@@ -7,6 +7,8 @@ D3. It avoids every through-hole or tall part and leaves the SPI flash U8 free f
 
 | File | What |
 |---|---|
+| `modchip.kicad_pcb`, `modchip.kicad_pro` | KiCad 10 board: the outline on Edge.Cuts, J1-J3 on the bottom side on the T3, T8 and T5 holes, TP1 above D3 for the reset wire, the switch's parts on Dwgs.User, U8's clip zone on Cmts.User. Aux and grid origin at T3 pin 1 |
+| `make_pcb.py` | Builds the KiCad board from `outline.py` with KiCad's Python API |
 | `outline.py` | The outline, the header holes and the obstacles in one place. Running it checks the clearances and writes the files below |
 | `modchip-outline.dxf` | Edge.Cuts, the header holes and the reset pad, in mm, origin at T3 pin 1, Y up |
 | `modchip-outline.svg` | 1:1 template with the outline, holes, obstacles and the U8 clip zone |
@@ -22,6 +24,23 @@ python3 outline.py --photo ../../doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWT
 
 It exits non-zero if the outline comes closer than 1.2 mm to an obstacle or the U8 clip zone, or if a
 header hole sits less than 1.5 mm from the edge.
+
+## KiCad board
+
+`modchip.kicad_pcb` is generated, so change `outline.py` and rebuild it rather than editing the outline
+by hand. It needs KiCad 10's Python; with the flatpak:
+
+```
+flatpak run --command=python3 org.kicad.KiCad make_pcb.py
+```
+
+- **Version.** Saved by KiCad 10.0.5. It opens in any KiCad 10 release, but not in KiCad 9.
+- **Footprints.** KiCad's standard 2.0 mm and 2.54 mm pin headers and a 1.5 mm through-hole test point.
+- **Pads checked.** After a reload, every pad sits on its measured hole to within 0.001 mm.
+- **DRC.** No violations. The only unconnected items are the GND and +3V3_SW pins shared between the
+  three headers, which the layout will connect.
+- **Nets.** Each pad carries the name of the switch signal it reaches, for example `SW_SCL` and
+  `SW_U0TXD`, so the schematic can use the same names.
 
 ## Where the numbers come from
 
