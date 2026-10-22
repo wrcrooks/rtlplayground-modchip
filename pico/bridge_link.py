@@ -1,6 +1,6 @@
 # Host side of the mod-chip bridge protocol (modchip/bridge/bridge_proto.h).
 #
-# Plain Python that runs both under MicroPython on the RP2040 and under
+# Plain Python that runs both under MicroPython on the RP2350 and under
 # CPython, where test_bridge_link.py exercises it.
 
 PROTO_VERSION = 1

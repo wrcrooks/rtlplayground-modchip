@@ -1,4 +1,4 @@
-# Talk to the mod-chip bridge firmware from a Raspberry Pi Pico.
+# Talk to the mod-chip bridge firmware from a Raspberry Pi Pico or Pico 2.
 #
 # MicroPython. Copy bridge_link.py to the Pico first, then:
 #   mpremote cp bridge_link.py :  &&  mpremote run bridge_host_test.py

@@ -1,6 +1,6 @@
 # Mod chip
 
-An RP2040 board inside SWTG024AS-V2.0 switches that takes over management from the RTL8372's 8051.
+An RP2350 board inside SWTG024AS-V2.0 switches that takes over management from the RTL8372's 8051.
 The design, the link protocol, the pinouts and the mechanical constraints are in
 [ARCHITECTURE.md](ARCHITECTURE.md). Nothing here has run on hardware yet.
 

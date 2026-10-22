@@ -7,7 +7,7 @@ D3. It avoids every through-hole or tall part and leaves the SPI flash U8 free f
 
 | File | What |
 |---|---|
-| `modchip.kicad_pcb`, `modchip.kicad_pro` | KiCad 10 board: the outline on Edge.Cuts, J1-J3 on the bottom side on the T3, T8 and T5 holes, TP1 above D3 for the reset wire, the switch's parts on Dwgs.User, U8's clip zone on Cmts.User. Aux and grid origin at T3 pin 1 |
+| `modchip.kicad_pcb`, `modchip.kicad_pro` | KiCad 10 board: the outline on Edge.Cuts, J1-J3 on the bottom side on the T3, T8 and T5 holes, TP1 above D3 for the reset wire to D3's anode, the switch's parts on Dwgs.User, U8's clip zone on Cmts.User. Aux and grid origin at T3 pin 1 |
 | `make_pcb.py` | Builds the KiCad board from `outline.py` with KiCad's Python API |
 | `outline.py` | The outline, the header holes and the obstacles in one place. Running it checks the clearances and writes the files below |
 | `modchip-outline.dxf` | Edge.Cuts, the header holes and the reset pad, in mm, origin at T3 pin 1, Y up |

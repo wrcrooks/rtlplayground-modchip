@@ -10,7 +10,7 @@ The board holds:
   Edge.Cuts   the outline from outline.py
   J1, J2, J3  the headers that mate with T3, T8 (2.0 mm) and T5 (2.54 mm),
               on the bottom side, pads checked against the switch's holes
-  TP1         a through-hole pad above D3 for the reset wire
+  TP1         a through-hole pad above D3 for the reset wire to D3's anode
   Dwgs.User   the switch's PCB edge and the parts the outline avoids
   Cmts.User   U8's clip zone and notes
 The aux and grid origins are at T3 pin 1, the DXF's origin. Footprints come
@@ -84,7 +84,7 @@ def main():
     ds.SetGridOrigin(pt(o.T3[0]))
 
     tb = board.GetTitleBlock()
-    tb.SetTitle("RTLPlayground mod chip (RP2040), outline")
+    tb.SetTitle("RTLPlayground mod chip (RP2350), outline")
     tb.SetCompany("github.com/wrcrooks/RTLPlayground, modchip/")
     tb.SetRevision("A0")
     tb.SetComment(0, "For SWTG024AS-V2.0 (MokerLink 2G040210GS, XikeStor SKS3200M-4GPY2XF)")
@@ -128,7 +128,7 @@ def main():
 
     tp = pcbnew.FootprintLoad(str(lib / "TestPoint.pretty"), "TestPoint_THTPad_D1.5mm_Drill0.7mm")
     tp.SetReference("TP1")
-    tp.SetValue("Reset wire to D3")
+    tp.SetValue("Reset: wire to D3 anode (front pad, + end)")
     board.Add(tp)
     place(board, tp, [o.RESET_PAD], bottom=False)
     next(iter(tp.Pads())).SetNet(net("SW_RESET_N"))
@@ -165,6 +165,7 @@ def main():
         "Keep the bottom side free of other parts: SMD parts on the switch sit up to 3 mm below it.",
         "Top-side parts: 3.2 mm at most, for about 8.7 mm above the switch PCB in all.",
         "Origin (aux, grid) at T3 pin 1. Positions +/-0.3 mm from a photo: verify before ordering.",
+        "TP1: wire to D3's ANODE (front pad, by the +), never the banded end (3.3 V rail). 1 k in series in the driver.",
     ]
     for i, n in enumerate(notes):
         text(board, n, (o.BOARD[0] / 2, o.BOARD[1] + 6 + 2.2 * i), pcbnew.Cmts_User, 1.2)

@@ -1,6 +1,6 @@
 # Read the RTL8372/RTL8373 chip ID through the slave management interface.
 #
-# MicroPython for a Raspberry Pi Pico (RP2040). Only reads registers; it never
+# MicroPython for a Raspberry Pi Pico or Pico 2. Only reads registers; it never
 # writes to the switch.
 #
 # Wiring, Pico -> SWTG024AS-V2.0 header T3 (pin 1 is the square pad):
@@ -57,7 +57,7 @@ def link_state(i2c, port):
 
 
 def main():
-    # The RP2040 port enables the pins' internal pull-ups (about 50 kOhm),
+    # MicroPython's rp2 port enables the pins' internal pull-ups (about 50 kOhm),
     # which is enough at 100 kHz over a short wire.
     i2c = I2C(0, sda=Pin(4), scl=Pin(5), freq=FREQ)
 

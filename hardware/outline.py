@@ -54,7 +54,10 @@ PITCH_T3 = 2.0
 T3 = [(32.4 + PITCH_T3 * i, 1.95) for i in range(6)]
 T8 = [(32.4 + PITCH_T3 * (7 + i), 1.95) for i in range(6)]
 T5 = [(126.6, 26.85 + 2.54 * i) for i in range(4)]
-RESET_PAD = (60.2, 15.0)        # above D3 (59.4-61.0 x 12.8-17.7), where the reset line is reached
+# Reset wire pad, over D3 (59.4-61.0 x 12.8-17.7). The wire goes to D3's
+# anode, the front pad at (60.1, 17.9) beside the "+": that's the reset node.
+# The banded rear end, the cathode, is on the 3.3 V rail.
+RESET_PAD = (60.2, 16.0)
 
 # Things to stay clear of: through-hole parts, and SMD parts too tall to sit
 # under the board (taller than the 4.5 mm stack). ("rect", x0, y0, x1, y1) or

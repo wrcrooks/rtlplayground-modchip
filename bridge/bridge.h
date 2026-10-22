@@ -4,7 +4,7 @@
 /*
  * Mod-chip bridge firmware: the 8051 initialises the switch, keeps the
  * SerDes and SFP slots working, and hands everything else to a host (the
- * RP2040 on the mod chip) over the UART. See modchip/ARCHITECTURE.md.
+ * RP2350 on the mod chip) over the UART. See modchip/ARCHITECTURE.md.
  */
 
 #define CLOCK_HZ 125000000
@@ -15,8 +15,9 @@
  * Link baud rate. Timer 1 divides F_SYS / 4 by 16 * (256 - TH1) with SMOD0
  * set, which gives these rates exactly at 125 MHz:
  *   TH1 0xff: 1953125   0xfe: 976562   0xfd: 651041   0xfc: 488281
- * The RP2040 UART reaches 1953125 and 976562 exactly from a 125 MHz
- * clk_peri (divisors 4 and 8). 115200 (TH1 0xef) is 0.27 % off.
+ * The RP2350's UART reaches both within 0.07 % from its default 150 MHz
+ * clk_peri, and exactly from 125 MHz (divisors 4 and 8). 115200 (TH1 0xef)
+ * is 0.27 % off.
  */
 #ifndef LINK_TH1
 #define LINK_TH1 0xfe

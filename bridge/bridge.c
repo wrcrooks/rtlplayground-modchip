@@ -11,7 +11,7 @@
  *    SerDes access, the SFP I2C master, the SPI flash) on the host's behalf.
  *
  * Everything else (STP, LACP, IGMP, LLDP, the IP stack, the web UI, the
- * configuration) belongs to the host, normally the RP2040 on the mod chip,
+ * configuration) belongs to the host, normally the RP2350 on the mod chip,
  * which also reaches every switch register through the slave interface on
  * header T3. The link to the host is the UART on header T5; bridge_proto.h
  * defines the protocol and modchip/ARCHITECTURE.md describes the design.
