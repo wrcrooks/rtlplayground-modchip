@@ -49,3 +49,12 @@ $CLI sch export pdf -o "$PWD/schematic.pdf" "$PWD/modchip.kicad_sch" >/dev/null
 rm -rf production
 $K jlc modchip.kicad_pcb >/dev/null
 rm -rf production/backups
+# Mechanical: STL (to 3D-print for a fit check, bottom down) and STEP, assembled parts only, no headers.
+# KiCad's library has no QFN-60 model; the QFN-56 7x7 mm one has the same body, so a scratch copy uses it.
+mkdir -p mechanical build/mech
+cp modchip.kicad_pcb modchip.kicad_pro build/mech/
+sed -i 's#QFN-60-1EP_7x7mm_P0.4mm_EP3.4x3.4mm.step#QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm.step#' build/mech/modchip.kicad_pcb
+for fmt in stl step; do
+    $CLI pcb export $fmt --force --drill-origin --subst-models --component-filter 'C*,R*,U*,Q*,Y*,D*,L*' \
+        -o "$PWD/mechanical/modchip-no-headers.$fmt" "$PWD/build/mech/modchip.kicad_pcb" >/dev/null
+done

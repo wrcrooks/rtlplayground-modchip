@@ -107,6 +107,20 @@ Snapshots go in `build/`: `placed.kicad_pcb` before routing, `routed.kicad_pcb` 
 
 **DRC.** The routed board has no DRC errors and no warnings, schematic parity included.
 
+## 3D model for a printed fit check (`mechanical/`)
+
+`modchip-no-headers.stl` and `.step` contain the board and every assembled part, without the headers
+J1-J3 or the pads J5 and TP1. Coordinates are in mm from T3 pin 1.
+
+- **Orientation.** The board's underside sits at z = 0 with nothing below it: print it bottom down on
+  the bed, with no supports.
+- **Size.** 106.2 × 37.2 mm overall. The board body is 1.0 mm thick, and the tallest part, U5 the
+  SOIC-8, reaches z = 3.15.
+- **Holes.** The header holes are cut through: 0.8 mm for T3/T8 and 1.0 mm for T5. Printed holes come
+  out small, so open them with a drill or scale them up to slide the print over pins on the switch.
+- **U1.** It uses the QFN-56 7×7 mm model, which has the same body; KiCad's library has no QFN-60
+  model.
+
 ## JLCPCB production files (`production/`)
 
 | File | What |
