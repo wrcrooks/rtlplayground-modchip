@@ -160,7 +160,7 @@ Their default states and any pull-ups on the switch side are unverified.
 ### Reset (optional fly-wire)
 
 The SoC reset line is active low, at the cathode of T-D3 (33 kΩ pull-up R78, RC delay C187). It sits
-about 11 mm in front of T8 (*photo*), under the mod chip's main section. The mod chip pulls it low through a 2N7002 from GP12, which lets
+about 13 mm in front of T8 (*photo*), under the mod chip's main section. The mod chip pulls it low through a 2N7002 from GP12, which lets
 the RP2040 restart a hung 8051 without a power cycle. The pad on the mod chip takes a short wire to
 T-D3. Without that wire, everything else still works.
 
@@ -329,35 +329,39 @@ a DXF for KiCad and a 1:1 print template; see [`hardware/README.md`](hardware/RE
 are *photo* estimates, in board coordinates: x from the left edge and y from the rear edge, seen from the
 top with the ports at the front.
 
-**Scale.** The photo is calibrated on U8's 1.27 mm pin pitch, at 23.5 px/mm. On that scale:
+**Source.** The positions are measured on up-n-atom's photo of a managed board, which is close to a
+flat scan, at 38.3 px/mm. That's calibrated on U8's 1.27 mm and T3's 2.0 mm pin pitches; expect about
+±0.3 mm. On that scale:
 
-- the PCB is about 131 × 95 mm;
-- T3 and T8 are **2.0 mm** pitch headers: T3 pin 1 to T8 pin 6 is 24.0 mm, 12 × 2.0 mm;
+- the PCB is about 130.3 × 88.7 mm;
+- T3 and T8 are 2.0 mm pitch: T3 pin 1 to T8 pin 6 is 24.0 mm;
 - T5 is 2.54 mm.
 
 | Feature | x (mm) | y (mm) | Notes |
 |---|---|---|---|
-| T3 pin 1 (square) | 31.7 | 2.75 | 2.0 mm pitch, 6 pins |
-| T8 pins 1-6 | 45.7-55.7 | 2.75 | same row; one empty position after T3 |
-| T5 pins 1-4 | 126.2 | 27.1-34.8 | 2.54 mm pitch; pin 1 (TX) at the rear |
-| D3 (reset line) | 59.1-60.5 | 13.8-16.2 | |
-| U8 SPI flash, 208-mil SOIC-8 | body 28.5-33.6 | 26.0-31.1 | leads 26.6-35.5 |
-| J1 DC jack, right edge | 21.2 | to 13.8 | THT |
-| C124, C123 electrolytics | 62.9-81.0 | to 9.4 | tall |
-| 1R5 power inductor | 81.4-95.2 | 1.2-16.9 | tall SMD |
-| Heatsink | 49.5-72.7 | from 17.5 | tall |
-| C102, EC1 electrolytics | centres 118.3 | 13.0, 23.2 | THT, about 8 mm |
-| SFP cages J4, J2 | 81.8-128.6 | from 43.6 | THT |
+| T3 pin 1 (square) | 32.4 | 1.95 | 2.0 mm pitch, 6 pins |
+| T8 pins 1-6 | 46.4-56.4 | 1.95 | same row; one empty position after T3 |
+| T5 pins 1-4 | 126.6 | 26.85-34.5 | 2.54 mm pitch; pin 1 (TX) at the rear |
+| D3 (reset line) | 59.4-61.0 | 12.8-17.7 | |
+| U8 SPI flash, 208-mil SOIC-8 | body 28.3-33.5 | 24.5-29.8 | leads 26.2-36.0 |
+| J1 DC jack, right edge | 21.8 | to 12.9 | THT |
+| C124, C127 electrolytics | 63.1-80.8 | to 10.2 | tall |
+| 1R5 power inductor | 81.3-94.3 | 1.9-16.4 | tall SMD |
+| Heatsink | 50.1-71.2 | 19.1-40.1 | tall |
+| C102, EC1 electrolytics | centres 119.4 | 12.5, 21.5 | THT, about 9 mm |
+| Mounting standoffs, rear | 4.5 and 126.3 | 11 | |
+| SFP cages J4, J2 | 81.9-126.6 | from 43.5 | THT |
 
-**Outline.** One rigid board, about 107 × 37 mm overall, reaches T3, T8, T5 and D3:
+**Outline.** One rigid board, about 106 × 37 mm overall, reaches T3, T8, T5 and D3:
 
-- **Main section** (x 22.5-61.6, y 0.5-16.2), over T3+T8, between J1 and C124, behind the heatsink.
-- **Neck** (y 10.8-16.2) under C124 and C123.
-- **Strip** (y 18.2-24.5) under the 1R5 inductor and past the heatsink's right side.
-- **Tail** (x 101-129.2, y 25.4-37.5) that steps around EC1 to reach T5 and stops short of the J2 cage.
+- **Main section** (x 23.1-61.8, y 0.4-17.8), over T3+T8, between J1 and C124, behind the heatsink.
+- **Neck** (y 11.5-17.8) under C124 and C127.
+- **Strip** (y 17.7-24.5) under the 1R5 inductor and past the heatsink's right side.
+- **Tail** (x 101-129.3, y 25.3-37.6) that steps around EC1 to reach T5 and stops short of the J2 cage.
 
-It keeps at least 1.3 mm from every through-hole or tall part, and 5.8 mm from a test clip on U8. Only
-SMD parts under 3 mm sit beneath it (L2/L3, D2, Q1/Q2, Y1, small R/C), so the mod chip's underside
+It keeps at least 1.3 mm from every through-hole or tall part, and 2.7 mm from the test-clip zone
+around U8. That zone reaches 4 mm beyond U8's leads and body, so the clip itself has more room. Only
+SMD parts under 3 mm sit beneath the board (L2/L3, D2, Q1/Q2, small R/C), so the mod chip's underside
 carries no components.
 
 **Mounting** (rev A: removable):
@@ -371,7 +375,7 @@ carries no components.
 
 With two connectors about 90 mm apart, their relative position has to be right to a few tenths of a
 millimetre. Check it with the 1:1 print and calipers before ordering. The board is supported only at
-its connectors, so a 4.5 mm adhesive foot under the strip (between Y1 and D2) helps against flex.
+its connectors, so a 4.5 mm adhesive foot under the strip (beside D2) helps against flex.
 
 **Reset.** A pad on the mod chip sits directly above D3, about 2 mm of wire away.
 

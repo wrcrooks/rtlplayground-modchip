@@ -3,11 +3,13 @@
 
 Everything here is in millimetres, in switch-board coordinates seen from the
 top with the ports at the front: x from the left edge, y from the rear edge.
-The positions were measured on the board photo in
-doc/devices/photos/SWTG024AS-v2.0-unmanaged/, calibrated on U8's 1.27 mm pin
-pitch (23.5 px/mm). Expect +/-0.5 mm near the centre of the photo and more
-towards its edges. Check them against a real board with the 1:1 print
-before ordering anything.
+The positions were measured on up-n-atom's photo of a managed SWTG024AS-V2.0
+(github.com/up-n-atom/SWTG118AS, photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg),
+which is close to a flat scan: 38.3 px/mm, calibrated on U8's 1.27 mm and
+T3's 2.0 mm pin pitches. Expect about +/-0.3 mm. The unmanaged photo in
+doc/devices/photos/ serves as a cross-check; its perspective makes it less
+accurate. Check the positions against a real board with the 1:1 print before
+ordering anything.
 
 Outputs, next to this script:
   modchip-outline.dxf  Edge.Cuts and header holes, origin at T3 pin 1, Y up,
@@ -25,64 +27,64 @@ HERE = pathlib.Path(__file__).resolve().parent
 CLEARANCE = 1.2      # outline to obstacles; more than the photo's error in most places
 HOLE_MARGIN = 1.5    # header hole centre to the outline
 
-BOARD = (130.7, 95.2)
+BOARD = (130.3, 88.7)
 
 # Mod-chip outline, clockwise from the rear-left corner
 OUTLINE = [
-    (22.5, 0.5),     # right of the DC jack J1
-    (61.6, 0.5),     # left of C124
-    (61.6, 10.8),    # under C124 and C123
-    (80.1, 10.8),    # left of the 1R5 inductor
-    (80.1, 18.2),    # under the inductor
-    (112.5, 18.2),   # left of EC1
-    (112.5, 29.0),   # under EC1
-    (124.1, 29.0),
-    (124.1, 25.4),   # up to T5, right of EC1
-    (129.2, 25.4),
-    (129.2, 37.5),   # T5 tail, clear of the J2 SFP cage
-    (101.0, 37.5),
+    (23.1, 0.4),     # right of the DC jack J1
+    (61.8, 0.4),     # left of C124
+    (61.8, 11.5),    # under C124 and C127
+    (80.0, 11.5),    # left of the 1R5 inductor
+    (80.0, 17.7),    # under the inductor
+    (113.5, 17.7),   # left of C102 and EC1
+    (113.5, 27.4),   # under EC1
+    (124.0, 27.4),
+    (124.0, 25.3),   # up to T5, right of EC1
+    (129.3, 25.3),
+    (129.3, 37.6),   # T5 tail, clear of the J2 SFP cage
+    (101.0, 37.6),
     (101.0, 24.5),
-    (74.0, 24.5),    # right of the heatsink
-    (74.0, 16.2),
-    (22.5, 16.2),    # over the heatsink's rear edge, clear of U8's clip
+    (72.5, 24.5),    # right of the heatsink
+    (72.5, 17.8),
+    (23.1, 17.8),    # behind the heatsink, clear of U8's clip
 ]
 
 # Header holes the mod chip mates with
 PITCH_T3 = 2.0
-T3 = [(31.69 + PITCH_T3 * i, 2.75) for i in range(6)]
-T8 = [(31.69 + PITCH_T3 * (7 + i), 2.75) for i in range(6)]
-T5 = [(126.2, 27.14 + 2.54 * i) for i in range(4)]
-RESET_PAD = (59.8, 14.0)        # above D3, where the reset line is reached
+T3 = [(32.4 + PITCH_T3 * i, 1.95) for i in range(6)]
+T8 = [(32.4 + PITCH_T3 * (7 + i), 1.95) for i in range(6)]
+T5 = [(126.6, 26.85 + 2.54 * i) for i in range(4)]
+RESET_PAD = (60.2, 15.0)        # above D3 (59.4-61.0 x 12.8-17.7), where the reset line is reached
 
 # Things to stay clear of: through-hole parts, and SMD parts too tall to sit
 # under the board (taller than the 4.5 mm stack). ("rect", x0, y0, x1, y1) or
-# ("circle", cx, cy, r): the footprint on the PCB, not the photo's view of
-# its top, which perspective shifts away from the photo's centre.
+# ("circle", cx, cy, r): the footprint on the PCB.
 OBSTACLES = {
-    "J1 DC jack (THT)": ("rect", 7.9, -2.4, 21.15, 13.8),
-    "C101 electrolytic (THT)": ("circle", 4.0, 21.5, 5.0),
-    "mounting standoff": ("circle", 4.2, 12.7, 3.0),
-    "EC2 electrolytic (THT)": ("rect", 12.3, 26.7, 24.8, 35.9),
-    "L13 power inductor": ("rect", 10.2, 20.4, 17.7, 26.3),
-    "C124 electrolytic": ("rect", 62.9, -0.4, 71.7, 9.44),
-    "C123 electrolytic": ("rect", 72.3, -0.4, 81.0, 9.44),
-    "1R5 power inductor": ("rect", 81.4, 1.2, 95.2, 16.9),
-    "heatsink": ("rect", 49.5, 17.5, 72.7, 40.5),
-    "C102 electrolytic (THT)": ("circle", 118.3, 13.0, 4.5),
-    "EC1 electrolytic (THT)": ("circle", 118.3, 23.2, 4.5),
-    "J4 SFP cage (THT)": ("rect", 81.8, 43.6, 99.5, 95.2),
-    "J2 SFP cage (THT)": ("rect", 110.1, 43.6, 128.6, 95.2),
+    "J1 DC jack (THT)": ("rect", 11.2, -3.0, 21.8, 12.9),
+    "C101 electrolytic (THT)": ("circle", 3.0, 20.1, 4.8),
+    "mounting standoff, rear left": ("circle", 4.5, 11.1, 3.0),
+    "mounting standoff, rear right": ("circle", 126.3, 10.9, 3.0),
+    "EC2 electrolytic (THT)": ("circle", 19.7, 29.1, 5.2),
+    "L13 power inductor": ("rect", 10.6, 19.2, 17.7, 24.9),
+    "C124 electrolytic": ("rect", 63.1, -0.2, 71.8, 10.2),
+    "C127 electrolytic": ("rect", 72.1, -0.2, 80.8, 10.2),
+    "1R5 power inductor": ("rect", 81.3, 1.9, 94.3, 16.4),
+    "heatsink": ("rect", 50.1, 19.1, 71.2, 40.1),
+    "C102 electrolytic (THT)": ("circle", 119.4, 12.5, 4.6),
+    "EC1 electrolytic (THT)": ("circle", 119.45, 21.5, 4.6),
+    "J4 SFP cage (THT)": ("rect", 81.9, 43.5, 98.2, 88.7),
+    "J2 SFP cage (THT)": ("rect", 110.1, 43.5, 126.6, 88.7),
 }
 
-# Room for a 208-mil SOIC-8 test clip on the SPI flash U8 (body 28.5-33.6 x
-# 26.0-31.1, leads 26.6-35.5): about 4 mm beyond the leads and 4 mm beyond the
-# body, and nothing above it
+# Room for a 208-mil SOIC-8 test clip on the SPI flash U8 (body 28.3-33.5 x
+# 24.5-29.8, leads 26.2-36.0): 4 mm beyond the leads and the body, and
+# nothing above it
 KEEPOUTS = {
-    "U8 flash clip access": ("rect", 23.0, 22.0, 39.0, 35.0),
+    "U8 flash clip access": ("rect", 22.2, 20.5, 40.0, 33.8),
 }
 
 # Parts under the board, for the record: all SMD and under 3 mm
-UNDER = "L2, L3, C38, C41, U4 and U10 (empty), R53, C103, D3, R78, C121, C129, C125, D2, Q1, Q2, Y1, R/C arrays"
+UNDER = "L2, L3, C38, C41, U4 (empty), R53, C103, D3, R78, C121, C129, C125, D2, Q1, Q2, R/C arrays"
 
 
 def seg_dist(p, q, a, b):
@@ -244,12 +246,14 @@ def write_svg(path):
 # mm, the board's rear-left corner in pixels, and the rotation that puts the
 # ports at the bottom
 PHOTOS = {
-    # doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png,
-    # on U8's pin pitch; the photo the outline is measured on
-    "unmanaged": (23.5, 152, 81, 0),
     # up-n-atom/SWTG118AS photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg
-    # (managed), on U8's pin pitch (38.5) and T3's (38.1)
+    # (managed), on U8's pin pitch (38.5) and T3's (38.1); the outline is
+    # measured on this one
     "managed": (38.3, 82.5, 113, 180),
+    # doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png,
+    # on U8's pin pitch; taken at an angle, so tall parts lean and the far
+    # edges stretch
+    "unmanaged": (23.5, 152, 81, 0),
 }
 
 
