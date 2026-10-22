@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="146.7mm" height="125.2mm" viewBox="-8 -8 146.7 125.2">
+<defs><pattern id="h" width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="2" stroke="#c00" stroke-width="0.4"/></pattern></defs>
+<rect x="0" y="0" width="130.7" height="95.2" fill="none" stroke="#888" stroke-width="0.3"/>
+<text x="1" y="94.2" font-size="2.2" fill="#888">SWTG024AS-V2.0 PCB edge (photo estimate), ports at the bottom</text>
+<rect x="7.9" y="-2.4" width="13.25" height="16.2" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="8.4" y="0.1" font-size="1.6" fill="#900">J1 DC jack</text>
+<circle cx="4" cy="21.5" r="5" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="-0.5" y="21.5" font-size="1.6" fill="#900">C101 electrolytic</text>
+<circle cx="4.2" cy="12.7" r="3" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="1.7" y="12.7" font-size="1.6" fill="#900">mounting standoff</text>
+<rect x="12.3" y="26.7" width="12.5" height="9.2" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="12.8" y="29.2" font-size="1.6" fill="#900">EC2 electrolytic</text>
+<rect x="10.2" y="20.4" width="7.5" height="5.9" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="10.7" y="22.9" font-size="1.6" fill="#900">L13 power inductor</text>
+<rect x="62.9" y="-0.4" width="8.8" height="9.84" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="63.4" y="2.1" font-size="1.6" fill="#900">C124 electrolytic</text>
+<rect x="72.3" y="-0.4" width="8.7" height="9.84" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="72.8" y="2.1" font-size="1.6" fill="#900">C123 electrolytic</text>
+<rect x="81.4" y="1.2" width="13.8" height="15.7" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="81.9" y="3.7" font-size="1.6" fill="#900">1R5 power inductor</text>
+<rect x="49.5" y="17.5" width="23.2" height="23" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="50" y="20" font-size="1.6" fill="#900">heatsink</text>
+<circle cx="118.3" cy="13" r="4.5" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="114.3" y="13" font-size="1.6" fill="#900">C102 electrolytic</text>
+<circle cx="118.3" cy="23.2" r="4.5" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="114.3" y="23.2" font-size="1.6" fill="#900">EC1 electrolytic</text>
+<rect x="81.8" y="43.6" width="17.7" height="51.6" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="82.3" y="46.1" font-size="1.6" fill="#900">J4 SFP cage</text>
+<rect x="110.1" y="43.6" width="18.5" height="51.6" fill="url(#h)" stroke="#c00" stroke-width="0.25"/>
+<text x="110.6" y="46.1" font-size="1.6" fill="#900">J2 SFP cage</text>
+<rect x="23" y="22" width="16" height="13" fill="none" stroke="#06c" stroke-width="0.4" stroke-dasharray="1.5,1"/>
+<text x="23.5" y="34.5" font-size="1.6" fill="#06c">U8 flash clip access</text>
+<polygon points="22.5,0.5 61.6,0.5 61.6,10.8 80.1,10.8 80.1,18.2 112.5,18.2 112.5,29 124.1,29 124.1,25.4 129.2,25.4 129.2,37.5 101,37.5 101,24.5 74,24.5 74,16.2 22.5,16.2" fill="rgba(0,160,0,0.12)" stroke="#080" stroke-width="0.4"/>
+<circle cx="31.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="33.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="35.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="37.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="39.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="41.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="45.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="47.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="49.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="51.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="53.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="55.69" cy="2.75" r="0.45" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="126.2" cy="27.14" r="0.5" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="126.2" cy="29.68" r="0.5" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="126.2" cy="32.22" r="0.5" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="126.2" cy="34.76" r="0.5" fill="none" stroke="#000" stroke-width="0.2"/>
+<circle cx="59.8" cy="14" r="0.75" fill="none" stroke="#a0a" stroke-width="0.25"/>
+<text x="31.69" y="5.95" font-size="1.8">T3</text>
+<text x="45.69" y="5.95" font-size="1.8">T8</text>
+<text x="123" y="25.94" font-size="1.8">T5</text>
+<text x="56.8" y="12.8" font-size="1.4" fill="#a0a">reset (D3)</text>
+<line x1="0" y1="101.2" x2="50" y2="101.2" stroke="#000" stroke-width="0.4"/>
+<line x1="0" y1="100" x2="0" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<line x1="10" y1="100" x2="10" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<line x1="20" y1="100" x2="20" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<line x1="30" y1="100" x2="30" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<line x1="40" y1="100" x2="40" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<line x1="50" y1="100" x2="50" y2="101.2" stroke="#000" stroke-width="0.3"/>
+<text x="52" y="102" font-size="2.2">50 mm: measure this to check the print scale</text>
+<text x="0" y="106.2" font-size="2.2">Green: mod chip outline. Red: parts to avoid. Blue: U8 clip access. Black: header holes.</text>
+</svg>

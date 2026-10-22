@@ -10,6 +10,7 @@ The design, the link protocol, the pinouts and the mechanical constraints are in
 | `pico/bridge_link.py` | MicroPython/CPython: the host side of the bridge protocol |
 | `pico/bridge_host_test.py` | MicroPython: talks to the bridge firmware over header T5 |
 | `bridge/` | The minimal 8051 firmware: init, SerDes/SFP upkeep, frame tunnel, SFR-only operations |
+| `hardware/` | Board outline reaching T3, T8 and T5: generator and checker, DXF for KiCad, 1:1 print template |
 
 Build the bridge firmware from the repository root:
 

@@ -51,7 +51,7 @@ its UART. The RP2040 does everything else.
  │  └────────────────────┼─────────┘        └──────────┼──────────────────────┘ │
  │          T3 (I²C 0x5C)│      T8 (GPIO46-49)│        │T5 (UART0, ~1 Mbaud)    │
  └───────────────────────┼────────────────────┼────────┼────────────────────────┘
-                         │                    │        │  3-wire harness
+                         │                    │        │  rigid tail
  ┌───────────────────────┴────────────────────┴────────┴────────────────────────┐
  │ mod chip: RP2040, 2 MiB QSPI flash, power path, reset driver, USB-C (dev)    │
  │  core 1: link driver (UART DMA, COBS/CRC), register access (I²C / RPC)       │
@@ -124,9 +124,8 @@ RP2040 largely unchanged. `test/sdcc_shim.h` already does the equivalent for the
 | 3 | U0RXD, switch input | RP2040 GP0 (UART0 TX), 100 Ω series |
 | 4 | 3.3 V | not connected |
 
-- **Wiring.** T5 is on the opposite edge from T3, about 90 mm away (*photo*), so it connects through a
-  3-wire harness. On the mod chip end that's a JST-SH 1.0 mm socket or solder pads; on the switch end,
-  a 1×4 2.54 mm housing on a header soldered into T5.
+- **Wiring.** T5 is about 90 mm from T3 (*photo*). The board outline reaches it with a rigid tail; see
+  Mechanical. A 3-wire harness is the fallback if the tail's fit turns out to be impractical.
 - **Baud rate.** The bridge runs UART0 at 976 562 baud (`LINK_TH1 0xfe`), which the 125 MHz 8051
   generates exactly. So does the RP2040, from a 125 MHz `clk_peri` with a divisor of 8.
 - **Faster option.** 1 953 125 baud (`0xff`, RP2040 divisor 4) is the next step, if the 8051 keeps up
@@ -145,8 +144,8 @@ RP2040 largely unchanged. `test/sdcc_shim.h` already does the equivalent for the
 | 6 | GPIO49 (I2C_SDA1) | GP11, 100 Ω |
 
 These pins are the SoC's I²C master buses 0 and 1, unused on this board. Protocol v1 doesn't use them.
-They're wired because they cost nothing: T8 sits on the same 2.54 mm grid as T3 with one empty
-position between them, so one connector takes both.
+They're wired because they cost nothing: T8 sits in the same row as T3, on the same 2.0 mm pitch
+with one empty position between them.
 
 Planned uses:
 
@@ -161,7 +160,7 @@ Their default states and any pull-ups on the switch side are unverified.
 ### Reset (optional fly-wire)
 
 The SoC reset line is active low, at the cathode of T-D3 (33 kΩ pull-up R78, RC delay C187). It sits
-about 10 mm in front of T8 (*photo*). The mod chip pulls it low through a 2N7002 from GP12, which lets
+about 11 mm in front of T8 (*photo*), under the mod chip's main section. The mod chip pulls it low through a 2N7002 from GP12, which lets
 the RP2040 restart a hung 8051 without a power cycle. The pad on the mod chip takes a short wire to
 T-D3. Without that wire, everything else still works.
 
@@ -325,41 +324,56 @@ The 8051 doesn't touch the RP2040's registers after boot, so the host may use ei
 
 ### Mechanical
 
-All measurements here are *photo* estimates, in board coordinates: x from the left edge and y from the
-rear edge, seen from the top with the ports at the front. The PCB is about 165 × 120 mm.
+The outline is generated and checked by [`hardware/outline.py`](hardware/outline.py), which also writes
+a DXF for KiCad and a 1:1 print template; see [`hardware/README.md`](hardware/README.md). All positions
+are *photo* estimates, in board coordinates: x from the left edge and y from the rear edge, seen from the
+top with the ports at the front.
 
-| Feature | x (mm) | y (mm) | Height |
+**Scale.** The photo is calibrated on U8's 1.27 mm pin pitch, at 23.5 px/mm. On that scale:
+
+- the PCB is about 131 × 95 mm;
+- T3 and T8 are **2.0 mm** pitch headers: T3 pin 1 to T8 pin 6 is 24.0 mm, 12 × 2.0 mm;
+- T5 is 2.54 mm.
+
+| Feature | x (mm) | y (mm) | Notes |
 |---|---|---|---|
-| T3 pin 1 (square) | 40.2 | 3.5 | through-hole |
-| T8 pin 6 | 70.6 | 3.5 | through-hole |
-| J1 DC jack, right edge | 25.8 | 0-20 | tall (~11 mm) |
-| L2/L3 inductors | 29-37 | 7-13 | ~2 mm |
-| U4, U10 footprints | 34-48 | 10-30 | empty |
-| C103 (MLCC), D3/R78 (reset) | 68-80 | 8-23 | ~1.5 mm |
-| C124 electrolytic, left edge | 79.6 | 0-13 | tall (~11 mm) |
-| Heatsink | 63-92 | from 23 | ~10-15 mm |
-| U6/U8 SPI flash (SOIC-8) | 33-46 | 33-40 | 1.75 mm |
-| T5, pins 1-4 | ~160 | 34-43 | through-hole |
+| T3 pin 1 (square) | 31.7 | 2.75 | 2.0 mm pitch, 6 pins |
+| T8 pins 1-6 | 45.7-55.7 | 2.75 | same row; one empty position after T3 |
+| T5 pins 1-4 | 126.2 | 27.1-34.8 | 2.54 mm pitch; pin 1 (TX) at the rear |
+| D3 (reset line) | 59.1-60.5 | 13.8-16.2 | |
+| U8 SPI flash, 208-mil SOIC-8 | body 28.5-33.6 | 26.0-31.1 | leads 26.6-35.5 |
+| J1 DC jack, right edge | 21.2 | to 13.8 | THT |
+| C124, C123 electrolytics | 62.9-81.0 | to 9.4 | tall |
+| 1R5 power inductor | 81.4-95.2 | 1.2-16.9 | tall SMD |
+| Heatsink | 49.5-72.7 | from 17.5 | tall |
+| C102, EC1 electrolytics | centres 118.3 | 13.0, 23.2 | THT, about 8 mm |
+| SFP cages J4, J2 | 81.8-128.6 | from 43.6 | THT |
 
-**T3 and T8 share one grid.** T3 pin 1 to T8 pin 6 is 30.5 mm, exactly 12 × 2.54 mm. They form one
-1×13 row with position 7 empty, so the mod chip uses one 13-position connector with pin 7 removed.
+**Outline.** One rigid board, about 107 × 37 mm overall, reaches T3, T8, T5 and D3:
 
-**Outline.** About **50 × 21 mm**, placed at x 28-78 and y 0.5-21.5. That stays inside J1, C124 and
-the heatsink. The connector row lies along the mod chip's rear edge, 3 mm in from it. The only parts
-under the board are low ones: L2/L3, C103, D3 and the empty U4/U10. Keep the mod chip's underside free
-of components.
+- **Main section** (x 22.5-61.6, y 0.5-16.2), over T3+T8, between J1 and C124, behind the heatsink.
+- **Neck** (y 10.8-16.2) under C124 and C123.
+- **Strip** (y 18.2-24.5) under the 1R5 inductor and past the heatsink's right side.
+- **Tail** (x 101-129.2, y 25.4-37.5) that steps around EC1 to reach T5 and stops short of the J2 cage.
+
+It keeps at least 1.3 mm from every through-hole or tall part, and 5.8 mm from a test clip on U8. Only
+SMD parts under 3 mm sit beneath it (L2/L3, D2, Q1/Q2, Y1, small R/C), so the mod chip's underside
+carries no components.
 
 **Mounting** (rev A: removable):
 
-- solder a low-profile 1×13 female socket (about 4.4 mm) into T3+T8 on the switch;
+- solder low-profile female sockets into T3 and T8 (2.0 mm, 1×6 each) and T5 (2.54 mm, 1×4), all at
+  the same height, about 4.5 mm;
 - the mod chip carries matching male pins pointing down;
-- stack height above the switch PCB: socket 4.4 + PCB 1.0 + parts ≤ 3.2 mm, about 8.6 mm in all. That
-  is below the electrolytics and the heatsink, which the lid already has to clear.
-- Rev B could solder the mod chip straight onto a 2.5 mm pin-strip spacer for about 6.7 mm.
+- stack height above the switch PCB: 4.5 + PCB 1.0 + parts ≤ 3.2 mm, about 8.7 mm in all. That is below
+  the electrolytics, the inductor and the heatsink, which the lid already has to clear.
+- Rev B could solder the mod chip straight onto pin strips for about 6.7 mm.
 
-**Harness to T5.** About 120 mm, routed along the rear edge.
+With two connectors about 90 mm apart, their relative position has to be right to a few tenths of a
+millimetre. Check it with the 1:1 print and calipers before ordering. The board is supported only at
+its connectors, so a 4.5 mm adhesive foot under the strip (between Y1 and D2) helps against flex.
 
-**Reset wire.** From the mod chip's reset pad (near T8) to T-D3, about 10 mm.
+**Reset.** A pad on the mod chip sits directly above D3, about 2 mm of wire away.
 
 **USB-C.** On the mod chip's left edge, for bench work with the lid off. Units in service update over
 the network.
@@ -368,7 +382,7 @@ the network.
 
 - the lid's inside height above T3/T8 and above C124;
 - the gap between the PCB's rear edge and the chassis wall;
-- the T3 and T8 positions and pitch, on both switches;
+- the T3, T8 and T5 positions and pitches (photo: 2.0, 2.0 and 2.54 mm), on both switches;
 - whether T5 has pins fitted.
 
 ## RP2040 firmware (outline)
