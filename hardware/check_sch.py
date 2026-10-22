@@ -4,8 +4,7 @@ compare every pin's net with expected-nets.json, which make_sch.py writes.
 
   python3 check_sch.py
 
-The one ERC error allowed is the two LM66100 outputs (U2, U3) driving +3V3:
-they are ideal diodes ORing the switch's and USB's supplies, by design.
+ERC must come back clean.
 """
 import json, pathlib, subprocess, sys, tempfile
 
@@ -15,7 +14,7 @@ import kisexpr as k  # noqa: E402
 
 KICAD_CLI = ["flatpak", "run", "--command=kicad-cli", "org.kicad.KiCad"]
 SCH = HERE / "modchip.kicad_sch"
-ALLOWED = [("pin_to_pin", {"U2", "U3"})]
+ALLOWED = []
 
 
 def cli(*args):

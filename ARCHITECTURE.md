@@ -53,7 +53,7 @@ its UART. The RP2350 does everything else.
  └───────────────────────┼────────────────────┼────────┼────────────────────────┘
                          │                    │        │  rigid tail
  ┌───────────────────────┴────────────────────┴────────┴────────────────────────┐
- │ mod chip: RP2350, 2 MiB QSPI flash, power path, reset driver, USB-C (dev)    │
+ │ mod chip: RP2350A, 16 MiB QSPI flash, ideal diode, reset driver, SWD pads    │
  │  core 1: link driver (UART DMA, COBS/CRC), register access (I²C / RPC)       │
  │  core 0: IP stack, web UI, STP/LACP/IGMP/LLDP, configuration                 │
  └──────────────────────────────────────────────────────────────────────────────┘
@@ -75,7 +75,7 @@ its UART. The RP2350 does everything else.
 | IP stack (ARP, ICMP, DHCP, TCP), web UI, SNMP, syslog, NTP, DNS | | ✓ |
 | STP/RSTP, LACP, IGMP snooping and relay, LLDP | | ✓ |
 | Configuration storage | | ✓ (its own flash) |
-| Console | | ✓ (USB CDC) |
+| Console | | ✓ (over the network; SWD/RTT on the bench) |
 
 The 8051 sets up the same forwarding defaults RTLPlayground starts from. With no RP2350 present, or
 with one that has crashed, the switch therefore still forwards as an unmanaged switch. Registers the
@@ -110,12 +110,12 @@ A rough estimate, from published Cortex-M benchmarks rather than measurement on 
 
 | T3 pin | Signal | Mod chip |
 |---|---|---|
-| 1 (square) | SCL / SCK / MDC | RP2350 GP5 (I2C0 SCL), 100 Ω series |
+| 1 (square) | SCL / SCK / MDC | RP2350 GP11 (I2C1 SCL), 100 Ω series |
 | 2 | GND | GND |
-| 3 | SDA / SDI / MDIO | RP2350 GP4 (I2C0 SDA), 100 Ω series |
+| 3 | SDA / SDI / MDIO | RP2350 GP10 (I2C1 SDA), 100 Ω series |
 | 4 | VCC (3.3 V, verify) | power in, through an ideal diode |
-| 5 | SPI DO (through 33 Ω) | GP6, for SPI-mode experiments only |
-| 6 | SPI CS | GP7, likewise |
+| 5 | SPI DO (through 33 Ω) | GP9, for SPI-mode experiments only |
+| 6 | SPI CS | GP8, likewise |
 
 - **Mode and address.** The `IF_SEL` straps put this board in I²C mode at 0x5C. The RP2350 has no pin
   that is both an I²C SCL and an SPI SCK, so SPI mode would have to run on PIO. That's not needed for
@@ -156,12 +156,12 @@ A rough estimate, from published Cortex-M benchmarks rather than measurement on 
 
 | T8 pin | Signal | Mod chip |
 |---|---|---|
-| 1 (square) | GPIO46 (I2C_SCL0) | GP8, 100 Ω |
+| 1 (square) | GPIO46 (I2C_SCL0) | GP7, 100 Ω |
 | 2 | GND | GND |
-| 3 | GPIO48 (I2C_SCL1) | GP10, 100 Ω |
+| 3 | GPIO48 (I2C_SCL1) | GP6, 100 Ω |
 | 4 | 3.3 V | power in, through the same ideal diode |
-| 5 | GPIO47 (I2C_SDA0) | GP9, 100 Ω |
-| 6 | GPIO49 (I2C_SDA1) | GP11, 100 Ω |
+| 5 | GPIO47 (I2C_SDA0) | GP5, 100 Ω |
+| 6 | GPIO49 (I2C_SDA1) | GP4, 100 Ω |
 
 These pins are the SoC's I²C master buses 0 and 1, unused on this board. Protocol v1 doesn't use them.
 They're wired because they cost nothing: T8 sits in the same row as T3, on the same 2.0 mm pitch
@@ -195,7 +195,7 @@ before soldering, with the switch unpowered:
 - the cathode reads about 0 Ω to T5 pin 4 (3.3 V);
 - the anode reads about 33 kΩ, through R78.
 
-**Driver.** The mod chip pulls the line low through a 2N7002 from GP12, with **1 kΩ in series** between
+**Driver.** The mod chip pulls the line low through a 2N7002 from GP27, with **1 kΩ in series** between
 the drain and TP1. That still takes the node to about 0.1 V against R78. If the wire ever lands on the
 3.3 V rail, it limits the current to 3.3 mA instead of shorting the supply. This lets the RP2350 restart
 a hung 8051 without a power cycle. Without the wire, everything else still works.
@@ -339,40 +339,77 @@ The full circuit is in [`hardware/modchip.kicad_sch`](hardware/modchip.kicad_sch
 [`hardware/README.md`](hardware/README.md).
 
 
-- **MCU and flash.** RP2354A, which is an RP2350A (QFN-60, 7 × 7 mm) with 2 MiB of flash inside the
-  package. That saves the flash chip and its six QSPI traces on a crowded board. An RP2350A with an
-  external W25Q16JV is the drop-in alternative if the RP2354A is out of stock. The board carries the
-  footprint for that flash (U5), left unpopulated with an RP2354A: the RP2354A's internal flash sits
-  on the same QSPI pads, so fitting both would put two chips on one chip select. Either way: a 12 MHz
-  crystal, and the core circuit of the Raspberry Pi Pico 2.
-- **Core regulator.** The RP2350's core supply comes from an on-chip switching regulator. It needs a
-  3.3 µH inductor on VREG_LX and an RC filter on VREG_AVDD. Lay it out as the RP2350 hardware design
-  guide shows, with the inductor close to the pins; it's the one part of the circuit that's new
-  compared with the RP2350.
-- **Power from the switch.** The 3.3 V comes from T3 pin 4 and T8 pin 4, through an ideal diode
-  (LM66100). The switch's TMI3244T rail is rated 4 A; the mod chip draws about 30-60 mA.
-- **Power over USB.** The optional USB-C (development only) feeds an AP2112K-3.3 through a second
-  LM66100. The two diodes keep USB from powering the whole switch, and the switch from back-feeding
-  USB.
+- **MCU and flash.** An RP2350A (QFN-60, 7 × 7 mm) with a W25Q128JVSIQ, 16 MiB of QSPI flash in a
+  208-mil SOIC-8 (U5). That's the default build, and the flash is a JLCPCB Basic part.
+- **RP2354A variant.** The board also takes an RP2354A, an RP2350A with 2 MiB of flash inside the
+  package, same footprint and pinout. Leave U5 and its capacitor C19 off: the RP2354A's internal
+  flash sits on the same QSPI pads, so fitting both would put two chips on one chip select.
+- **Crystal.** 12 MHz, the Abracon ABM8-272-T3, which the RP2350 is tuned for.
+- **Core regulator.** The RP2350's core supply comes from an on-chip switching regulator: a 3.3 µH
+  inductor on VREG_LX and an RC filter on VREG_AVDD, laid out after the Pico 2 (see Layout below).
+- **Power.** The 3.3 V comes from T3 pin 4 and T8 pin 4, through an LM66100 ideal diode. The switch's
+  TMI3244T rail is rated 4 A; the mod chip draws about 30-60 mA.
+- **Bench power and debug.** A debug probe on J5 (+3V3, SWCLK, GND, SWDIO, RUN) programs and debugs
+  the RP2350 and can power the board on the bench. The ideal diode keeps that 3.3 V out of the
+  switch. There's no USB port: no plug fits inside the switch, and SWD covers programming.
 - **No back-powering through I/O.** A switch-side 3.3 V sense (divider to GP26/ADC0) gates the I/O. The
   RP2350 leaves every switch-facing pin high-impedance, with its input buffer off, until the switch is
   powered. The 100 Ω series resistors limit current if that ever fails.
 - **Pull-downs.** Don't rely on the RP2350's internal pull-downs. Erratum RP2350-E9 makes them latch
-  on early silicon. The design uses only external pull-ups (I²C) and the 3.3 V sense divider, so it
-  isn't affected.
-- **Development extras.** BOOTSEL and RUN buttons, SWD pads, and a status LED on GP25.
-- **Board stack.** Four layers, giving the switching regulator a solid ground under it and keeping
-  decoupling short.
+  on early silicon. The design uses only external resistors, so it isn't affected.
+- **Status LED.** On GP22.
 
 | RP2350 pin | Use |
 |---|---|
 | GP0 / GP1 | UART0 TX / RX → T5 |
-| GP4 / GP5 | I2C0 SDA / SCL → T3 |
-| GP6 / GP7 | T3 SPI DO / CS (spare) |
-| GP8-GP11 | T8 GPIO46, 47, 48, 49 |
-| GP12 | SoC reset driver (2N7002, 1 kΩ series to TP1) |
-| GP25 | status LED |
-| GP26 | switch 3.3 V sense |
+| GP11 / GP10 | I2C1 SCL / SDA → T3 pins 1 / 3 |
+| GP9 / GP8 | T3 SPI DO / CS (spare) |
+| GP7, GP6, GP5, GP4 | T8 GPIO46, GPIO48, GPIO47, GPIO49 |
+| GP27 | SoC reset driver (2N7002, 1 kΩ series to TP1) |
+| GP22 | status LED |
+| GP26 | switch 3.3 V sense (ADC0) |
+
+The GPIOs follow the board, not the other way round. With U1 rotated 270°, GP11…GP0 run left to right
+along the side facing T3 and T8, in the order of the header pins they reach, so no two routes cross.
+
+### Layout
+
+- **Stack.** Four layers: F.Cu parts and signals, In1 GND plane, In2 3.3 V plane, B.Cu signals.
+  Nothing but the headers on the bottom side.
+- **Why not two layers.** The RP2350 doesn't need four; the Pico 2 is two layers. This board puts a
+  0.4 mm-pitch QFN-60 and everything around it on one side of about 39 × 17 mm, and two inner planes
+  are what make it route. They also give the regulator unbroken ground and feed the supply pins
+  without tracks. At JLCPCB, four layers cost a few dollars more per batch.
+- **Hand-routed, before the router runs:**
+  - VREG_LX straight to L1, and VREG_AVDD to its filter capacitor;
+  - U1's right-side 3.3 V pins (VIN, USB_OTP_VDD, QSPI_IOVDD) on a short trunk to CIN;
+  - +1V1: each DVDD pin (6, 23, 39) and VREG_FB (50) drops a via just inside the pad row, and B.Cu
+    tracks round the exposed pad join them. Once the signals have escaped, those pins are boxed in;
+  - the fan of T8 lines and the UART RX lane above U1, stacked so no two cross;
+  - UART TX straight down to B.Cu, and pin 20's and pin 38's plane vias, placed out of their
+    neighbours' way.
+- **Autorouted.** Everything else is Freerouting plus kicad-agent-kit's A* finisher.
+- **Escape corridors.** Auto-placed parts are kept out of corridors on all four sides of U1.
+- **Result.** KiCad DRC is clean: no errors, no warnings, schematic parity included.
+- **Tracks and vias.** 0.15 mm signal tracks (0.4 mm pitch leaves 0.225 mm to the next pad), 0.3 mm
+  power tracks, 0.5/0.2 mm vias, and JLCPCB's design rules (`modchip.kicad_dru`).
+
+### Parts and assembly (JLCPCB)
+
+Every part has an LCSC number in the schematic. JLCPCB Basic parts wherever one exists: every resistor
+and capacitor, the 2N7002, the W25Q128JVSIQ and the LED (red 0603: JLC's Basic LEDs are red or white).
+Extended parts, all in stock:
+
+| Part | LCSC | Why not Basic |
+|---|---|---|
+| RP2350A | C42411118 | none exists |
+| LM66100 | C2869734 | none exists |
+| AOTA-B201610S3R3-101-T (L1) | C42411119 | the datasheet's inductor; no Basic 3.3 µH 0806 |
+| ABM8-272-T3 (Y1) | C20625731 | the Basic 12 MHz crystal (C9002) has a 20 pF load and 80 Ω ESR; the RP2350 is tuned for 10 pF and at most 50 Ω |
+
+**Not assembled.** The headers J1-J3, through-hole on the bottom side, are soldered by hand to match the
+sockets fitted on the switch, and stay out of the assembly BOM. If wanted: C22438289 (2.0 mm 1×6) and
+C32713270 (2.54 mm 1×4). The SWD pads (J5) and the reset pad (TP1) are bare copper.
 
 ### Mechanical
 
@@ -432,9 +469,6 @@ its connectors, so a 4.5 mm adhesive foot under the strip (beside D2) helps agai
 **Reset.** TP1 sits above D3. Its wire goes to D3's anode pad, the front one, which lies just outside
 the board's edge, about 2 mm away.
 
-**USB-C.** On the mod chip's left edge, for bench work with the lid off. Units in service update over
-the network.
-
 **Measure before laying out:**
 
 - the lid's inside height above T3/T8 and above C124;
@@ -456,7 +490,7 @@ the network.
     STP, LACP, IGMP and LLDP. The latter can come from RTLPlayground's C through a register shim.
   - **Configuration.** LittleFS in the RP2350's flash, applied after each `HELLO`.
 - **Updates.**
-  - RP2350 firmware: over its web UI, with an A/B or bootloader scheme, or by USB.
+  - RP2350 firmware: over its web UI, with an A/B or bootloader scheme, or by SWD.
   - Bridge firmware: through `FLASH_WRITE` staging, as above.
 
 ## Bring-up plan

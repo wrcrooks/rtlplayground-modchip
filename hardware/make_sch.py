@@ -38,6 +38,19 @@ def lib_dir():
     sys.exit("KiCad symbol library not found; set KICAD10_SYMBOL_DIR")
 
 
+U1_FP = "Package_DFN_QFN:QFN-60-1EP_7x7mm_P0.4mm_EP3.4x3.4mm_ThermalVias"
+
+# JLCPCB parts: Basic wherever one exists (all the passives, the crystal caps, Q1, U5, D1); the rest are
+# Extended parts in stock. Resistors and capacitors are found by value; other parts give "LCSC" in fields.
+LCSC_BY_VALUE = {
+    ("Device:R", "100"): "C25076", ("Device:R", "1k"): "C11702", ("Device:R", "10k"): "C25744",
+    ("Device:R", "100k"): "C25741", ("Device:R", "4.7k"): "C25900", ("Device:R", "330"): "C25104",
+    ("Device:R", "33"): "C25105",
+    ("Device:C", "100n"): "C1525", ("Device:C", "15p"): "C1548", ("Device:C", "1u"): "C52923",
+    ("Device:C", "4.7u"): "C23733", ("Device:C", "10u"): "C19702",
+}
+U1_FIELDS = {"LCSC": "C42411118", "Variant": "RP2354A (2 MiB in package): same footprint and pinout; then leave U5 and C19 off"}
+FLASH_FIT = {"Fit": "Fitted with the RP2350A (default); leave off in an RP2354A build"}
 R0402, C0402, C0603 = "Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric", "Capacitor_SMD:C_0603_1608Metric"
 SHEET = k.uid("sheet/root")
 
@@ -100,7 +113,7 @@ class Schematic:
         self.claim(xy, None)
         self.items.append(["no_connect", ["at", num(xy[0]), num(xy[1])], ["uuid", Q(k.uid("nc/%s" % (xy,)))]])
 
-    def part(self, ref, lib_id, value, at, nets, footprint=None, dnp=False, fields=None, text_at=None):
+    def part(self, ref, lib_id, value, at, nets, footprint=None, dnp=False, fields=None, text_at=None, in_bom=True):
         """nets: {pin number or pin name: net, or None for not connected}.
         text_at: (dx, dy) in grid units for the reference, the value goes below it."""
         sym = self.symbol_def(lib_id)
@@ -127,7 +140,8 @@ class Schematic:
 
         props = {p[1]: p for p in k.find(sym, "property")}
         inst = ["symbol", ["lib_id", Q(lib_id)], ["at", num(x), num(y), 0], ["unit", 1],
-                ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "yes" if dnp else "no"],
+                ["exclude_from_sim", "no"], ["in_bom", "yes" if in_bom else "no"], ["on_board", "yes"],
+                ["dnp", "yes" if dnp else "no"],
                 ["uuid", Q(k.uid("sym/" + ref))]]
         values = {"Reference": ref, "Value": value}
         if footprint:
@@ -143,7 +157,12 @@ class Schematic:
             if text_at and name in ("Reference", "Value"):
                 px, py, rot, just = text_at[0] * G, -(text_at[1] + (name == "Value")) * G, 0, "left"
             inst.append(["property", Q(name), Q(text), ["at", num(x + px), num(y - py), rot], font(1.27, just, hide=hidden)])
-        for name, text in (fields or {}).items():
+        fields = dict(fields or {})
+        if (lib_id, value) in LCSC_BY_VALUE:
+            fields.setdefault("LCSC", LCSC_BY_VALUE[(lib_id, value)])
+        if in_bom and not ref.startswith("#") and "LCSC" not in fields:
+            sys.exit("%s (%s %s) has no LCSC part number" % (ref, lib_id, value))
+        for name, text in fields.items():
             inst.append(["property", Q(name), Q(text), ["at", num(x), num(y), 0], font(1.27, hide=True)])
         for number in sorted({p[0] for p in pins}, key=str):
             inst.append(["pin", Q(number), ["uuid", Q(k.uid("pin/%s/%s" % (ref, number)))]])
@@ -176,35 +195,21 @@ def build():
     R = "Device:R"
     C = "Device:C"
 
-    # ---- Power: USB, 3.3 V from USB, ideal-diode OR with the switch's 3.3 V
+    # ---- Power: the switch's 3.3 V through an ideal diode, and the sense divider
     ox, oy = 10, 18
-    s.text("POWER\nThe switch's 3.3 V (T3/T8 pin 4) and USB's 3.3 V are ORed by two ideal diodes,\n"
-           "so neither back-feeds the other. SW_SENSE tells the firmware whether the switch is on:\n"
-           "until it is, keep every switch-facing pin high-impedance with its input buffer off.",
+    s.text("POWER\nThe board runs from the switch's 3.3 V (T3/T8 pin 4) through the ideal diode U2. On the bench a debug\n"
+           "probe can supply 3.3 V on J5 pin 1 instead; U2 keeps it out of the switch. SW_SENSE tells the firmware whether\n"
+           "the switch is on: until it is, keep every switch-facing pin high-impedance with its input buffer off.",
            (ox, oy - 8))
-    s.part("J4", "Connector:USB_C_Receptacle_USB2.0_16P", "USB-C (bench use)", (ox + 6, oy + 14),
-           {"VBUS": "VBUS", "GND": "GND", "SHIELD": "GND", "CC1": "USB_CC1", "CC2": "USB_CC2",
-            "D+": "USB_DP_C", "D-": "USB_DM_C", "SBU1": None, "SBU2": None},
-           footprint="Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal")
-    s.part("U6", "Power_Protection:USBLC6-2SC6", "USBLC6-2SC6", (ox + 30, oy + 8),
-           {"1": "USB_DP_C", "6": "USB_DP_C", "3": "USB_DM_C", "4": "USB_DM_C", "VBUS": "VBUS", "GND": "GND"},
-           text_at=(3, -4))
-    s.part("R1", R, "5.1k", (ox + 40, oy + 8), {"1": "USB_CC1", "2": "GND"}, R0402)
-    s.part("R2", R, "5.1k", (ox + 43, oy + 8), {"1": "USB_CC2", "2": "GND"}, R0402)
-    s.part("R3", R, "27", (ox + 46, oy + 8), {"1": "USB_DP_C", "2": "USB_DP"}, R0402)
-    s.part("R4", R, "27", (ox + 49, oy + 8), {"1": "USB_DM_C", "2": "USB_DM"}, R0402)
-    s.part("U4", "Regulator_Linear:AP2112K-3.3", "AP2112K-3.3", (ox + 30, oy + 30),
-           {"VIN": "VBUS", "EN": "VBUS", "GND": "GND", "VOUT": "+3V3_USB", "NC": None}, text_at=(-3, -4))
-    s.part("C20", C, "1u", (ox + 40, oy + 30), {"1": "VBUS", "2": "GND"}, C0402)
-    s.part("C21", C, "1u", (ox + 43, oy + 30), {"1": "+3V3_USB", "2": "GND"}, C0402)
-    for ref, src, row in (("U2", "+3V3_SW", 8), ("U3", "+3V3_USB", 30)):
+    for ref, src, row in (("U2", "+3V3_SW", 8),):
         s.part(ref, "Power_Management:LM66100DCK", "LM66100", (ox + 62, oy + row),
-               {"VIN": src, "VOUT": "+3V3", "~{CE}": "GND", "GND": "GND", "ST": None, "NC": None}, text_at=(4, 3))
-    s.part("C24", C, "1u", (ox + 74, oy + 8), {"1": "+3V3_SW", "2": "GND"}, C0402)
-    s.part("C22", C, "10u", (ox + 77, oy + 8), {"1": "+3V3", "2": "GND"}, C0603)
-    s.part("R22", R, "100k", (ox + 80, oy + 8), {"1": "+3V3_SW", "2": "SW_SENSE"}, R0402)
-    s.part("R23", R, "100k", (ox + 83, oy + 8), {"1": "SW_SENSE", "2": "GND"}, R0402)
-    for i, net in enumerate(("GND", "VBUS", "+3V3_SW", "+1V1", "VREG_AVDD")):
+               {"VIN": src, "VOUT": "+3V3", "~{CE}": "GND", "GND": "GND", "ST": None, "NC": None}, text_at=(4, 3),
+               fields={"LCSC": "C2869734"})
+    s.part("C24", C, "1u", (ox + 74, oy + 8), {"1": "+3V3_SW", "2": "GND"}, C0402, fields={"Near": "U2"})
+    s.part("C22", C, "10u", (ox + 77, oy + 8), {"1": "+3V3", "2": "GND"}, C0603, fields={"Near": "U2"})
+    s.part("R22", R, "100k", (ox + 80, oy + 8), {"1": "+3V3_SW", "2": "SW_SENSE"}, R0402, fields={"Near": "U1"})
+    s.part("R23", R, "100k", (ox + 83, oy + 8), {"1": "SW_SENSE", "2": "GND"}, R0402, fields={"Near": "U1"})
+    for i, net in enumerate(("GND", "+3V3_SW", "+1V1", "VREG_AVDD")):
         s.flag(i + 1, net, (ox + 74 + 5 * i, oy + 30))
 
     # ---- Core regulator and decoupling (RP2350 datasheet figure 22)
@@ -218,59 +223,65 @@ def build():
     caps += [("C10", "100n", "+1V1"), ("C11", "100n", "+1V1"), ("C12", "100n", "+1V1")]
     caps += [("C13", "4.7u", "+3V3"), ("C14", "4.7u", "+1V1"), ("C15", "4.7u", "+1V1"), ("C16", "4.7u", "VREG_AVDD")]
     for i, (ref, val, net) in enumerate(caps):
-        s.part(ref, C, val, (ox + 3 * i, oy + 8), {"1": net, "2": "GND"}, C0402)
+        s.part(ref, C, val, (ox + 3 * i, oy + 8), {"1": net, "2": "GND"}, C0402, fields={"Near": "U1"})
     s.part("L1", "Device:L", "3.3uH", (ox + 3 * len(caps) + 2, oy + 8), {"1": "VREG_LX", "2": "+1V1"},
            "Inductor_SMD:L_Murata_DFE201610P",
-           {"MPN": "Abracon AOTA-B201610S3R3-101-T (check its land pattern against this footprint)"})
+           fields={"MPN": "Abracon AOTA-B201610S3R3-101-T, the datasheet's choice (check its land pattern against this footprint)",
+            "LCSC": "C42411119"})
     s.part("R5", R, "33", (ox + 3 * len(caps) + 5, oy + 8), {"1": "+3V3", "2": "VREG_AVDD"}, R0402)
 
     # ---- MCU
-    s.text("MCU\nRP2354A: RP2350A with 2 MiB of flash in the package (same pinout).\n"
-           "With an RP2350A, fit U5 and C19. Never fit U5 with an RP2354A: both would answer on QSPI_SS.",
+    s.text("MCU\nDefault build: RP2350A with U5, a W25Q128JVSIQ (16 MiB).\n"
+           "Alternative: RP2354A (2 MiB in the package, same pinout) with U5 and C19 left off.\n"
+           "Never fit U5 with an RP2354A: both flash chips would answer on QSPI_SS.",
            (106, 28))
-    s.part("U1", "MCU_RaspberryPi:RP2354A", "RP2354A", (130, 68), {
+    s.part("U1", "MCU_RaspberryPi:RP2350A", "RP2350A", (130, 68), footprint=U1_FP, fields=U1_FIELDS, nets={
         "IOVDD": "+3V3", "QSPI_IOVDD": "+3V3", "USB_OTP_VDD": "+3V3", "ADC_AVDD": "+3V3",
         "VREG_VIN": "+3V3", "VREG_AVDD": "VREG_AVDD", "VREG_LX": "VREG_LX", "VREG_FB": "+1V1",
         "DVDD": "+1V1", "VREG_PGND": "GND", "GND": "GND",
-        "RUN": "RUN", "USB_DP": "USB_DP", "USB_DM": "USB_DM", "XIN": "XIN", "XOUT": "XOUT",
+        "RUN": "RUN", "USB_DP": None, "USB_DM": None, "XIN": "XIN", "XOUT": "XOUT",
         "SWCLK": "SWCLK", "SWDIO": "SWDIO",
         "~{QSPI_SS}": "QSPI_SS", "QSPI_SCLK": "QSPI_SCLK", "QSPI_SD0": "QSPI_SD0", "QSPI_SD1": "QSPI_SD1",
         "QSPI_SD2": "QSPI_SD2", "QSPI_SD3": "QSPI_SD3",
-        "GPIO0": "UART_TX", "GPIO1": "UART_RX", "GPIO4": "I2C_SDA", "GPIO5": "I2C_SCL",
-        "GPIO6": "T3_SPI_DO", "GPIO7": "T3_SPI_CS",
-        "GPIO8": "T8_GPIO46", "GPIO9": "T8_GPIO47", "GPIO10": "T8_GPIO48", "GPIO11": "T8_GPIO49",
-        "GPIO12": "RESET_DRV", "GPIO25": "LED_GP25", "GPIO26/ADC0": "SW_SENSE",
-        **{"GPIO%d" % n: None for n in (2, 3, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24)},
-        "GPIO27/ADC1": None, "GPIO28/ADC2": None, "GPIO29/ADC3": None,
+        # GP11..GP4 face T3/T8 in header order once U1 is rotated 270 on the board
+        "GPIO0": "UART_TX", "GPIO1": "UART_RX", "GPIO11": "I2C_SCL", "GPIO10": "I2C_SDA",
+        "GPIO9": "T3_SPI_DO", "GPIO8": "T3_SPI_CS",
+        "GPIO7": "T8_GPIO46", "GPIO6": "T8_GPIO48", "GPIO5": "T8_GPIO47", "GPIO4": "T8_GPIO49",
+        "GPIO27/ADC1": "RESET_DRV", "GPIO22": "LED", "GPIO26/ADC0": "SW_SENSE",
+        **{"GPIO%d" % n: None for n in (2, 3, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25)},
+        "GPIO28/ADC2": None, "GPIO29/ADC3": None,
     })
+    # (footprint given above: the thermal-via variant ties the exposed pad to the GND plane)
 
     # ---- Flash (RP2350A only), crystal, buttons, debug, LED
     ox, oy = 58, 98
-    s.text("FLASH, CLOCK, BOOT, DEBUG\nU5/C19: DNP with the RP2354A. Keep the QSPI stubs to U5 short.",
+    s.text("FLASH, CLOCK, DEBUG\nU5/C19: fitted with the RP2350A, left off with an RP2354A.\n"
+           "Programming and debug are over SWD (J5); there is no USB.",
            (ox, oy - 8))
-    s.part("U5", "Memory_Flash:W25Q16JVSS", "W25Q16JVUXIQ", (ox + 10, oy + 8), {
+    s.part("U5", "Memory_Flash:W25Q128JVS", "W25Q128JVSIQ", (ox + 10, oy + 8), {
         "~{CS}": "QSPI_SS", "CLK": "QSPI_SCLK", "DI/IO_{0}": "QSPI_SD0", "DO/IO_{1}": "QSPI_SD1",
         "~{WP}/IO_{2}": "QSPI_SD2", "~{HOLD}/~{RESET}/IO_{3}": "QSPI_SD3", "VCC": "+3V3", "GND": "GND"},
-        "Package_SON:Winbond_USON-8-1EP_3x2mm_P0.5mm_EP0.2x1.6mm", dnp=True,
-        fields={"Fit": "RP2350A builds only; DNP with RP2354A"})
-    s.part("C19", C, "100n", (ox + 18, oy + 8), {"1": "+3V3", "2": "GND"}, C0402, dnp=True,
-           fields={"Fit": "RP2350A builds only; DNP with RP2354A"})
+        "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm",
+        fields={**FLASH_FIT, "LCSC": "C97521",
+                "Note": "W25Q128JVSIQ, 16 MiB, JLCPCB Basic; any 208-mil SOIC-8 QSPI flash fits"})
+    s.part("C19", C, "100n", (ox + 18, oy + 8), {"1": "+3V3", "2": "GND"}, C0402,
+           fields={"Near": "U5", **FLASH_FIT})
     s.part("Y1", "Device:Crystal_GND24", "12MHz", (ox + 10, oy + 30),
            {"1": "XIN", "3": "XTAL_OUT", "2": "GND", "4": "GND"},
-           "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm", fields={"MPN": "Abracon ABM8-272-T3"})
-    s.part("C17", C, "15p", (ox + 19, oy + 30), {"1": "XIN", "2": "GND"}, C0402)
-    s.part("C18", C, "15p", (ox + 22, oy + 30), {"1": "XTAL_OUT", "2": "GND"}, C0402)
-    s.part("R6", R, "1k", (ox + 25, oy + 30), {"1": "XOUT", "2": "XTAL_OUT"}, R0402)
-    s.part("SW1", "Switch:SW_Push", "BOOTSEL", (ox + 34, oy + 8), {"1": "BOOT_SW", "2": "GND"},
-           "Button_Switch_SMD:SW_Push_1P1T_NO_CK_KMR2")
-    s.part("R7", R, "1k", (ox + 41, oy + 8), {"1": "QSPI_SS", "2": "BOOT_SW"}, R0402)
-    s.part("SW2", "Switch:SW_Push", "RUN", (ox + 34, oy + 30), {"1": "RUN", "2": "GND"},
-           "Button_Switch_SMD:SW_Push_1P1T_NO_CK_KMR2")
-    s.part("R8", R, "10k", (ox + 41, oy + 30), {"1": "+3V3", "2": "RUN"}, R0402)
-    s.part("J5", "Connector_Generic:Conn_01x03", "SWD", (ox + 50, oy + 8),
-           {"1": "SWCLK", "2": "GND", "3": "SWDIO"}, "Connector_PinHeader_1.27mm:PinHeader_1x03_P1.27mm_Vertical")
-    s.part("D1", "Device:LED", "green", (ox + 50, oy + 30), {"1": "GND", "2": "LED_A"}, "LED_SMD:LED_0402_1005Metric")
-    s.part("R9", R, "330", (ox + 56, oy + 30), {"1": "LED_GP25", "2": "LED_A"}, R0402)
+           "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm",
+           fields={"MPN": "Abracon ABM8-272-T3: the RP2350 is tuned for it (10 pF load, ESR <= 50 R); JLC's Basic "
+                          "12 MHz crystal (C9002, 20 pF, 80 R) is outside that", "LCSC": "C20625731"})
+    s.part("C17", C, "15p", (ox + 19, oy + 30), {"1": "XIN", "2": "GND"}, C0402, fields={"Near": "Y1"})
+    s.part("C18", C, "15p", (ox + 22, oy + 30), {"1": "XTAL_OUT", "2": "GND"}, C0402, fields={"Near": "Y1"})
+    s.part("R6", R, "1k", (ox + 25, oy + 30), {"1": "XOUT", "2": "XTAL_OUT"}, R0402, fields={"Near": "Y1"})
+    s.part("R8", R, "10k", (ox + 41, oy + 30), {"1": "+3V3", "2": "RUN"}, R0402, fields={"Near": "J5"})
+    s.part("J5", "Connector_Generic:Conn_01x05", "SWD", (ox + 50, oy + 8),
+           {"1": "+3V3", "2": "SWCLK", "3": "GND", "4": "SWDIO", "5": "RUN"},
+           "Connector_PinHeader_1.27mm:PinHeader_1x05_P1.27mm_Vertical", in_bom=False,
+           fields={"Note": "Debug probe: SWD, RUN, and 3.3 V for bench power (U2 blocks it from the switch)"})
+    s.part("D1", "Device:LED", "red", (ox + 50, oy + 30), {"1": "GND", "2": "LED_A"}, "LED_SMD:LED_0603_1608Metric",
+           fields={"LCSC": "C2286"})      # JLC's Basic LEDs are red or white 0603
+    s.part("R9", R, "330", (ox + 56, oy + 30), {"1": "LED", "2": "LED_A"}, R0402, fields={"Near": "D1"})
 
     # ---- Switch interfaces
     ox, oy = 170, 18
@@ -280,13 +291,16 @@ def build():
            (ox, oy - 8))
     s.part("J1", "Connector_Generic:Conn_01x06", "To switch T3 (I2C slave)", (ox + 10, oy + 10),
            {"1": "SW_SCL", "2": "GND", "3": "SW_SDA", "4": "+3V3_SW", "5": "SW_SPI_DO", "6": "SW_SPI_CS"},
-           "Connector_PinHeader_2.00mm:PinHeader_1x06_P2.00mm_Vertical")
+           "Connector_PinHeader_2.00mm:PinHeader_1x06_P2.00mm_Vertical", in_bom=False,
+           fields={"Note": "Hand-soldered on the bottom side; not assembled (JLC: C22438289 if wanted)"})
     s.part("J2", "Connector_Generic:Conn_01x06", "To switch T8 (GPIO46-49)", (ox + 10, oy + 30),
            {"1": "SW_GPIO46", "2": "GND", "3": "SW_GPIO48", "4": "+3V3_SW", "5": "SW_GPIO47", "6": "SW_GPIO49"},
-           "Connector_PinHeader_2.00mm:PinHeader_1x06_P2.00mm_Vertical")
+           "Connector_PinHeader_2.00mm:PinHeader_1x06_P2.00mm_Vertical", in_bom=False,
+           fields={"Note": "Hand-soldered on the bottom side; not assembled (JLC: C22438289 if wanted)"})
     s.part("J3", "Connector_Generic:Conn_01x04", "To switch T5 (UART0)", (ox + 10, oy + 48),
            {"1": "SW_U0TXD", "2": "GND", "3": "SW_U0RXD", "4": None},
-           "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical")
+           "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical", in_bom=False,
+           fields={"Note": "Hand-soldered on the bottom side; not assembled (JLC: C32713270 if wanted)"})
     series = [("R10", "UART_TX", "SW_U0RXD"), ("R11", "UART_RX", "SW_U0TXD"),
               ("R12", "I2C_SDA", "SW_SDA"), ("R13", "I2C_SCL", "SW_SCL"),
               ("R14", "T3_SPI_DO", "SW_SPI_DO"), ("R15", "T3_SPI_CS", "SW_SPI_CS"),
@@ -294,17 +308,17 @@ def build():
               ("R18", "T8_GPIO48", "SW_GPIO48"), ("R19", "T8_GPIO49", "SW_GPIO49")]
     for i, (ref, a, b) in enumerate(series):
         s.part(ref, R, "100", (ox + 22 + 3 * i, oy + 10), {"1": a, "2": b}, R0402)
-    s.part("R20", R, "4.7k", (ox + 54, oy + 10), {"1": "+3V3_SW", "2": "SW_SDA"}, R0402)
-    s.part("R21", R, "4.7k", (ox + 57, oy + 10), {"1": "+3V3_SW", "2": "SW_SCL"}, R0402)
+    s.part("R20", R, "4.7k", (ox + 54, oy + 10), {"1": "+3V3_SW", "2": "SW_SDA"}, R0402, fields={"Near": "J1"})
+    s.part("R21", R, "4.7k", (ox + 57, oy + 10), {"1": "+3V3_SW", "2": "SW_SCL"}, R0402, fields={"Near": "J1"})
     s.text("SOC RESET\nTP1 goes to D3's ANODE on the switch: the front pad, by the \"+\".\n"
            "The banded end is the 3.3 V rail. R25 limits the current if the wire is misplaced.",
            (ox + 20, oy + 28))
     s.part("Q1", "Transistor_FET:2N7002", "2N7002", (ox + 26, oy + 44), {"G": "RESET_DRV", "S": "GND", "D": "RESET_D"},
-           text_at=(3, 1))
-    s.part("R24", R, "100k", (ox + 33, oy + 44), {"1": "RESET_DRV", "2": "GND"}, R0402)
-    s.part("R25", R, "1k", (ox + 37, oy + 44), {"1": "RESET_D", "2": "SW_RESET_N"}, R0402)
+           text_at=(3, 1), fields={"LCSC": "C8545"})
+    s.part("R24", R, "100k", (ox + 33, oy + 44), {"1": "RESET_DRV", "2": "GND"}, R0402, fields={"Near": "Q1"})
+    s.part("R25", R, "1k", (ox + 37, oy + 44), {"1": "RESET_D", "2": "SW_RESET_N"}, R0402, fields={"Near": "Q1"})
     s.part("TP1", "Connector:TestPoint", "Reset wire to D3 anode", (ox + 44, oy + 44), {"1": "SW_RESET_N"},
-           "TestPoint:TestPoint_THTPad_D1.5mm_Drill0.7mm")
+           "TestPoint:TestPoint_THTPad_D1.5mm_Drill0.7mm", in_bom=False)
 
     s.write(OUT)
     (HERE / "expected-nets.json").write_text(json.dumps(s.expected, indent=1, sort_keys=True) + "\n")

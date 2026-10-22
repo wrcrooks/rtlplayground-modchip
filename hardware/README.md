@@ -8,7 +8,7 @@ D3. It avoids every through-hole or tall part and leaves the SPI flash U8 free f
 | File | What |
 |---|---|
 | `modchip.kicad_pcb`, `modchip.kicad_pro` | KiCad 10 board: the outline on Edge.Cuts, J1-J3 on the bottom side on the T3, T8 and T5 holes, TP1 above D3 for the reset wire to D3's anode, the switch's parts on Dwgs.User, U8's clip zone on Cmts.User. Aux and grid origin at T3 pin 1 |
-| `make_pcb.py` | Builds the KiCad board from `outline.py` with KiCad's Python API |
+| `make_pcb.py`, `finish.py`, `build.sh`, `modchip.kicad_dru` | Layout and routing pipeline (below), with JLCPCB's design rules |
 | `modchip.kicad_sch`, `schematic.pdf` | KiCad 10 schematic of the whole mod chip, and a PDF of it |
 | `make_sch.py`, `kisexpr.py` | Generate the schematic: every pin's net is listed in `make_sch.py` |
 | `check_sch.py`, `expected-nets.json` | ERC, and KiCad's netlist compared pin by pin with the intended nets |
@@ -76,25 +76,58 @@ generator doesn't write them.
 fields. Tools → Update PCB from Schematic then adds the other 62 parts and changes nothing about those
 four.
 
-## KiCad board
+## KiCad board (layout and routing)
 
-`modchip.kicad_pcb` is generated, so change `outline.py` and rebuild it rather than editing the outline
-by hand. It needs KiCad 10's Python; with the flatpak:
+`modchip.kicad_pcb` is generated from the schematic. `build.sh` runs the whole pipeline and stops at the
+first failure:
 
 ```
-flatpak run --command=python3 org.kicad.KiCad make_pcb.py
+KAK=~/Desktop/Workspace/KiCad/kicad-agent-kit ./build.sh [freerouting passes]
 ```
 
-- **Version.** Saved by KiCad 10.0.5. It opens in any KiCad 10 release, but not in KiCad 9.
-- **Footprints.** KiCad's standard 2.0 mm and 2.54 mm pin headers and a 1.5 mm through-hole test point.
-- **Pads checked.** After a reload, every pad sits on its measured hole to within 0.001 mm.
-- **DRC.** No violations. The only unconnected items are the GND and +3V3_SW pins shared between the
-  headers, which the layout will connect. A schematic-parity check finds the four linked footprints
-  matching their symbols.
-- **Nets.** Each pad carries the name of the switch signal it reaches, for example `SW_SCL` and
-  `SW_U0TXD`, the same names the schematic uses. J3 pin 4 (T5's 3.3 V) is left open, as in the
-  schematic.
-- **Layers.** Four copper layers, for the RP2350's switching regulator.
+It needs the KiCad 10 flatpak and a checkout of kicad-agent-kit, which supplies the board-from-netlist
+build, auto-placement, escape rings, plane fanout, Freerouting (with its JRE) and the A* finisher. In
+order:
+
+1. **Schematic.** `make_sch.py`, `kicad-cli sch upgrade`, then `check_sch.py`: ERC clean, every pin
+   on its intended net.
+2. **Board.** `make_pcb.py`:
+   - outline, plus J1-J3 and TP1 placed on the switch's holes, exactly;
+   - hand placement of U1, the regulator, the clock, the debug pads, the flash and the series
+     resistors, then auto-placement of the rest; the script refuses overlapping courtyards;
+   - In1 GND plane, In2 split into +3V3 and a +1V1 region under U1;
+   - locked hand routes for VREG_LX, VREG_AVDD and U1's 3.3 V trunk to CIN, then plane fanout.
+3. **Routing.** Freerouting, with analytics and telemetry off on its command line.
+4. **Finishing.** `finish.py` joins anything Freerouting left open, without ripping up other nets.
+5. **Pours and checks.** `make_pcb.py --pour` adds the outer GND pours, then DRC and renders.
+
+6. **Production.** `kak.sh jlc` writes `production/`.
+
+Snapshots go in `build/`: `placed.kicad_pcb` before routing, `routed.kicad_pcb` after it.
+
+**DRC.** The routed board has no DRC errors and no warnings, schematic parity included.
+
+## JLCPCB production files (`production/`)
+
+| File | What |
+|---|---|
+| `RTLPlayground_mod_chip_RP2350_A0.zip` | Gerbers for 4 copper layers, masks, paste, silkscreen, outline, and drill files |
+| `bom.csv` | 19 lines, every one with an LCSC number |
+| `positions.csv` | 48 parts, all on the top side |
+| `designators.csv`, `netlist.ipc` | Designator list and IPC netlist, for JLC's checks |
+
+**Ordering:**
+
+- **Board.** 4 layers, 1.0 mm thick (the stack in ARCHITECTURE.md assumes 1.0), 0.2 mm minimum via
+  drill, any colour.
+- **Assembly.** PCBA on the top side only, with `bom.csv` and `positions.csv`.
+- **Parts.** Basic parts throughout, except four Extended ones: RP2350A, LM66100, the AOTA inductor
+  and the ABM8 crystal. ARCHITECTURE.md says why.
+- **Not assembled.** The headers J1-J3 are hand-soldered. The SWD pads J5 and the reset pad TP1 are
+  bare copper.
+- **Check in JLC's preview.** The rotation of U1 (QFN-60), U5 (SOIC-8), U2 (SC-70-6), Y1 and L1. The
+  Fabrication Toolkit applies JLC's rotation corrections, but these packages are the ones to look at.
+
 
 ## Where the numbers come from
 
