@@ -9,8 +9,10 @@ under a small bridge firmware, and tunnels the rest to the RP2350:
 - the CPU-port packet DMA;
 - PHY, SerDes and flash access.
 
+**Status:** Not tested as I haven't received the assembled PCBs yet.
+
 The design, the link protocol, the pinouts and the mechanical constraints are in
-[ARCHITECTURE.md](ARCHITECTURE.md). Nothing here has been built or run on hardware yet.
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 | Path | What |
 |---|---|
