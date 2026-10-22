@@ -10,12 +10,14 @@ D3. It avoids every through-hole or tall part and leaves the SPI flash U8 free f
 | `outline.py` | The outline, the header holes and the obstacles in one place. Running it checks the clearances and writes the files below |
 | `modchip-outline.dxf` | Edge.Cuts, the header holes and the reset pad, in mm, origin at T3 pin 1, Y up |
 | `modchip-outline.svg` | 1:1 template with the outline, holes, obstacles and the U8 clip zone |
-| `overlay.jpg` | The same drawn on the board photo |
+| `overlay.jpg` | The same drawn on the board photo it was measured on (unmanaged) |
+| `overlay-managed.jpg` | The same on a second, independent photo: a managed board from [up-n-atom/SWTG118AS](https://github.com/up-n-atom/SWTG118AS/blob/main/photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg) |
 
 Regenerate everything with:
 
 ```
 python3 outline.py --photo ../../doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png
+python3 outline.py --photo SWTG024AS-v2-pcb-top.jpg --calibration managed   # downloaded from the link above
 ```
 
 It exits non-zero if the outline comes closer than 1.2 mm to an obstacle or the U8 clip zone, or if a
@@ -31,6 +33,26 @@ pitch (23.5 px/mm).
   T5 is.
 - **Tall parts.** They are placed by their footprint on the PCB, not by their tops, which perspective
   pushes away from the centre of the photo.
+
+## Cross-check on the managed board's photo
+
+The managed photo is close to a flat scan at 38.3 px/mm. It's calibrated on its own, from U8's pin
+pitch, T3's hole pitch and the board's rear-left corner, not fitted to the outline. On it:
+
+- **Parts to avoid.** Every one lands inside its marked footprint: J1, C124, C127 (C123 on the
+  unmanaged board), the 1R5 inductor, the heatsink, C102/EC1, EC2, L13, the SFP cages and U8's clip zone.
+- **Capacitors.** The round capacitors sit centred in their circles, which supports placing tall parts
+  by footprint rather than by their tops in the perspective photo.
+- **Pitches.** 2.0 mm for T3 and 2.55 mm for T5, the latter measured over three pitches.
+- **Holes.** The markers sit about 0.7 mm left of and 0.8 mm behind the T3/T8 holes, and about
+  0.4 mm off the T5 holes. Between T3 pin 1 and T5 pin 1, the two photos differ by 0.4 mm across and
+  0.6 mm front to back.
+
+The two photos agree to within about a millimetre: enough for the outline's clearances, not enough to
+place connectors that must mate. Calipers decide that.
+
+The managed board differs only in fitted parts: it has the reset button K1, T5 without pins, and a
+W25Q16JV (2 MiB) at U8, in the same 208-mil SOIC-8 footprint.
 
 ## Before ordering a board
 

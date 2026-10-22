@@ -14,6 +14,7 @@ Outputs, next to this script:
                        for KiCad (File > Import > Graphics, layer Edge.Cuts)
   modchip-outline.svg  1:1 template: print at 100 % and lay it on the switch
   overlay.jpg          the outline drawn on the board photo (with --photo)
+  overlay-managed.jpg  the same on a managed board's photo (--calibration managed)
 
 The script fails if the outline comes closer than CLEARANCE to anything it
 must avoid, or leaves a header hole uncovered.
@@ -239,28 +240,43 @@ def write_svg(path):
     path.write_text("\n".join(s) + "\n")
 
 
-def write_overlay(photo, path):
+# Calibrations of the photos the outline has been checked against: pixels per
+# mm, the board's rear-left corner in pixels, and the rotation that puts the
+# ports at the bottom
+PHOTOS = {
+    # doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png,
+    # on U8's pin pitch; the photo the outline is measured on
+    "unmanaged": (23.5, 152, 81, 0),
+    # up-n-atom/SWTG118AS photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg
+    # (managed), on U8's pin pitch (38.5) and T3's (38.1)
+    "managed": (38.3, 82.5, 113, 180),
+}
+
+
+def write_overlay(photo, path, calibration):
     from PIL import Image, ImageDraw
-    ppm, ox, oy = 23.5, 152, 81       # photo pixels per mm, board origin in the photo
+    ppm, ox, oy, rotation = PHOTOS[calibration]
 
     def px(p):
         return (ox + p[0] * ppm, oy + p[1] * ppm)
 
-    im = Image.open(photo).convert("RGB")
+    im = Image.open(photo).convert("RGB").rotate(rotation)
     d = ImageDraw.Draw(im, "RGBA")
+    w = max(3, round(ppm * 0.18))      # line widths scale with the photo, about 0.2 mm
     for sh in OBSTACLES.values():
         if sh[0] == "rect":
-            d.rectangle([px(sh[1:3]), px(sh[3:5])], outline=(255, 40, 40), width=4)
+            d.rectangle([px(sh[1:3]), px(sh[3:5])], outline=(255, 40, 40), width=w)
         else:
             c, r = px(sh[1:3]), sh[3] * ppm
-            d.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], outline=(255, 40, 40), width=4)
+            d.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], outline=(255, 40, 40), width=w)
     for sh in KEEPOUTS.values():
-        d.rectangle([px(sh[1:3]), px(sh[3:5])], outline=(60, 140, 255), width=5)
+        d.rectangle([px(sh[1:3]), px(sh[3:5])], outline=(60, 140, 255), width=w)
     d.polygon([px(p) for p in OUTLINE], fill=(0, 255, 0, 60), outline=(0, 255, 0))
-    d.line([px(p) for p in OUTLINE + OUTLINE[:1]], fill=(0, 255, 0), width=6)
+    d.line([px(p) for p in OUTLINE + OUTLINE[:1]], fill=(0, 255, 0), width=round(w * 1.5))
+    r = 0.45 * ppm
     for h in T3 + T8 + T5 + [RESET_PAD]:
         c = px(h)
-        d.ellipse([c[0] - 9, c[1] - 9, c[0] + 9, c[1] + 9], outline=(255, 255, 0), width=4)
+        d.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], outline=(255, 255, 0), width=w)
     im = im.resize((1800, int(im.height * 1800 / im.width)))
     im.save(path, quality=85)
 
@@ -269,8 +285,11 @@ if __name__ == "__main__":
     good = check()
     write_dxf(HERE / "modchip-outline.dxf")
     write_svg(HERE / "modchip-outline.svg")
+    # --photo FILE [--calibration NAME]: NAME from PHOTOS, default "unmanaged"
     if "--photo" in sys.argv:
-        write_overlay(sys.argv[sys.argv.index("--photo") + 1], HERE / "overlay.jpg")
+        cal = sys.argv[sys.argv.index("--calibration") + 1] if "--calibration" in sys.argv else "unmanaged"
+        name = "overlay.jpg" if cal == "unmanaged" else "overlay-%s.jpg" % cal
+        write_overlay(sys.argv[sys.argv.index("--photo") + 1], HERE / name, cal)
     print("Local coordinates (origin T3 pin 1, Y up):")
     for p in OUTLINE:
         print("  (%7.2f, %7.2f)" % to_local(p))
