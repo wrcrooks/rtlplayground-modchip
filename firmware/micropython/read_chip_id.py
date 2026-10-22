@@ -15,7 +15,7 @@
 #
 # Run it with:  mpremote run read_chip_id.py
 #
-# Protocol, from doc/devices/SWTG024AS.md: a 16-bit register address, high
+# Protocol, from RTLPlayground's doc/devices/SWTG024AS.md: a 16-bit register address, high
 # byte first, then a repeated start and four data bytes, low byte first.
 
 from machine import I2C, Pin

@@ -16,13 +16,13 @@ D3. It avoids every through-hole or tall part and leaves the SPI flash U8 free f
 | `modchip-outline.dxf` | Edge.Cuts, the header holes and the reset pad, in mm, origin at T3 pin 1, Y up |
 | `modchip-outline.svg` | 1:1 template with the outline, holes, obstacles and the U8 clip zone |
 | `overlay-managed.jpg` | The same drawn on the photo it is measured on: a managed board from [up-n-atom/SWTG118AS](https://github.com/up-n-atom/SWTG118AS/blob/main/photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg) |
-| `overlay.jpg` | The same on the unmanaged board's photo in `doc/devices/photos/`, as a cross-check |
+| `overlay.jpg` | The same on the unmanaged board's photo in RTLPlayground's `doc/devices/photos/`, as a cross-check |
 
 Regenerate everything with:
 
 ```
 python3 outline.py --photo SWTG024AS-v2-pcb-top.jpg --calibration managed   # downloaded from the link above
-python3 outline.py --photo ../../doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png
+python3 outline.py --photo SWTG024AS-v2.0-top-uman.png   # from RTLPlayground doc/devices/photos/SWTG024AS-v2.0-unmanaged/
 ```
 
 It exits non-zero if the outline comes closer than 1.2 mm to an obstacle or the U8 clip zone, or if a
@@ -153,7 +153,7 @@ almost straight down, so it is close to a flat scan:
 - **Cross-checks on the photo itself.** T5 measures 2.55 mm pitch and the board 130.3 × 88.7 mm. Tall
   parts sit squarely on their footprints, and the round capacitors fill their silkscreen circles.
 
-**Earlier estimate.** A first pass used the unmanaged photo in `doc/devices/photos/`. That photo is taken
+**Earlier estimate.** A first pass used the unmanaged photo in RTLPlayground's `doc/devices/photos/`. That photo is taken
 at an angle:
 
 - tall parts lean outward;

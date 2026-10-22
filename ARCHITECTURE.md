@@ -2,7 +2,7 @@
 
 Status: design draft. The firmware builds and its link framing is tested on the host, but none of this
 has run on hardware yet. Measurements marked *photo* come from the board photo in
-`doc/devices/photos/SWTG024AS-v2.0-unmanaged/` and must be checked with calipers before a PCB is
+RTLPlayground's `doc/devices/photos/SWTG024AS-v2.0-unmanaged/` and must be checked with calipers before a PCB is
 ordered.
 
 ## Goal
@@ -16,7 +16,7 @@ family, and in particular the two on hand:
 | MokerLink 2G040210GS | SWTG024AS-V2.0, unmanaged layout | W25Q40, 512 KiB | `MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact` |
 | XikeStor SKS3200M-4GPY2XF | SWTG024AS-V2.0, managed layout | FM25Q16, 2 MiB | `MACHINE=SWGT024_V2_0_MANAGED` |
 
-`doc/devices/SWTG024AS.md` lists the XikeStor as a v1.0 PCB, but the board on hand is marked v2.0.
+[`doc/devices/SWTG024AS.md`](https://github.com/logicog/RTLPlayground/blob/main/doc/devices/SWTG024AS.md) lists the XikeStor as a v1.0 PCB, but the board on hand is marked v2.0.
 Check the header positions on both boards before committing to one outline.
 
 ## Why the 8051 can't simply be bypassed
@@ -121,7 +121,7 @@ A rough estimate, from published Cortex-M benchmarks rather than measurement on 
   that is both an I²C SCL and an SPI SCK, so SPI mode would have to run on PIO. That's not needed for
   this board.
 - **Register format.** The address is 16 bits, high byte first; data is 32 bits, low byte first (see
-  `doc/devices/SWTG024AS.md`). `pico/read_chip_id.py` checks the read path.
+  `doc/devices/SWTG024AS.md` in RTLPlayground). `firmware/micropython/read_chip_id.py` checks the read path.
 - **Write format.** Unconfirmed: the doc shows the device address repeated mid-write. Check it on the
   register the bridge leaves unused (`RTL837X_REG_SEC_COUNTER`, 0x06f4) before relying on writes.
 - **Pull-ups.** The mod chip carries 4.7 kΩ pull-ups to the switch's 3.3 V. That's fine alongside any
@@ -202,7 +202,8 @@ a hung 8051 without a power cycle. Without the wire, everything else still works
 
 ## Bridge firmware (8051)
 
-The source is in `modchip/bridge/`. Build it from the repository root:
+The source lives in RTLPlayground, [`modchip/bridge/`](https://github.com/wrcrooks/RTLPlayground/tree/feat/modchip/modchip/bridge) on the `feat/modchip` branch of the fork,
+because it shares the chip-level modules there. Build it from that repository's root:
 
 ```
 make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact   # MokerLink, 512 KiB
@@ -495,7 +496,7 @@ the board's edge, about 2 mm away.
 
 ## Bring-up plan
 
-1. **Chip ID.** Run `pico/read_chip_id.py` against T3 with RTLPlayground still running. Expect
+1. **Chip ID.** Run `firmware/micropython/read_chip_id.py` against T3 with RTLPlayground still running. Expect
    `0x8372xx00` and a ticking seconds counter.
 2. **Writes.** Confirm the T3 write format on `RTL837X_REG_SEC_COUNTER`, then raise the I²C clock to
    400 kHz and 1 MHz.
@@ -503,7 +504,7 @@ the board's edge, about 2 mm away.
 4. **Flash the bridge.** On the MokerLink, write
    `bridge-…-SWGT024_V2_0_UNMANAGED-compact-flash512k.bin` with the CH341A. Keep the stock and
    RTLPlayground recovery images at hand: the bridge has no web UI.
-5. **Talk to it.** Run `pico/bridge_host_test.py` against T5. Expect:
+5. **Talk to it.** Run `firmware/micropython/bridge_host_test.py` against T5. Expect:
    - beacons and boot log lines;
    - `HELLO` answered;
    - `LINK` events when cables are plugged in;

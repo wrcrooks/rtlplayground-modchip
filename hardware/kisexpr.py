@@ -92,6 +92,7 @@ def pins(sym, unit=1):
 
 def uid(key):
     """A stable UUID for a schematic or board item, so regenerating a file
-    changes only what changed"""
+    changes only what changed. The namespace string predates the move out of
+    RTLPlayground; changing it would renumber every item."""
     import uuid
     return str(uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/wrcrooks/RTLPlayground/modchip/" + key))

@@ -7,7 +7,7 @@ The positions were measured on up-n-atom's photo of a managed SWTG024AS-V2.0
 (github.com/up-n-atom/SWTG118AS, photos/SWGT024AS-v2.0/SWTG024AS-v2-pcb-top.jpg),
 which is close to a flat scan: 38.3 px/mm, calibrated on U8's 1.27 mm and
 T3's 2.0 mm pin pitches. Expect about +/-0.3 mm. The unmanaged photo in
-doc/devices/photos/ serves as a cross-check; its perspective makes it less
+doc/devices/photos/ (in RTLPlayground) serves as a cross-check; its perspective makes it less
 accurate. Check the positions against a real board with the 1:1 print before
 ordering anything.
 
@@ -253,7 +253,7 @@ PHOTOS = {
     # (managed), on U8's pin pitch (38.5) and T3's (38.1); the outline is
     # measured on this one
     "managed": (38.3, 82.5, 113, 180),
-    # doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png,
+    # RTLPlayground doc/devices/photos/SWTG024AS-v2.0-unmanaged/SWTG024AS-v2.0-top-uman.png,
     # on U8's pin pitch; taken at an angle, so tall parts lean and the far
     # edges stretch
     "unmanaged": (23.5, 152, 81, 0),

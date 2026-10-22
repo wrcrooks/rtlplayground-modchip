@@ -1,4 +1,5 @@
-# Host side of the mod-chip bridge protocol (modchip/bridge/bridge_proto.h).
+# Host side of the mod-chip bridge protocol (bridge_proto.h in the bridge firmware:
+# https://github.com/wrcrooks/RTLPlayground/tree/feat/modchip/modchip/bridge).
 #
 # Plain Python that runs both under MicroPython on the RP2350 and under
 # CPython, where test_bridge_link.py exercises it.

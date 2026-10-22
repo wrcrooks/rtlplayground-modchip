@@ -1,23 +1,49 @@
-# Mod chip
+# RTLPlayground mod chip
 
-An RP2350 board inside SWTG024AS-V2.0 switches that takes over management from the RTL8372's 8051.
+An RP2350 board inside SWTG024AS-V2.0 switches (MokerLink 2G040210GS, XikeStor SKS3200M-4GPY2XF) that
+takes over management from the RTL8372's built-in 8051. The 8051 keeps only what has to run on it,
+under a small bridge firmware, and tunnels the rest to the RP2350:
+
+- chip init;
+- SerDes and SFP upkeep;
+- the CPU-port packet DMA;
+- PHY, SerDes and flash access.
+
 The design, the link protocol, the pinouts and the mechanical constraints are in
-[ARCHITECTURE.md](ARCHITECTURE.md). Nothing here has run on hardware yet.
+[ARCHITECTURE.md](ARCHITECTURE.md). Nothing here has been built or run on hardware yet.
 
 | Path | What |
 |---|---|
-| `pico/read_chip_id.py` | MicroPython: reads the chip ID and link state over header T3 (I²C 0x5C). Read-only |
-| `pico/bridge_link.py` | MicroPython/CPython: the host side of the bridge protocol |
-| `pico/bridge_host_test.py` | MicroPython: talks to the bridge firmware over header T5 |
-| `bridge/` | The minimal 8051 firmware: init, SerDes/SFP upkeep, frame tunnel, SFR-only operations |
-| `hardware/` | KiCad 10 schematic and board, the outline reaching T3, T8 and T5, a DXF and a 1:1 print template, and the scripts that generate and check them |
+| `hardware/` | KiCad 10 schematic and 4-layer board, routed, with clean ERC and DRC. Also the board outline reaching headers T3, T8 and T5, a 1:1 print template, a DXF, photo overlays, STL/STEP for a printed fit check, JLCPCB production files, and the scripts that generate and check all of it. See [hardware/README.md](hardware/README.md) |
+| `firmware/micropython/` | RP2350/RP2040 tools in MicroPython: `read_chip_id.py` reads the switch over T3, `bridge_link.py` is the host side of the bridge protocol, `bridge_host_test.py` talks to the bridge over T5, and `test_bridge_link.py` checks the protocol against the bridge's own frames |
 
-Build the bridge firmware from the repository root:
+The RP2350's application firmware (IP stack, web UI, STP/LACP/IGMP/LLDP) isn't written yet;
+ARCHITECTURE.md outlines it.
+
+## The bridge firmware
+
+The 8051 side lives in RTLPlayground, on the `feat/modchip` branch of the fork:
+[`modchip/bridge/`](https://github.com/wrcrooks/RTLPlayground/tree/feat/modchip/modchip/bridge). It shares
+RTLPlayground's chip-level modules there. Build it from that repository's root:
 
 ```
-make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact
+make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact   # MokerLink, 512 KiB
+make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_MANAGED                    # XikeStor, 2 MiB
 ```
 
-Tests: `make -C test` runs `test_bridge_link` (the 8051 framing code, compiled unchanged) and
-`test_bridge_link.py` (the Python host side against it). `modchip/bridge/check_hal.py` checks that the
-helpers copied from `rtlplayground.c` haven't drifted.
+## Rebuilding the hardware
+
+Needs the KiCad 10 flatpak and a checkout of kicad-agent-kit:
+
+```
+KAK=~/Desktop/Workspace/KiCad/kicad-agent-kit hardware/build.sh
+```
+
+This goes from the schematic through ERC, layout, Freerouting, DRC and the JLCPCB files to the STL/STEP.
+
+## Tests
+
+```
+python3 firmware/micropython/test_bridge_link.py
+python3 hardware/check_sch.py         # ERC, and every pin's net against hardware/expected-nets.json
+```

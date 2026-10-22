@@ -3,7 +3,8 @@
 # MicroPython. Copy bridge_link.py to the Pico first, then:
 #   mpremote cp bridge_link.py :  &&  mpremote run bridge_host_test.py
 #
-# The switch must run the bridge firmware (modchip/bridge), not RTLPlayground.
+# The switch must run the bridge firmware, not RTLPlayground:
+# https://github.com/wrcrooks/RTLPlayground/tree/feat/modchip/modchip/bridge
 #
 # Wiring, Pico -> SWTG024AS-V2.0 header T5 (serial console, pin 1 square):
 #
@@ -17,7 +18,7 @@ from machine import UART, Pin
 import time
 import bridge_link as bl
 
-BAUD = 976562           # LINK_TH1 0xfe in modchip/bridge/bridge.h
+BAUD = 976562           # LINK_TH1 0xfe in the bridge's bridge.h
 PORTS = (("RJ45 1", 4), ("RJ45 2", 5), ("RJ45 3", 6), ("RJ45 4", 7),
          ("SFP J4", 8), ("SFP J2", 3))
 
