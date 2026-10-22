@@ -44,7 +44,7 @@ pitch, T3's hole pitch and the board's rear-left corner, not fitted to the outli
 - **Capacitors.** The round capacitors sit centred in their circles, which supports placing tall parts
   by footprint rather than by their tops in the perspective photo.
 - **Pitches.** 2.0 mm for T3 and 2.55 mm for T5, the latter measured over three pitches.
-- **Holes.** The markers sit about 0.7 mm left of and 0.8 mm behind the T3/T8 holes, and about
+- **Holes.** The markers sit about 0.7 mm left of and 0.8 mm in front of the T3/T8 holes, and about
   0.4 mm off the T5 holes. Between T3 pin 1 and T5 pin 1, the two photos differ by 0.4 mm across and
   0.6 mm front to back.
 
