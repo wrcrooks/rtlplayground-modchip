@@ -334,9 +334,16 @@ The 8051 doesn't touch the RP2350's registers after boot, so the host may use ei
 
 ### Electrical
 
+The full circuit is in [`hardware/modchip.kicad_sch`](hardware/modchip.kicad_sch)
+([PDF](hardware/schematic.pdf)), generated and checked as described in
+[`hardware/README.md`](hardware/README.md).
+
+
 - **MCU and flash.** RP2354A, which is an RP2350A (QFN-60, 7 × 7 mm) with 2 MiB of flash inside the
   package. That saves the flash chip and its six QSPI traces on a crowded board. An RP2350A with an
-  external W25Q16JV is the drop-in alternative if the RP2354A is out of stock. Either way: a 12 MHz
+  external W25Q16JV is the drop-in alternative if the RP2354A is out of stock. The board carries the
+  footprint for that flash (U5), left unpopulated with an RP2354A: the RP2354A's internal flash sits
+  on the same QSPI pads, so fitting both would put two chips on one chip select. Either way: a 12 MHz
   crystal, and the core circuit of the Raspberry Pi Pico 2.
 - **Core regulator.** The RP2350's core supply comes from an on-chip switching regulator. It needs a
   3.3 µH inductor on VREG_LX and an RC filter on VREG_AVDD. Lay it out as the RP2350 hardware design

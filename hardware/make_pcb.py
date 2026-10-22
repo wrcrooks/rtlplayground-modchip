@@ -13,6 +13,9 @@ The board holds:
   TP1         a through-hole pad above D3 for the reset wire to D3's anode
   Dwgs.User   the switch's PCB edge and the parts the outline avoids
   Cmts.User   U8's clip zone and notes
+The headers and TP1 are linked to their symbols in modchip.kicad_sch
+(make_sch.py), so Tools > Update PCB from Schematic adds the rest of the
+parts around them.
 The aux and grid origins are at T3 pin 1, the DXF's origin. Footprints come
 from KiCad's standard library, so the file carries their current versions.
 """
@@ -22,10 +25,13 @@ import pcbnew
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import outline as o  # noqa: E402
+import kisexpr as k  # noqa: E402
 
 OUT = HERE / "modchip.kicad_pcb"
 OFFSET = (60.0, 40.0)           # switch coordinates -> sheet position (A4)
 THICKNESS = 1.0                 # the stack in ARCHITECTURE.md assumes 1.0 mm
+LAYERS = 4                      # for the RP2350's switching regulator
+SHEET = k.uid("sheet/root")     # make_sch.py's root sheet
 
 
 def lib_dir():
@@ -75,11 +81,46 @@ def place(board, fp, targets, bottom):
     sys.exit("%s: no orientation puts its pads on the holes" % fp.GetReference())
 
 
+def schematic_fields():
+    """Reference -> {field: text} for the symbols in modchip.kicad_sch"""
+    sch = HERE / "modchip.kicad_sch"
+    if not sch.exists():
+        return {}
+    out = {}
+    for sym in k.find(k.parse(sch.read_text()), "symbol"):
+        props = {p[1]: p[2] for p in k.find(sym, "property")}
+        if "Reference" in props:
+            out[props["Reference"]] = props
+    return out
+
+
+SCH_FIELDS = schematic_fields()
+
+
+def link(fp, lib, name):
+    """Tie a footprint to its symbol in modchip.kicad_sch and take its fields,
+    so that Update PCB from Schematic keeps it where it is and finds nothing
+    to change"""
+    ref = fp.GetReference()
+    fp.SetPath(pcbnew.KIID_PATH("/%s/%s" % (SHEET, k.uid("sym/" + ref))))
+    fp.SetFPID(pcbnew.LIB_ID(lib, name))
+    fp.SetExcludedFromBOM(False)
+    fields = SCH_FIELDS.get(ref, {})
+    if "Value" in fields:
+        fp.SetValue(fields["Value"])
+    if "Description" in fields:
+        fp.SetLibDescription(fields["Description"])
+        f = fp.GetField(pcbnew.FIELD_T_DESCRIPTION) if hasattr(pcbnew, "FIELD_T_DESCRIPTION") else None
+        if f:
+            f.SetText(fields["Description"])
+
+
 def main():
     lib = lib_dir()
     board = pcbnew.NewBoard(str(OUT))
     ds = board.GetDesignSettings()
     ds.SetBoardThickness(pcbnew.FromMM(THICKNESS))
+    board.SetCopperLayerCount(LAYERS)
     ds.SetAuxOrigin(pt(o.T3[0]))
     ds.SetGridOrigin(pt(o.T3[0]))
 
@@ -113,7 +154,7 @@ def main():
         ("J2", "To switch T8 (GPIO46-49)", "Connector_PinHeader_2.00mm", "PinHeader_1x06_P2.00mm_Vertical",
          o.T8, ["SW_GPIO46", "GND", "SW_GPIO48", "+3V3_SW", "SW_GPIO47", "SW_GPIO49"]),
         ("J3", "To switch T5 (UART0)", "Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
-         o.T5, ["SW_U0TXD", "GND", "SW_U0RXD", "+3V3_SW"]),
+         o.T5, ["SW_U0TXD", "GND", "SW_U0RXD", None]),
     ]
     for ref, value, libname, name, holes, pins in headers:
         fp = pcbnew.FootprintLoad(str(lib / (libname + ".pretty")), name)
@@ -123,14 +164,17 @@ def main():
         # Male pins point down into sockets on the switch: the header's
         # body sits under the board
         place(board, fp, holes, bottom=True)
+        link(fp, libname, name)
         for p in fp.Pads():
-            p.SetNet(net(pins[int(p.GetNumber()) - 1]))
+            if pins[int(p.GetNumber()) - 1]:
+                p.SetNet(net(pins[int(p.GetNumber()) - 1]))
 
     tp = pcbnew.FootprintLoad(str(lib / "TestPoint.pretty"), "TestPoint_THTPad_D1.5mm_Drill0.7mm")
     tp.SetReference("TP1")
     tp.SetValue("Reset: wire to D3 anode (front pad, + end)")
     board.Add(tp)
     place(board, tp, [o.RESET_PAD], bottom=False)
+    link(tp, "TestPoint", "TestPoint_THTPad_D1.5mm_Drill0.7mm")
     next(iter(tp.Pads())).SetNet(net("SW_RESET_N"))
 
     # The switch underneath, for reference
