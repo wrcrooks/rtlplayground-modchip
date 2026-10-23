@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mod chip architecture</title>
+<!-- Source of docs/architecture.png: render, then crop the white margin, e.g.
+     google-chrome --headless --window-size=1600,900 --screenshot=docs/architecture.png docs/architecture.html -->
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1600px;background:#ffffff;color:#1a222c;font:15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:28px 34px;position:relative}
+h1{font-size:24px;font-weight:700;margin-bottom:2px}
+.sub{color:#5c6773;font-size:14px;margin-bottom:18px}
+.row{display:flex;gap:26px;align-items:stretch}
+.box{border:2px solid var(--c);border-radius:12px;background:var(--bg);padding:14px 16px;position:relative}
+.box h2{font-size:17px;font-weight:700;color:var(--c);margin-bottom:8px}
+.box h3{font-size:14px;font-weight:650;margin:8px 0 4px}
+.box ul{padding-left:18px}.box li{margin:2px 0}
+.chip{border:1.5px solid var(--c);border-radius:9px;background:#fff;padding:9px 11px;margin-top:9px}
+.chip b{color:var(--c)}
+.mut{color:#5c6773;font-size:13px}
+.sw{--c:#6e40c9;--bg:#f6f2fd}
+.mc{--c:#0969da;--bg:#f0f6ff}
+.net{--c:#1a7f37;--bg:#effaf2}
+.link{--c:#9a6700;--bg:#fff8e5}
+.tag{display:inline-block;font-size:12px;font-weight:650;border-radius:10px;padding:1px 8px;background:var(--c);color:#fff;margin-left:6px;vertical-align:2px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;min-width:190px;}
+.arrow.narrow{min-width:90px}
+.arrow{color:#9a6700;font-weight:650;text-align:center;gap:6px}
+.arrow .line{height:4px;width:100%;background:#9a6700;position:relative;border-radius:2px}
+.arrow .line:before,.arrow .line:after{content:"";position:absolute;top:-7px;border:9px solid transparent}
+.arrow .line:before{left:-10px;border-right-color:#9a6700}
+.arrow .line:after{right:-10px;border-left-color:#9a6700}
+.arrow .small{font-weight:400;color:#5c6773;font-size:13px}
+.foot{margin-top:14px;display:flex;justify-content:space-between;color:#5c6773;font-size:13px}
+</style>
+</head>
+<body>
+<h1>RTLPlayground mod chip &mdash; architecture</h1>
+<div class="sub">An RP2350 board on the SWTG024AS switch's T3/T5/T8 headers takes over management from the RTL8372's built-in 8051, which keeps only what has to run on it.</div>
+
+<div class="row">
+  <div class="box net" style="width:250px">
+    <h2>Your network</h2>
+    <div class="chip"><b>Browser</b><br><span class="mut">RTLPlayground web UI, Graphs dashboard &mdash; HTTP :80, HTTPS :443</span></div>
+    <div class="chip"><b>SNMP manager</b><br><span class="mut">SNMPv2c :161, MIB-2 + IF-MIB per port</span></div>
+    <div class="chip"><b>Syslog / NTP / DNS / DHCP</b><br><span class="mut">servers the switch talks to</span></div>
+    <div class="chip"><b>Peers</b><br><span class="mut">STP / RSTP, LACP, LLDP, IGMP</span></div>
+  </div>
+
+  <div class="arrow narrow">
+    <div>Switch<br>ports</div>
+    <div class="line"></div>
+    <div class="small">management<br>traffic via the<br>CPU port</div>
+  </div>
+
+  <div class="box sw" style="width:380px">
+    <h2>SWTG024AS switch <span class="tag">RTL8372</span></h2>
+    <div class="chip"><b>Switch core</b><br><span class="mut">4 &times; 2.5G copper + 2 &times; 10G SFP+, VLANs, L2/ACL tables, counters &mdash; forwarding never leaves the ASIC</span></div>
+    <div class="chip"><b>8051 + bridge firmware</b> <span class="mut">(RTLPlayground <code>feat/modchip</code>)</span>
+      <ul class="mut" style="margin-top:4px">
+        <li>chip init, forwarding defaults at boot</li>
+        <li>SerDes modes on link / SFP changes</li>
+        <li>CPU-port DMA: tunnels frames both ways</li>
+        <li>PHY (MDIO), SerDes, SFP EEPROM, SPI flash on request</li>
+        <li>batched table and counter reads</li>
+      </ul>
+    </div>
+    <div class="mut" style="margin-top:10px">Without the mod chip, or if it stops, the switch keeps forwarding as configured.</div>
+  </div>
+
+  <div class="arrow">
+    <div>T5 &middot; UART0<br>~1 Mbaud</div>
+    <div class="line"></div>
+    <div class="small">COBS + CRC-16 frames<br>one request in flight:<br>REG / PHY / SDS / SFP / FLASH<br>TBL_READ, STAT_READ<br>+ RX/TX frames, link and SFP events</div>
+    <div style="margin-top:14px">T3 &middot; I&sup2;C 0x5C</div>
+    <div class="line" style="opacity:.45"></div>
+    <div class="small">register access (planned)<br>+ 3.3 V power in</div>
+    <div style="margin-top:14px">T8 &middot; GPIO46&ndash;49</div>
+    <div class="line" style="opacity:.45"></div>
+    <div class="small">spare GPIO + 3.3 V power in</div>
+  </div>
+
+  <div class="box mc" style="flex:1">
+    <h2>Mod chip <span class="tag">RP2350A</span> <span class="tag">16 MiB flash</span></h2>
+    <div class="grid2">
+      <div class="chip"><b>RTLPlayground modules</b><br><span class="mut">compiled unchanged: CLI, JSON pages, VLAN/port/L2, STP, LACP, IGMP, LLDP, DNS, NTP, syslog</span></div>
+      <div class="chip"><b>Register HAL</b><br><span class="mut">reg / PHY / SDS / flash calls become bridge requests</span></div>
+      <div class="chip"><b>lwIP</b><br><span class="mut">IPv4, ARP, DHCP, TCP/UDP on a netif over the bridge; management VLAN</span></div>
+      <div class="chip"><b>Web server</b><br><span class="mut">HTTP + HTTPS (mbedTLS, TLS 1.2, key made on the device)</span></div>
+      <div class="chip"><b>SNMP agent</b><br><span class="mut">read-only v2c, switch ports as interfaces</span></div>
+      <div class="chip"><b>Graphs</b><br><span class="mut">10 s sampler, 1 h history in RAM, live charts</span></div>
+    </div>
+    <h3>Board</h3>
+    <div class="mut">LM66100 ideal diode from the switch's 3.3 V &middot; reset driver to the switch &middot; SWD pads (flashing, RTT console) &middot; 3.3 V sense keeps pins isolated until the switch is powered</div>
+  </div>
+</div>
+
+<div class="foot">
+  <span>github.com/wrcrooks/rtlplayground-modchip</span>
+  <span>Not yet tested on hardware</span>
+</div>
+</body>
+</html>
