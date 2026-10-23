@@ -31,6 +31,17 @@ bool plat_config_write(const uint8_t *src, uint32_t len);	/* replaces the whole 
 void plat_dhcp_start(void);
 void plat_dhcp_stop(void);
 
+/* HTTPS on port 443 (tls.c) */
+bool plat_https_enable(bool on);
+bool plat_https_enabled(void);
+bool plat_https_newcert(void);
+void plat_https_status(char *fingerprint, size_t len);
+
+/* The SNMP agent's settings (snmp.c); set() with NULL clears, false: too long */
+enum { PLAT_SNMP_ENABLED, PLAT_SNMP_COMMUNITY, PLAT_SNMP_LOCATION, PLAT_SNMP_CONTACT };
+bool plat_snmp_set(int what, const char *value);
+const char *plat_snmp_get(int what);	/* ENABLED: non-NULL when on */
+
 /* ---- implemented by the RTLPlayground half (rtl_*.c) ---- */
 
 extern volatile uint32_t ticks;			/* 200 Hz, SYS_TICK_HZ */
@@ -72,6 +83,18 @@ struct rtl_udp_info {
 void rtl_udp_info(int i, struct rtl_udp_info *info);
 uint16_t rtl_udp_poll(int i, uint8_t **data);			/* -> bytes to send */
 uint16_t rtl_udp_input(int i, const uint8_t *p, uint16_t len, uint8_t **data);
+
+/* The switch ports, for the SNMP agent (rtl_ext.c) */
+struct rtl_port {
+	char name[32];
+	uint8_t link;			/* 0 down, else 1 + the speed code: 10M, 100M, 1G, 500M, 10G, 2.5G, 5G */
+	bool enabled;
+	bool sfp;
+	uint64_t in_octets, out_octets, in_ucast, in_mcast, in_bcast, out_ucast, out_mcast, out_bcast;
+	uint32_t in_discards, out_discards, in_errors, out_errors;
+};
+uint8_t rtl_port_count(void);
+bool rtl_port_read(uint8_t phys, struct rtl_port *p);	/* phys from 1 */
 
 /* The web server's view of RTLPlayground: page_impl.c writes into outbuf */
 #define RTL_SESSION_ID_LEN	12

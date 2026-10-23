@@ -489,6 +489,10 @@ from the first outline as follows:
   confirmed.
 - **Configuration.** RTLPlayground's text config in one raw 4 KiB flash sector rather than LittleFS.
   It is replayed after each `HELLO`.
+- **Bridge requests.** Three were added for the firmware: `TBL_READ` (64 table reads per request),
+  `SDS_CONFIG` and `FLASH_ID`.
+- **HTTPS and SNMP.** TLS 1.2 on port 443 with a key made on the device, and a read-only SNMPv2c
+  agent listing the switch ports.
 - **Updates.** RP2350 firmware by SWD for now. Bridge updates through `FLASH_WRITE` staging aren't
   wired to the web UI yet.
 

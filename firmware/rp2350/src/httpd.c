@@ -10,7 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "lwip/tcp.h"
+#include "lwip/altcp.h"
+#include "lwip/altcp_tcp.h"
+#include "lwip/altcp_tls.h"
 
 #include "net.h"
 #include "plat.h"
@@ -20,12 +22,15 @@
 #define REQ_MAX			(PLAT_CONFIG_LEN + 384)	/* httpd.c's CONFIG_UPLOAD_BUF */
 #define RX_TIMEOUT_S		5
 #define CMD_LINE_MAX		127			/* CMD_BUF_SIZE - 1 */
+#define TLS_CONNS		2			/* each holds about 25 KB of mbedTLS buffers */
+#define WRITE_MAX		2048			/* below MBEDTLS_SSL_OUT_CONTENT_LEN: one TLS record */
 
 enum { ST_FREE, ST_RX, ST_TX };
 
 struct conn {
-	struct tcp_pcb *pcb;
+	struct altcp_pcb *pcb;
 	uint8_t state;
+	bool tls;
 	uint8_t idle_s;
 	bool reboot_after;
 	uint16_t req_len;
@@ -40,6 +45,7 @@ struct conn {
 };
 
 static struct conn conns[CONNS];
+static struct altcp_pcb *listen_tls;
 static char session_id[RTL_SESSION_ID_LEN + 1];
 static uint32_t last_session_use;
 static bool reboot_pending;
@@ -63,15 +69,15 @@ static void conn_free(struct conn *c)
 
 static void conn_close(struct conn *c)
 {
-	struct tcp_pcb *pcb = c->pcb;
+	struct altcp_pcb *pcb = c->pcb;
 
 	if (pcb) {
-		tcp_arg(pcb, NULL);
-		tcp_recv(pcb, NULL);
-		tcp_sent(pcb, NULL);
-		tcp_err(pcb, NULL);
-		if (tcp_close(pcb) != ERR_OK)
-			tcp_abort(pcb);
+		altcp_arg(pcb, NULL);
+		altcp_recv(pcb, NULL);
+		altcp_sent(pcb, NULL);
+		altcp_err(pcb, NULL);
+		if (altcp_close(pcb) != ERR_OK)
+			altcp_abort(pcb);
 	}
 	if (c->reboot_after)
 		reboot_pending = true;
@@ -82,29 +88,31 @@ static void conn_close(struct conn *c)
 /* Queue as much of the response as lwIP takes; close once it is all acked */
 static void conn_push(struct conn *c)
 {
-	struct tcp_pcb *pcb = c->pcb;
+	struct altcp_pcb *pcb = c->pcb;
 
 	while (c->resp_off < c->resp_len) {
 		uint32_t n = c->resp_len - c->resp_off;
-		if (n > tcp_sndbuf(pcb))
-			n = tcp_sndbuf(pcb);
-		if (!n || tcp_write(pcb, c->resp + c->resp_off, n, TCP_WRITE_FLAG_COPY) != ERR_OK)
+		if (n > altcp_sndbuf(pcb))
+			n = altcp_sndbuf(pcb);
+		if (n > WRITE_MAX)
+			n = WRITE_MAX;
+		if (!n || altcp_write(pcb, c->resp + c->resp_off, n, TCP_WRITE_FLAG_COPY) != ERR_OK)
 			goto out;
 		c->resp_off += n;
 	}
 	while (c->body_off < c->body_len) {
 		uint32_t n = c->body_len - c->body_off;
-		if (n > tcp_sndbuf(pcb))
-			n = tcp_sndbuf(pcb);
-		if (n > 0xffff)
-			n = 0xffff;
-		if (!n || tcp_write(pcb, c->body + c->body_off, n, 0) != ERR_OK)
+		if (n > altcp_sndbuf(pcb))
+			n = altcp_sndbuf(pcb);
+		if (n > WRITE_MAX)
+			n = WRITE_MAX;
+		if (!n || altcp_write(pcb, c->body + c->body_off, n, 0) != ERR_OK)
 			goto out;
 		c->body_off += n;
 	}
 out:
-	tcp_output(pcb);
-	if (c->resp_off == c->resp_len && c->body_off == c->body_len && !tcp_sndqueuelen(pcb))
+	altcp_output(pcb);
+	if (c->resp_off == c->resp_len && c->body_off == c->body_len && !altcp_sndqueuelen(pcb))
 		conn_close(c);
 }
 
@@ -422,7 +430,7 @@ static void handle_request(struct conn *c)
 }
 
 
-static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+static err_t on_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err)
 {
 	struct conn *c = arg;
 	(void)err;
@@ -433,7 +441,7 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 		conn_close(c);
 		return ERR_OK;
 	}
-	tcp_recved(pcb, p->tot_len);
+	altcp_recved(pcb, p->tot_len);
 	if (c->state != ST_RX) {
 		pbuf_free(p);
 		return ERR_OK;
@@ -473,7 +481,7 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 }
 
 
-static err_t on_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
+static err_t on_sent(void *arg, struct altcp_pcb *pcb, u16_t len)
 {
 	struct conn *c = arg;
 	(void)pcb;
@@ -497,17 +505,21 @@ static void on_err(void *arg, err_t err)
 }
 
 
-static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err)
+static err_t on_accept(void *arg, struct altcp_pcb *pcb, err_t err)
 {
-	(void)arg;
+	bool tls = arg != NULL;
+	int n_tls = 0;
 
 	if (err != ERR_OK || !pcb)
 		return ERR_VAL;
-	for (int i = 0; i < CONNS; i++) {
+	for (int i = 0; i < CONNS; i++)
+		n_tls += conns[i].state != ST_FREE && conns[i].tls;
+	for (int i = 0; i < CONNS && !(tls && n_tls >= TLS_CONNS); i++) {
 		struct conn *c = &conns[i];
 		if (c->state != ST_FREE)
 			continue;
 		c->pcb = pcb;
+		c->tls = tls;
 		c->state = ST_RX;
 		c->idle_s = 0;
 		c->reboot_after = false;
@@ -516,25 +528,66 @@ static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err)
 		c->resp_len = c->resp_off = 0;
 		c->body = NULL;
 		c->body_len = c->body_off = 0;
-		tcp_arg(pcb, c);
-		tcp_recv(pcb, on_recv);
-		tcp_sent(pcb, on_sent);
-		tcp_err(pcb, on_err);
-		tcp_setprio(pcb, TCP_PRIO_MIN);
+		altcp_arg(pcb, c);
+		altcp_recv(pcb, on_recv);
+		altcp_sent(pcb, on_sent);
+		altcp_err(pcb, on_err);
+		altcp_setprio(pcb, TCP_PRIO_MIN);
 		return ERR_OK;
 	}
-	tcp_abort(pcb);
+	altcp_abort(pcb);
 	return ERR_ABRT;
+}
+
+
+static struct altcp_pcb *listen_on(struct altcp_pcb *pcb, u16_t port, void *arg)
+{
+	struct altcp_pcb *l;
+
+	if (!pcb)
+		return NULL;
+	if (altcp_bind(pcb, IP4_ADDR_ANY, port) != ERR_OK || !(l = altcp_listen_with_backlog(pcb, CONNS))) {
+		altcp_close(pcb);
+		return NULL;
+	}
+	altcp_arg(l, arg);
+	altcp_accept(l, on_accept);
+	return l;
 }
 
 
 void httpd_init(void)
 {
-	struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_V4);
+	listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_V4), 80, NULL);
+}
 
-	tcp_bind(pcb, IP4_ADDR_ANY, 80);
-	pcb = tcp_listen_with_backlog(pcb, CONNS);
-	tcp_accept(pcb, on_accept);
+
+/* HTTPS on port 443 with the key and certificate in conf (tls.c) */
+bool httpd_tls_start(struct altcp_tls_config *conf)
+{
+	httpd_tls_stop();
+	listen_tls = listen_on(altcp_tls_new(conf, IPADDR_TYPE_V4), 443, (void *)1);
+	return listen_tls != NULL;
+}
+
+
+/* Closes the listener and every TLS connection, so the config can be freed */
+void httpd_tls_stop(void)
+{
+	if (listen_tls) {
+		altcp_close(listen_tls);
+		listen_tls = NULL;
+	}
+	for (int i = 0; i < CONNS; i++) {
+		struct conn *c = &conns[i];
+		if (c->state == ST_FREE || !c->tls)
+			continue;
+		if (c->pcb) {
+			altcp_arg(c->pcb, NULL);
+			altcp_abort(c->pcb);
+		}
+		conn_free(c);
+	}
 }
 
 
@@ -546,8 +599,8 @@ void httpd_second(void)
 			continue;
 		if (++c->idle_s > (c->state == ST_RX ? RX_TIMEOUT_S : 30)) {
 			if (c->pcb) {
-				tcp_arg(c->pcb, NULL);
-				tcp_abort(c->pcb);
+				altcp_arg(c->pcb, NULL);
+				altcp_abort(c->pcb);
 			}
 			conn_free(c);
 		}

@@ -24,6 +24,30 @@ static uint32_t uptime;
 static char console[1 << 20];
 static size_t console_len;
 static uint32_t requests;
+static uint32_t vlan_tbl[0x1000][3];	/* the VLAN table behind TBL_CTRL */
+static bool old_bridge;			/* answer as a bridge from before TBL_READ */
+static int sds_configs;
+static uint8_t sds_last[2];
+static bool sfp_module;
+
+/* The table engine, enough of it for VLAN entries */
+static void tbl_ctrl(uint32_t v)
+{
+	uint16_t entry = v >> 16;
+
+	if (((v >> 8) & 0xff) == 0x03 && (v & 1) && entry < 0x1000) {
+		if (v & 2) {
+			vlan_tbl[entry][0] = regs[0x5cb8];
+			vlan_tbl[entry][1] = regs[0x5cbc];
+			vlan_tbl[entry][2] = regs[0x5cc0];
+		} else {
+			regs[0x5ccc] = vlan_tbl[entry][0];
+			regs[0x5cd0] = vlan_tbl[entry][1];
+			regs[0x5cd4] = vlan_tbl[entry][2];
+		}
+	}
+	regs[0x5cac] = v & ~1u;
+}
 
 #define TX_MAX 64
 static uint8_t tx[TX_MAX][1600];
@@ -74,6 +98,8 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 	{
 		uint16_t a = p[0] | p[1] << 8;
 		regs[a] = get32(p + 2);
+		if (a == 0x5cac)
+			tbl_ctrl(regs[a]);
 		/* Engines the modules poll finish at once here */
 		if (a == 0x5cac || a == 0x0418 || a == 0x0f60)	/* TBL_CTRL, I2C_CTRL, STAT_GET */
 			regs[a] &= ~1u;
@@ -104,7 +130,43 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 		sds[p[0]][p[1]][p[2]] = p[3] | p[4] << 8;
 		break;
 	case REQ_SFP_READ:
-		return ST_FAILED;	/* no module */
+		if (!sfp_module || p[0] != 0 || p[2] > 16)
+			return ST_FAILED;
+		memset(r, ' ', p[2]);
+		if (p[1] == 11 && p[2] >= 2) {
+			r[0] = 0x03;	/* encoding */
+			r[1] = 0x0d;	/* 1.3 GBd: 1G */
+		}
+		out = p[2];
+		break;
+	case REQ_TBL_READ: {
+		if (old_bridge)
+			return ST_UNKNOWN;
+		uint32_t ctrl = get32(p);
+		if (n != 5 || (ctrl & 3) != 1 || !p[4] || p[4] > TBL_READ_MAX)
+			return ST_BAD_ARGUMENT;
+		for (int i = 0; i < p[4]; i++) {
+			tbl_ctrl(ctrl + ((uint32_t)i << 16));
+			put32(r + out, regs[0x5cac]);
+			put32(r + out + 4, regs[0x5ccc]);
+			put32(r + out + 8, regs[0x5cd0]);
+			put32(r + out + 12, regs[0x5cd4]);
+			put32(r + out + 16, regs[0x5cb0]);
+			out += 20;
+		}
+		break;
+	}
+	case REQ_SDS_CONFIG:
+		if (old_bridge)
+			return ST_UNKNOWN;
+		sds_configs++;
+		memcpy(sds_last, p, 2);
+		break;
+	case REQ_FLASH_ID:
+		if (old_bridge)
+			return ST_UNKNOWN;
+		out = sprintf((char *)r, "Flash information:\n  Manufacturer ID: 0x%s\n", p[0] == 'j' ? "ef" : "--");
+		break;
 	case REQ_FLASH_READ: {
 		uint16_t len = p[4] | p[5] << 8;
 		memset(r, 0xff, len);
@@ -155,6 +217,31 @@ bool plat_config_write(const uint8_t *src, uint32_t len)
 	memset(config, 0xff, sizeof(config));
 	memcpy(config, src, len);
 	return true;
+}
+
+static bool https_on, snmp_on;
+static char snmp_comm[33] = "public";
+static int newcerts;
+bool plat_https_enable(bool on) { https_on = on; return true; }
+bool plat_https_enabled(void) { return https_on; }
+bool plat_https_newcert(void) { newcerts++; return true; }
+void plat_https_status(char *fp, size_t len) { snprintf(fp, len, "AA:BB"); }
+bool plat_snmp_set(int what, const char *v)
+{
+	if (what == PLAT_SNMP_ENABLED)
+		snmp_on = v != NULL;
+	else if (what == PLAT_SNMP_COMMUNITY) {
+		if (strlen(v) >= sizeof(snmp_comm))
+			return false;
+		strcpy(snmp_comm, v);
+	}
+	return true;
+}
+const char *plat_snmp_get(int what)
+{
+	if (what == PLAT_SNMP_ENABLED)
+		return snmp_on ? "1" : NULL;
+	return what == PLAT_SNMP_COMMUNITY ? snmp_comm : "";
 }
 
 static int dhcp_starts;
@@ -296,6 +383,67 @@ int main(void)
 		uint16_t n = rtl_udp_poll(s, &d);
 		check(n > 4 && !memcmp(d, "<14>", 4), "syslog datagram: %.*s", n > 60 ? 60 : n, d);
 	}
+
+	/* VLAN table walks: TBL_READ in blocks of 64, or entry by entry from an older bridge */
+	cmd("vlan 10 3 4t");
+	cmd("vlan 4000 5");
+	uint32_t r0 = requests;
+	rtl_http_get("/vlanlist");
+	uint32_t fast = requests - r0;
+	static char fast_body[4096];
+	memcpy(fast_body, outbuf, slen);
+	fast_body[slen] = 0;
+	check(strstr(fast_body, "\"id\":10,") && strstr(fast_body, "\"id\":4000,"),
+	      "/vlanlist lists VLANs 10 and 4000");
+	check(fast < 100, "/vlanlist in %u bridge requests", fast);
+	cmd("vlan 20 6");	/* a write between two walks must not leave a stale prefetch */
+	rtl_http_get("/vlanlist");
+	outbuf[slen] = 0;
+	check(strstr((char *)outbuf, "\"id\":20,") != NULL, "a VLAN added since the last walk shows up");
+	old_bridge = true;
+	cmd("vlan 20 d");
+	r0 = requests;
+	rtl_http_get("/vlanlist");
+	outbuf[slen] = 0;
+	check(!strcmp((char *)outbuf, fast_body), "an older bridge gives the same list, in %u requests", requests - r0);
+	old_bridge = false;
+
+	cmd("flash j");
+	check(strstr((char *)outbuf, "Manufacturer ID: 0xef") != NULL, "flash j: the bridge's JEDEC dump");
+	/* A module in slot 1, then a forced speed: the SerDes goes to 10GBase-R */
+	sfp_module = true;
+	rtl_on_sfp(0x30);
+	ticks_run(200 * 3);
+	check(sds_configs == 0, "a module at auto speed leaves the SerDes to the 8051");
+	cmd("sfp 1 10g");
+	check(sds_configs == 1 && sds_last[1] == 0x1a, "sfp 1 10g: SDS_CONFIG mode %02x", sds_last[1]);
+	cmd("sfp 1 auto");
+	check(sds_configs == 1, "sfp 1 auto sends nothing");
+
+	/* The mod chip's own commands, through the parser's hook */
+	cmd("https on");
+	check(https_on && strstr((char *)outbuf, "200 OK"), "https on");
+	cmd("https newcert");
+	check(newcerts == 1, "https newcert");
+	cmd("https");
+	check(strstr((char *)outbuf, "HTTPS on, certificate SHA-256 AA:BB") != NULL, "https status");
+	cmd("snmp community s3cret");
+	cmd("snmp on");
+	check(snmp_on && !strcmp(snmp_comm, "s3cret"), "snmp on, community");
+	cmd("snmp community 0123456789012345678901234567890123456789");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "an overlong community is refused");
+	cmd("https sideways");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "a bad https argument is refused");
+	rtl_http_get("/cmd_log");
+	outbuf[slen] = 0;
+	check(strstr((char *)outbuf, "snmp community s3cret") && strstr((char *)outbuf, "https on"),
+	      "the commands land in the history, so the saved config keeps them");
+
+	/* The ports as the SNMP agent reads them */
+	struct rtl_port port;
+	regs[0x0f68] = 1234;		/* STAT_V_LOW: every counter reads 1234 here */
+	check(rtl_port_count() == 6 && rtl_port_read(1, &port) && port.in_octets == 1234 && port.out_errors == 1234
+	      && !strcmp(port.name, "Port 1") && !rtl_port_read(7, &port), "port 1 of %u: counters, name", rtl_port_count());
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

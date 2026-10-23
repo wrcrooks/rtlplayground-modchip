@@ -71,6 +71,7 @@ add_library(rtlp OBJECT
     src/rtl_env.c
     src/rtl_app.c
     src/rtl_udp.c
+    src/rtl_ext.c
 )
 target_include_directories(rtlp PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
@@ -86,9 +87,12 @@ target_compile_definitions(rtlp PRIVATE
     MACHINE_NAME=${RTLP_MACHINE}
     # lwIP has functions of the same names, taking a netif
     dhcp_start=rtlp_dhcp_start
-    dhcp_stop=rtlp_dhcp_stop)
+    dhcp_stop=rtlp_dhcp_stop
+    # commands of our own, rtl_ext.c
+    CMD_PARSER_EXT=rtl_cmd_ext)
 target_compile_options(rtlp PRIVATE
-    -include ${RTLP}/test/sdcc_shim.h
+    "SHELL:-include ${RTLP}/test/sdcc_shim.h"
+    "SHELL:-include ${CMAKE_CURRENT_LIST_DIR}/stub/rtlp_ext.h"
     -fno-strict-aliasing
     -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-sign-compare
     -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-discarded-qualifiers)
@@ -99,15 +103,41 @@ add_executable(modchip
     src/link.c
     src/net.c
     src/httpd.c
+    src/tls.c
+    src/tls_cert.c
+    src/snmp.c
+    src/snmp_mib.c
+    src/snmp_udp.c
     src/rtl_sfr.S
     ${GEN}/web_assets.c
     $<TARGET_OBJECTS:rtlp>)
 target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge)
 target_compile_definitions(modchip PRIVATE MODCHIP_VERSION="${MODCHIP_VERSION}")
 target_compile_options(modchip PRIVATE -Wall)
-target_link_options(modchip PRIVATE -Wl,--wrap=sfp_read_block)
+target_link_options(modchip PRIVATE -Wl,--wrap=sfp_read_block -Wl,--wrap=handle_sfp)
+# lwIP's SNMP core and MIB-2 groups, without its transport (snmp.c has its own)
+set(LWIP_SNMP ${PICO_LWIP_PATH}/src/apps/snmp)
+target_sources(modchip PRIVATE
+    ${LWIP_SNMP}/snmp_asn1.c
+    ${LWIP_SNMP}/snmp_core.c
+    ${LWIP_SNMP}/snmp_mib2.c
+    ${LWIP_SNMP}/snmp_mib2_icmp.c
+    ${LWIP_SNMP}/snmp_mib2_interfaces.c
+    ${LWIP_SNMP}/snmp_mib2_ip.c
+    ${LWIP_SNMP}/snmp_mib2_snmp.c
+    ${LWIP_SNMP}/snmp_mib2_system.c
+    ${LWIP_SNMP}/snmp_mib2_tcp.c
+    ${LWIP_SNMP}/snmp_mib2_udp.c
+    ${LWIP_SNMP}/snmp_msg.c
+    ${LWIP_SNMP}/snmp_pbuf_stream.c
+    ${LWIP_SNMP}/snmp_scalar.c
+    ${LWIP_SNMP}/snmp_table.c
+    ${LWIP_SNMP}/snmp_traps.c)
+
 target_link_libraries(modchip
     pico_stdlib
+    pico_mbedtls
+    pico_lwip_mbedtls
     pico_flash
     pico_rand
     hardware_adc

@@ -286,6 +286,91 @@ static void sfr_put32(uint32_t v)
  * A failed request leaves zeros: polling loops in the modules wait for busy
  * bits to clear, so zeros end them rather than hanging the firmware.
  */
+/*
+ * The table engine. Reading an entry takes three steps - write the command
+ * to TBL_CTRL, poll TBL_CTRL until done, read the results - and each step
+ * would be a bridge round trip. A read command instead goes out as one
+ * TBL_READ, and the poll and the result registers are answered from its
+ * reply until the next register write. VLAN entries are read 64 at a time,
+ * for the walks over all 4094 of them (send_vlanlist()).
+ */
+#define TBL_SHADOW_REGS		5
+#define TBL_PREFETCH_TICKS	(SYS_TICK_HZ / 5)
+
+static __code const uint16_t tbl_regs[TBL_SHADOW_REGS] = {
+	RTL837X_TBL_CTRL, RTL837x_L2_DATA_OUT_A, RTL837x_L2_DATA_OUT_B, RTL837x_L2_DATA_OUT_C, RTL837x_TBL_DATA_0
+};
+static bool tbl_read_unsupported;	/* a bridge from before TBL_READ */
+static bool shadow_valid;
+static uint32_t shadow[TBL_SHADOW_REGS];
+static struct {
+	uint16_t cmd;			/* TBL_CTRL's low half: table type and command */
+	uint16_t first;
+	uint8_t n;
+	uint32_t at;			/* ticks */
+	uint32_t v[TBL_READ_MAX][TBL_SHADOW_REGS];
+} pre;
+
+static void tbl_invalidate(void)
+{
+	shadow_valid = false;
+	pre.n = 0;
+}
+
+
+static void shadow_from(const uint32_t *v)
+{
+	memcpy(shadow, v, sizeof(shadow));
+	shadow[0] &= ~(uint32_t)TBL_EXECUTE;	/* polls end even if the bridge's timed out */
+	shadow_valid = true;
+}
+
+
+/* False: do the write the ordinary way */
+static bool tbl_read(uint32_t ctrl)
+{
+	static uint8_t r[TBL_READ_MAX * TBL_SHADOW_REGS * 4];
+	uint16_t entry = ctrl >> 16;
+	uint8_t count = 1;
+	size_t n;
+
+	if (tbl_read_unsupported)
+		return false;
+	if (((ctrl >> 8) & 0xff) == TBL_VLAN) {
+		if (pre.n && pre.cmd == (uint16_t)ctrl && entry >= pre.first && entry < pre.first + pre.n
+		    && ticks - pre.at < TBL_PREFETCH_TICKS) {
+			shadow_from(pre.v[entry - pre.first]);
+			return true;
+		}
+		count = entry < 0xfff ? (0xfff - entry > TBL_READ_MAX ? TBL_READ_MAX : 0xfff - entry) : 1;
+	}
+	uint8_t p[5] = { ctrl, ctrl >> 8, ctrl >> 16, ctrl >> 24, count };
+	int st = bridge_request(REQ_TBL_READ, p, 5, NULL, 0, r, sizeof(r), &n);
+	if (st == ST_UNKNOWN) {
+		tbl_read_unsupported = true;
+		return false;
+	}
+	if (st != ST_OK || n != (size_t)count * TBL_SHADOW_REGS * 4) {
+		/* Zeros, as for a failed read: the poll ends, the entry reads empty */
+		memset(shadow, 0, sizeof(shadow));
+		shadow_valid = true;
+		return true;
+	}
+	pre.n = 0;
+	for (uint8_t i = 0; i < count; i++)
+		for (uint8_t k = 0; k < TBL_SHADOW_REGS; k++)
+			pre.v[i][k] = get32(r + (i * TBL_SHADOW_REGS + k) * 4);
+	shadow_from(pre.v[0]);
+	if (count > 1) {
+		pre.cmd = ctrl;
+		pre.first = entry;
+		pre.n = count;
+		pre.at = ticks;
+	}
+	return true;
+}
+
+
 void reg_read(uint16_t reg_addr)
 {
 	uint8_t p[2] = { reg_addr, reg_addr >> 8 };
@@ -293,6 +378,14 @@ void reg_read(uint16_t reg_addr)
 	size_t n;
 	uint32_t v = 0;
 
+	if (shadow_valid) {
+		for (uint8_t k = 0; k < TBL_SHADOW_REGS; k++) {
+			if (tbl_regs[k] == reg_addr) {
+				sfr_put32(shadow[k]);
+				return;
+			}
+		}
+	}
 	/* The bridge leaves the seconds counter alone; RTLPlayground's 8051
 	 * firmware advanced it in its tick, so here it reads our uptime. */
 	if (reg_addr == RTL837X_REG_SEC_COUNTER)
@@ -319,6 +412,11 @@ void reg_write(uint16_t reg_addr)
 
 	if (reg_addr == RTL837X_REG_SEC_COUNTER)
 		return;
+	if (reg_addr == RTL837X_TBL_CTRL && (p[2] & (TBL_WRITE | TBL_EXECUTE)) == TBL_EXECUTE
+	    && tbl_read(get32(p + 2)))
+		return;
+	/* Any write may change what a table read returns */
+	tbl_invalidate();
 	bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL);
 }
 
@@ -454,12 +552,13 @@ void sds_write_v(uint8_t sds_id, uint8_t page, uint8_t reg, uint16_t v)
 }
 
 
-/* SerDes modes follow links and SFP modules on the 8051, which owns them */
+/* The 8051 owns the SerDes and runs sds_config() itself */
 void sds_config(uint8_t sds, uint8_t mode)
 {
-	(void)sds;
-	(void)mode;
-	print_string("SerDes modes are set by the bridge firmware\n");
+	uint8_t p[2] = { sds, mode };
+
+	if (bridge_request(REQ_SDS_CONFIG, p, 2, NULL, 0, NULL, 0, NULL) != ST_OK)
+		print_string("SerDes configuration failed\n");
 }
 
 
@@ -610,27 +709,39 @@ void flash_write_bytes(__xdata uint8_t *src)
 }
 
 
-static void flash_not_here(void)
+/* The flash's ID registers are the 8051's to read: it runs the same
+ * functions of rtl837x_flash.c and returns what they print */
+static void flash_id(char what, uint32_t addr)
 {
-	print_string("The bridge doesn't give access to the flash's ID registers\n");
+	uint8_t p[5] = { what, addr, addr >> 8, addr >> 16, addr >> 24 };
+	char text[129];
+	size_t n;
+
+	if (bridge_request(REQ_FLASH_ID, p, 5, NULL, 0, text, sizeof(text) - 1, &n) != ST_OK) {
+		print_string("The bridge doesn't answer FLASH_ID\n");
+		return;
+	}
+	text[n] = 0;
+	print_string_x(text);
 }
 
 
 void flash_read_jedecid(void)
 {
-	flash_not_here();
+	flash_id('j', 0);
 }
 
 
 void flash_read_uid(void)
 {
-	flash_not_here();
+	flash_id('u', 0);
 }
 
 
 void flash_read_security(void)
 {
-	flash_not_here();
+	flash_id('s', flash_region.addr);
+	flash_region.addr += flash_region.len;
 }
 
 

@@ -1,6 +1,7 @@
 #ifndef _NET_H_
 #define _NET_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 void net_init(void);
@@ -13,5 +14,10 @@ void net_second(void);
 
 void httpd_init(void);
 void httpd_second(void);
+struct altcp_tls_config;
+bool httpd_tls_start(struct altcp_tls_config *conf);
+void httpd_tls_stop(void);
+
+void snmp_second(void);
 
 #endif

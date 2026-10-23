@@ -10,17 +10,45 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c rtl837x_port.c rtl837x_st
 	rtl837x_lacp.c rtl837x_igmp.c rtl837x_lldp.c rtl837x_bandwidth.c rtl837x_storm.c \
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
-SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c \
+SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c \
 	$(BUILD)/web_assets.c sim.c
-SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h \
+SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
 	-DRTLP_HOST_TEST -DMACHINE_$(MACHINE) -DMACHINE_NAME=$(MACHINE) \
 	-Ddhcp_start=rtlp_dhcp_start -Ddhcp_stop=rtlp_dhcp_stop \
-	-w -Wl,--wrap=sfp_read_block
+	-w -Wl,--wrap=sfp_read_block -Wl,--wrap=handle_sfp
 
-all: $(BUILD)/test_link $(BUILD)/sim
+# test_tls needs mbedTLS's sources: the Pico SDK's copy, if PICO_SDK_PATH is set
+# and test_snmp lwIP's, from the same place
+MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
+LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp)
+
+all: $(BUILD)/test_link $(BUILD)/sim $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
 	python3 run_sim.py $(BUILD)/sim
+ifneq ($(PICO_SDK_PATH),)
+	$(BUILD)/test_tls
+	python3 run_snmp.py $(BUILD)/test_snmp
+else
+	@echo "SKIP  test_tls, test_snmp: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
+endif
+
+SNMP_SRC = asn1 core mib2 mib2_icmp mib2_interfaces mib2_ip mib2_snmp mib2_system mib2_tcp mib2_udp \
+	msg pbuf_stream scalar table traps
+LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c \
+	$(patsubst %,$(LWIP)/src/apps/snmp/snmp_%.c,$(SNMP_SRC))
+
+$(BUILD)/test_snmp: test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -Ilwip_host -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
+		'-DMODCHIP_VERSION="sim"' -o $@ test_snmp.c ../src/snmp.c ../src/snmp_mib.c $(LWIP_SRC)
+
+$(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/mbedtls_config.h mbedtls_test_config.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O2 -w -I../src -I$(MBEDTLS)/include -I$(MBEDTLS)/library \
+		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' -I. \
+		-o $@ test_tls.c ../src/tls_cert.c $(wildcard $(MBEDTLS)/library/*.c)
 
 $(BUILD)/test_link: test_link.c ../src/link.c ../src/link.h
 	@mkdir -p $(BUILD)

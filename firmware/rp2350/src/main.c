@@ -225,6 +225,25 @@ static void check_power(void)
 }
 
 
+/*
+ * mbedTLS's key generation and handshakes want more stack than the 4 KiB
+ * scratch bank the SDK gives core 0. The main loop runs on a stack in RAM
+ * instead, with MSPLIM at its bottom so an overflow faults rather than
+ * overwrites the heap.
+ */
+#define MAIN_STACK_SIZE		(32 * 1024)
+static uint64_t main_stack[MAIN_STACK_SIZE / 8];
+void main_loop(void);
+
+static void __attribute__((noreturn, noinline)) run_main_loop(void)
+{
+	uintptr_t bottom = (uintptr_t)main_stack, top = bottom + sizeof(main_stack);
+
+	__asm volatile("msr msplim, %0\n\tmsr msp, %1\n\tisb\n\tb main_loop" : : "r"(bottom), "r"(top) : "memory");
+	__builtin_unreachable();
+}
+
+
 int main(void)
 {
 	stdio_init_all();
@@ -241,6 +260,12 @@ int main(void)
 	httpd_init();
 	rtl_boot();
 
+	run_main_loop();
+}
+
+
+void __attribute__((noreturn, noinline, used)) main_loop(void)
+{
 	uint32_t tick_last = ticks;
 	uint32_t second_last = plat_uptime_s();
 	for (;;) {
@@ -270,6 +295,7 @@ int main(void)
 			rtl_second();
 			net_second();
 			httpd_second();
+			snmp_second();
 		}
 		led_update();
 	}

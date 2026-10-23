@@ -205,10 +205,73 @@ static void handle_button(void)
 }
 
 
-/* The module part of sfp_module_read() in sfp.c; the 8051 sets the SerDes */
+/* As sfp_rate_to_sds_config() in sfp.c */
+static uint8_t sfp_rate_to_sds(uint8_t rate)
+{
+	if (rate == 0x1 || rate == 0x2)
+		return SDS_100FX;
+	if (rate == 0xc || rate == 0xd)
+		return SDS_1000BX_FIBER;
+	if (rate >= 0x19 && rate <= 0x20)
+		return SDS_HSG;
+	if (rate >= 0x62)
+		return SDS_10GR;
+	return 0xff;
+}
+
+
+/*
+ * The 8051 sets the SerDes for a module from its EEPROM when it is
+ * inserted. A speed forced with "sfp <slot> <speed>" lives here, so it is
+ * applied on top, through the bridge's sds_config(). Reads byte 11-12 into
+ * sfp_buf; false if they don't answer.
+ */
+static bool sfp_apply_speed(uint8_t sfp)
+{
+	uint8_t rate;
+
+	if (!sfp_read_block(sfp, 11, 2))
+		return false;
+	rate = sfp_buf[1];
+	if (sfp_speed[sfp] == SFP_SPEED_AUTO)
+		return true;
+	if (sfp_speed[sfp] == SFP_SPEED_100M)
+		rate = 0x1;
+	else if (sfp_speed[sfp] == SFP_SPEED_1G)
+		rate = 0xc;
+	else if (sfp_speed[sfp] == SFP_SPEED_2G5)
+		rate = 0x19;
+	else if (sfp_speed[sfp] == SFP_SPEED_10G)
+		rate = 0x69;
+	if (sfp_rate_to_sds(rate) != 0xff)
+		sds_config(machine.sfp_port[sfp].sds, sfp_rate_to_sds(rate));
+	return true;
+}
+
+
+/*
+ * "sfp <slot> <speed>" marks the slot empty and calls handle_sfp() to read
+ * the module again. Here the bridge reports the slots, so put its state
+ * back and apply the speed (linked in place of sfp.c's handle_sfp()).
+ */
+static uint8_t sfp_pins_bridge = 0x33;
+
+void __wrap_handle_sfp(void)
+{
+	for (uint8_t sfp = 0; sfp < machine.n_sfp && sfp < 2; sfp++) {
+		uint8_t bit = 1 << (sfp << 2);
+
+		if ((sfp_pins_last & bit) && !(sfp_pins_bridge & bit) && !sfp_apply_speed(sfp))
+			print_string("SFP: the module's EEPROM doesn't answer\n");
+	}
+	sfp_pins_last = sfp_pins_bridge;
+}
+
+
+/* The module part of sfp_module_read() in sfp.c */
 static bool sfp_read_module(uint8_t sfp)
 {
-	if (!sfp_read_block(sfp, 11, 2))
+	if (!sfp_apply_speed(sfp))
 		return false;
 	print_string("  Rate: "); print_byte(sfp_buf[1]);
 	print_string("  Encoding: "); print_byte(sfp_buf[0]);
@@ -289,7 +352,8 @@ void rtl_on_sfp(uint8_t pins)
 
 		if ((was & 1) && !(now & 1)) {
 			print_string("\n<MODULE INSERTED>  Slot: "); write_char('1' + sfp); write_char('\n');
-			sfp_read_due[sfp] = 1 + SFP_WAKE_TICKS / SYS_TICK_HZ;
+			/* after the 8051 has woken the module and set the SerDes */
+			sfp_read_due[sfp] = 2 + SFP_WAKE_TICKS / SYS_TICK_HZ;
 			sfp_read_tries[sfp] = 0;
 		} else if (!(was & 1) && (now & 1)) {
 			print_string("\n<MODULE REMOVED>  Slot: "); write_char('1' + sfp); write_char('\n');
@@ -302,7 +366,7 @@ void rtl_on_sfp(uint8_t pins)
 			print_string("\n<SFP-RX LOS>  Slot: "); write_char('1' + sfp); write_char('\n');
 		}
 	}
-	sfp_pins_last = pins;
+	sfp_pins_last = sfp_pins_bridge = pins;
 }
 
 

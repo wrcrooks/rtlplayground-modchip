@@ -18,6 +18,7 @@
 #define EVENT_SLOTS		24
 
 #define TIMEOUT_MS		150	/* 100 ms, the protocol's figure, plus a full frame's transfer */
+#define TIMEOUT_SLOW_MS		500	/* 64 table entries, about 1.3 KB back; SerDes setup */
 #define TIMEOUT_FLASH_MS	3000	/* a sector erase on a W25Q40 takes up to 400 ms, slow writes more */
 #define TRIES			3
 
@@ -243,6 +244,8 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 		return BRIDGE_TIMEOUT;
 	if (type == REQ_FLASH_ERASE || type == REQ_FLASH_WRITE)
 		timeout = TIMEOUT_FLASH_MS;
+	else if (type == REQ_TBL_READ || type == REQ_FLASH_ID || type == REQ_SDS_CONFIG)
+		timeout = TIMEOUT_SLOW_MS;
 	/* A frame sent twice is worse than a frame lost; the peer retransmits */
 	if (type == REQ_TX_FRAME || type == REQ_REBOOT)
 		tries = 1;

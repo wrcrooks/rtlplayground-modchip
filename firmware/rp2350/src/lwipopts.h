@@ -34,7 +34,10 @@
 #define LWIP_AUTOIP			0
 #define LWIP_NETIF_HOSTNAME		1
 #define LWIP_NETIF_STATUS_CALLBACK	1
-#define LWIP_STATS			0
+/* lwIP's MIB-2 groups count through the stats */
+#define LWIP_STATS			1
+#define MIB2_STATS			1
+#define LWIP_STATS_DISPLAY		0
 #define LWIP_SINGLE_NETIF		1
 
 /* The bridge link carries about 97 KB/s, so a few full segments in flight
@@ -57,6 +60,20 @@ struct pbuf;
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset);
 #define LWIP_HOOK_DHCP_PARSE_OPTION(netif, dhcp, state, msg, msg_type, option, len, pbuf, offset) \
 	net_dhcp_option(option, len, pbuf, offset)
+
+/* HTTPS: the web server runs on altcp, plain or through mbedTLS */
+#define LWIP_ALTCP			1
+#define LWIP_ALTCP_TLS			1
+#define LWIP_ALTCP_TLS_MBEDTLS		1
+#define ALTCP_MBEDTLS_AUTHMODE		MBEDTLS_SSL_VERIFY_NONE
+
+/* SNMPv2c; snmp.c owns the UDP socket in place of snmp_raw.c */
+#define LWIP_SNMP			1
+#define SNMP_USE_RAW			1
+#define SNMP_LWIP_MIB2			1
+#define SNMP_LWIP_MIB2_SYSDESC		"RTLPlayground mod chip"
+#define SNMP_LWIP_ENTERPRISE_OID	0
+#define SNMP_MAX_VALUE_SIZE		128
 
 #define LWIP_DEBUG			0
 
