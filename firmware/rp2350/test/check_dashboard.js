@@ -93,7 +93,7 @@ check(groups.length === 2 && groups[0].mbps === 2500 && groups[0].ports.map((p) 
 check(ctx.speedName(2500) === "2.5 Gb/s" && ctx.speedName(10000) === "10 Gb/s", "group titles");
 const pc = vm.runInContext("portCharts", ctx);
 check(pc[1] === pc[4] && pc[5] === pc[6] && pc[1] !== pc[5], "ports 1-4 share a chart, 5-6 another");
-check(pc[4].badges[4].textContent === "down" && pc[1].badges[1].textContent === "1G", "state badges: port 4 down, port 1 at 1G");
+check(pc[4].badges[4].textContent === "Down" && pc[1].badges[1].textContent === "1G", "state badges: port 4 down, port 1 at 1G");
 check(pc[1].series().length === 8, "the 2.5 Gb/s chart overlays 4 ports, in and out");
 
 // A switch reboot clears the counters: no negative rates

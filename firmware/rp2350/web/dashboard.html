@@ -122,7 +122,7 @@ td.num,th.num{text-align:right}
   </section>
 
   <section class="card">
-    <h2>Errors and discards <span class="hint">per second</span></h2>
+    <h2>Errors and Discards <span class="hint">per second</span></h2>
     <div class="chart"><canvas id="c-errs"></canvas></div>
     <div class="legend" id="l-errs"></div>
   </section>
@@ -134,28 +134,28 @@ td.num,th.num{text-align:right}
   </section>
 
   <section class="card">
-    <h2>MAC table <span class="hint">learned addresses</span></h2>
+    <h2>MAC Table <span class="hint">learned addresses</span></h2>
     <div class="chart"><canvas id="c-mac"></canvas></div>
     <div class="legend" id="l-mac"></div>
   </section>
 
   <section class="card wide">
-    <h2>SFP modules <span class="hint">diagnostics, refreshed every 30 s</span></h2>
+    <h2>SFP Modules <span class="hint">diagnostics, refreshed every 30 s</span></h2>
     <div class="scroll"><table id="sfp"><thead><tr><th>Slot</th><th>Module</th><th class="num">Temp</th><th class="num">Vcc</th>
-      <th class="num">TX bias</th><th class="num">TX power</th><th class="num">RX power</th><th>Signal</th></tr></thead><tbody></tbody></table></div>
+      <th class="num">TX Bias</th><th class="num">TX Power</th><th class="num">RX Power</th><th>Signal</th></tr></thead><tbody></tbody></table></div>
     <div class="chart short" style="margin-top:10px"><canvas id="c-optics"></canvas></div>
     <div class="legend" id="l-optics"></div>
   </section>
 
   <section class="card">
-    <h2>Mod chip</h2>
+    <h2>Mod Chip</h2>
     <div class="tiles" id="t-mod"></div>
     <div class="chart short"><canvas id="c-mod"></canvas></div>
     <div class="legend" id="l-mod"></div>
   </section>
 
   <section class="card">
-    <h2>Bridge link <span class="hint">RP2350 &harr; 8051, about 97 KB/s each way</span></h2>
+    <h2>Bridge Link <span class="hint">RP2350 &harr; 8051, about 97 KB/s each way</span></h2>
     <div class="tiles" id="t-bridge"></div>
     <div class="chart short"><canvas id="c-bridge"></canvas></div>
     <div class="legend" id="l-bridge"></div>
@@ -180,7 +180,7 @@ td.num,th.num{text-align:right}
  */
 var POLL_MS=2000, KEEP_MS=3700e3, DELAY_MS=2200;
 var SPEED_VAR=["","--s10","--s100","--s1000","--s1000","--s10g","--s2g5","--s5g"];
-var SPEED_TXT=["down","10M","100M","1G","500M","10G","2.5G","5G"];
+var SPEED_TXT=["Down","10M","100M","1G","500M","10G","2.5G","5G"];
 var win=300e3, offset=null, prev=null, ports=[], charts=[];
 var S={};	/* series: key -> [[time, value], ...], time in local ms */
 
@@ -445,52 +445,52 @@ function I(i){return function(){return col(i)}}
 function build(){
   built=true;
   new Chart("c-traffic",{legend:"l-traffic",stack:true,mirror:true,fmt:bps,floor:1000,series:function(){
-    var s=[];ports.forEach(function(p,i){s.push(G(S2("rx"+p.n,p.name+" in",I(i),bps),"p"+p.n,p.name));});
-    ports.forEach(function(p,i){s.push(G(S2("tx"+p.n,p.name+" out",I(i),bps,true),"p"+p.n,p.name));});return s}});
+    var s=[];ports.forEach(function(p,i){s.push(G(S2("rx"+p.n,p.name+" In",I(i),bps),"p"+p.n,p.name));});
+    ports.forEach(function(p,i){s.push(G(S2("tx"+p.n,p.name+" Out",I(i),bps,true),"p"+p.n,p.name));});return s}});
   /* One chart per top speed, the ports overlaid; colours as in the traffic chart */
   var pc=$("ports");pc.innerHTML="";
   speedGroups(ports).forEach(function(g){
     var id="grp"+g.mbps,box=el("div",{class:"port"},[
-      el("div",{class:"hd"},[el("span",{class:"nm",text:speedName(g.mbps)+" ports"})]),
+      el("div",{class:"hd"},[el("span",{class:"nm",text:speedName(g.mbps)+" Ports"})]),
       el("div",{class:"chart"},[el("canvas",{id:"c-"+id})]),
       el("div",{class:"legend",id:"l-"+id})]);
     pc.appendChild(box);
     var series=[];
     g.ports.forEach(function(p){
-      var i=ports.indexOf(p),rx=G(S2("rx"+p.n,p.name+" in",I(i),bps),"p"+p.n,p.n+" "+p.name);
+      var i=ports.indexOf(p),rx=G(S2("rx"+p.n,p.name+" In",I(i),bps),"p"+p.n,p.n+" "+p.name);
       rx.port=p.n;series.push(rx);
-      series.push(G(S2("tx"+p.n,p.name+" out",I(i),bps,true),"p"+p.n,p.n+" "+p.name));
+      series.push(G(S2("tx"+p.n,p.name+" Out",I(i),bps,true),"p"+p.n,p.n+" "+p.name));
     });
     var ch=new Chart("c-"+id,{legend:"l-"+id,fmt:bps,mirror:true,fill:false,floor:1000,series:series});
     g.ports.forEach(function(p){portCharts[p.n]=ch});
   });
   new Chart("c-pkts",{legend:"l-pkts",fmt:pps,mirror:true,floor:10,series:[
-    S2("p_iu","in unicast",I(0),pps),S2("p_im","in multicast",I(5),pps),S2("p_ib","in broadcast",I(2),pps),
-    S2("p_ou","out unicast",I(1),pps,true),S2("p_om","out multicast",I(4),pps,true),S2("p_ob","out broadcast",I(9),pps,true)]});
+    S2("p_iu","In Unicast",I(0),pps),S2("p_im","In Multicast",I(5),pps),S2("p_ib","In Broadcast",I(2),pps),
+    S2("p_ou","Out Unicast",I(1),pps,true),S2("p_om","Out Multicast",I(4),pps,true),S2("p_ob","Out Broadcast",I(9),pps,true)]});
   new Chart("c-errs",{legend:"l-errs",fmt:function(v){return v.toFixed(v<10?2:0)},floor:1,series:[
-    S2("e_err","errors",C("--bad"),function(v){return v.toFixed(2)+"/s"}),
-    S2("e_dis","discards",C("--warn"),function(v){return v.toFixed(2)+"/s"})]});
+    S2("e_err","Errors",C("--bad"),function(v){return v.toFixed(2)+"/s"}),
+    S2("e_dis","Discards",C("--warn"),function(v){return v.toFixed(2)+"/s"})]});
   new Chart("c-temp",{legend:"l-temp",zero:false,fill:false,fmt:function(v){return v.toFixed(0)},series:function(){
-    var s=[S2("t_sw","switch chip",I(3),function(v){return v.toFixed(1)+" °C"}),
-      S2("t_mod","mod chip",I(4),function(v){return v.toFixed(1)+" °C"})];
+    var s=[S2("t_sw","Switch Chip",I(3),function(v){return v.toFixed(1)+" °C"}),
+      S2("t_mod","Mod Chip",I(4),function(v){return v.toFixed(1)+" °C"})];
     (prev?prev.sfp:[]).forEach(function(x){if(x.ddm)s.push(S2("t_sfp"+x.slot,"SFP "+x.slot,I(5+x.slot),function(v){return v.toFixed(1)+" °C"}))});
     return s}});
-  new Chart("c-mac",{legend:"l-mac",fmt:n0,floor:4,series:[S2("mac","entries",I(0),n0)]});
+  new Chart("c-mac",{legend:"l-mac",fmt:n0,floor:4,series:[S2("mac","Entries",I(0),n0)]});
   new Chart("c-optics",{legend:"l-optics",zero:false,fill:false,fmt:function(v){return v.toFixed(1)},series:function(){
     var s=[];(prev?prev.sfp:[]).forEach(function(x){if(!x.ddm)return;
       s.push(S2("o_tx"+x.slot,"SFP "+x.slot+" TX",I(x.slot),function(v){return v.toFixed(2)+" dBm"}));
       s.push(S2("o_rx"+x.slot,"SFP "+x.slot+" RX",I(x.slot+4),function(v){return v.toFixed(2)+" dBm"}))});return s}});
   new Chart("c-mod",{legend:"l-mod",fmt:function(v){return v.toFixed(0)+"%"},max:100,fill:false,series:[
-    S2("m_load","main loop load",I(0),function(v){return v.toFixed(1)+"%"}),
-    S2("m_heap","heap used",I(4),function(v){return v.toFixed(1)+"%"})]});
+    S2("m_load","Main Loop Load",I(0),function(v){return v.toFixed(1)+"%"}),
+    S2("m_heap","Heap Used",I(4),function(v){return v.toFixed(1)+"%"})]});
   new Chart("c-bridge",{legend:"l-bridge",fmt:n0,fill:false,floor:5,series:[
-    S2("b_load","link load %",I(0),function(v){return v.toFixed(1)+"%"}),
-    S2("b_rxf","CPU-port frames in/s",I(1),n1),S2("b_txf","frames out/s",I(2),n1),
-    S2("b_req","requests/s",I(5),n1),S2("b_to","timeouts/s",C("--bad"),n1),
-    S2("b_lerr","link errors/s",C("--warn"),n1),S2("b_drop","frames dropped/s",I(6),n1)]});
+    S2("b_load","Link Load %",I(0),function(v){return v.toFixed(1)+"%"}),
+    S2("b_rxf","CPU-Port Frames In/s",I(1),n1),S2("b_txf","CPU-Port Frames Out/s",I(2),n1),
+    S2("b_req","Requests/s",I(5),n1),S2("b_to","Timeouts/s",C("--bad"),n1),
+    S2("b_lerr","Link Errors/s",C("--warn"),n1),S2("b_drop","Frames Dropped/s",I(6),n1)]});
   new Chart("c-proto",{legend:"l-proto",fmt:n0,fill:false,floor:2,marks:function(){return marks},series:[
-    S2("i_groups","IGMP groups",I(0),n0),S2("i_join","IGMP joins/min",I(1),n1),S2("i_leave","leaves/min",I(3),n1),
-    S2("l_up","LACP ports up",I(4),n0)]});
+    S2("i_groups","IGMP Groups",I(0),n0),S2("i_join","IGMP Joins/min",I(1),n1),S2("i_leave","IGMP Leaves/min",I(3),n1),
+    S2("l_up","LACP Ports Up",I(4),n0)]});
 }
 
 function tiles(id,list){
@@ -505,7 +505,7 @@ function render(m){
   /* Each port's state, now: its link speed, down, or switched off */
   m.ports.forEach(function(p){
     var ch=portCharts[p.n],bd=ch&&ch.badges[p.n];if(!bd)return;
-    bd.textContent=!p.en?"off":p.link?SPEED_TXT[p.link]||"up":"down";
+    bd.textContent=!p.en?"Off":p.link?SPEED_TXT[p.link]||"Up":"Down";
     bd.style.background=p.en&&p.link?css(SPEED_VAR[p.link]):"";bd.style.color=p.en&&p.link?"#fff":"";
   });
   var sb=$("sfp").tBodies[0];sb.innerHTML="";
@@ -519,16 +519,16 @@ function render(m){
   });
   if(!m.sfp.length)sb.appendChild(el("tr",{},[el("td",{class:"mut",text:"No SFP slots on this switch"})]));
   tiles("t-mod",[["Load",n1(m.modchip.load)+"<small> %</small>"],
-    ["Heap free",Math.round(m.modchip.heap_free/1024)+"<small> KiB</small>"],
+    ["Heap Free",Math.round(m.modchip.heap_free/1024)+"<small> KiB</small>"],
     ["Temperature",n1(m.modchip.temp)+"<small> °C</small>"],["Uptime",dur(m.uptime)]]);
   var b=m.bridge;
-  tiles("t-bridge",[["State",m.bridge_up?"up":"<span style='color:var(--bad)'>down</span>"],
-    ["Link load",n1(b.link_load)+"<small> %</small>"],["Timeouts",String(b.timeouts)],
-    ["Link errors",String(b.link_errors+b.bridge_link_errors)],["8051 dropped",String(b.rx_dropped)],
-    ["8051 uptime",dur(b.uptime)]]);
-  tiles("t-proto",[["STP",m.stp.on?"on":"off"],["Root port",!m.stp.on?"–":m.stp.root_port===255?"this switch":String(m.stp.root_port)],
-    ["Topology changes",String(m.stp.tc)],["LACP",m.lacp.on?m.lacp.up+"<small> ports up</small>":"off"],
-    ["LACP changes",String(m.lacp.changes)],["IGMP snooping",m.igmp.on?m.igmp.groups+"<small> groups</small>":"off"]]);
+  tiles("t-bridge",[["State",m.bridge_up?"Up":"<span style='color:var(--bad)'>Down</span>"],
+    ["Link Load",n1(b.link_load)+"<small> %</small>"],["Timeouts",String(b.timeouts)],
+    ["Link Errors",String(b.link_errors+b.bridge_link_errors)],["8051 Dropped",String(b.rx_dropped)],
+    ["8051 Uptime",dur(b.uptime)]]);
+  tiles("t-proto",[["STP",m.stp.on?"On":"Off"],["Root Port",!m.stp.on?"–":m.stp.root_port===255?"This Switch":String(m.stp.root_port)],
+    ["Topology Changes",String(m.stp.tc)],["LACP",m.lacp.on?m.lacp.up+"<small> ports up</small>":"Off"],
+    ["LACP Changes",String(m.lacp.changes)],["IGMP Snooping",m.igmp.on?m.igmp.groups+"<small> groups</small>":"Off"]]);
   charts.forEach(function(c){if(c.values)c.values()});
 }
 
