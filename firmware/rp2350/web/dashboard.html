@@ -524,7 +524,8 @@ function render(m){
   tiles("t-bridge",[["State",m.bridge_up?"Up":"<span style='color:var(--bad)'>Down</span>"],
     ["Link Load",n1(b.link_load)+"<small> %</small>"],["Timeouts",String(b.timeouts)],
     ["Link Errors",String(b.link_errors+b.bridge_link_errors)],["8051 Dropped",String(b.rx_dropped)],
-    ["8051 Uptime",dur(b.uptime)]]);
+    ["8051 Uptime",dur(b.uptime)],
+    ["Registers Via",!m.t3||!m.t3.enabled?"Bridge":"T3 I²C<small> "+m.t3.khz+" kHz"+(m.t3.errors?", "+m.t3.errors+" errors":"")+"</small>"]]);
   tiles("t-proto",[["STP",m.stp.on?"On":"Off"],["Root Port",!m.stp.on?"–":m.stp.root_port===255?"This Switch":String(m.stp.root_port)],
     ["Topology Changes",String(m.stp.tc)],["LACP",m.lacp.on?m.lacp.up+"<small> ports up</small>":"Off"],
     ["LACP Changes",String(m.lacp.changes)],["IGMP Snooping",m.igmp.on?m.igmp.groups+"<small> groups</small>":"Off"]]);

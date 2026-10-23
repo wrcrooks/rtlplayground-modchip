@@ -330,6 +330,10 @@ size_t metrics_json(char *buf, size_t max)
 	    (unsigned long)bs->resets, (unsigned long)bs->rx_frames, (unsigned long)bs->tx_frames,
 	    (unsigned long)bs->uart_rx_bytes, (unsigned long)bs->uart_tx_bytes, (unsigned long)bs->uptime_s,
 	    bs->bridge_rx_dropped, bs->bridge_link_errors);
+	struct plat_t3 t3;
+	plat_t3_status(&t3);
+	add(&o, "\"t3\":{\"up\":%s,\"enabled\":%s,\"khz\":%u,\"reads\":%lu,\"writes\":%lu,\"errors\":%lu},",
+	    b(t3.up), b(t3.enabled), t3.khz, (unsigned long)t3.reads, (unsigned long)t3.writes, (unsigned long)t3.errors);
 	add(&o, "\"events\":[");
 	uint8_t n = rtl_link_events(ev, 32);
 	for (uint8_t i = 0; i < n; i++)

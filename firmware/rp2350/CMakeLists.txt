@@ -117,6 +117,8 @@ add_executable(modchip
     src/httpd.c
     src/upload.c
     src/upload_bridge.c
+    src/t3.c
+    src/t3_route.c
     src/tls.c
     src/tls_cert.c
     src/snmp.c
@@ -157,6 +159,7 @@ target_link_libraries(modchip
     pico_rand
     hardware_adc
     hardware_flash
+    hardware_i2c
     hardware_uart
     hardware_watchdog
     pico_lwip_core

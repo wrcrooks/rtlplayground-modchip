@@ -93,6 +93,11 @@ uint8_t rtl_link_events(struct rtl_link_event *out, uint8_t max)
 	return 1;
 }
 
+void plat_t3_status(struct plat_t3 *s)
+{
+	*s = (struct plat_t3){ .up = true, .enabled = true, .khz = 400, .reads = 1000, .writes = 200, .errors = 1 };
+}
+
 void plat_sys_read(struct plat_sys *s)
 {
 	s->load_pm = 125;

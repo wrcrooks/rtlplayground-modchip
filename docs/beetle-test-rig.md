@@ -11,12 +11,12 @@ and the reset driver.
 - CPU-port frames both ways, IP, DHCP and ARP;
 - the web UI, `/cmd`, HTTPS, SNMP and the Graphs dashboard;
 - STP, LACP, IGMP and LLDP on real links;
-- config replay and SFP diagnostics.
+- config replay and SFP diagnostics;
+- register access over T3 (I²C), if wired: `t3 test`, then `t3 on`.
 
 **What it doesn't:**
 - the mod chip board itself: the ideal diode, its reset driver, its flash and crystal;
-- its fit on the headers;
-- register access over T3, which the firmware doesn't use yet.
+- its fit on the headers.
 
 ## Parts
 
@@ -24,6 +24,7 @@ and the reset driver.
 - 1 × 100 Ω resistor (series in the Beetle → switch UART line)
 - 2 × 100 kΩ resistors (3.3 V sense divider)
 - optional, for the reset line: a 2N7002 (or a 2N3904 with a 4.7 kΩ base resistor), 1 kΩ, 100 kΩ
+- optional, for T3: 2 × 4.7 kΩ pull-ups
 - thin wire, or pin headers on the switch's T3/T5
 
 ## Wiring
@@ -37,8 +38,8 @@ and the reset driver.
 | GND | — | T5 pin 2 (GND) | the only power connection between the boards |
 | 26 (A0) | GP26, ADC0 | middle of a 100k/100k divider from T3 pin 4 (switch 3.3 V) to GND | the switch-powered sense |
 | 27 (A1) | GP27 | reset driver, below | optional |
-| 4 (D4) | GP4, I2C0 SDA | T3 pin 3 (SDA) | only for `read_chip_id.py` |
-| 5 (D5) | GP5, I2C0 SCL | T3 pin 1, square pad (SCL) | only for `read_chip_id.py` |
+| 4 (D4) | GP4, I2C0 SDA | T3 pin 3 (SDA) | optional: `read_chip_id.py`, and the firmware's `t3 test` / `t3 on` |
+| 5 (D5) | GP5, I2C0 SCL | T3 pin 1, square pad (SCL) | optional, as above |
 
 ```
 T5 pin 1 (8051 TX) ─────────────────────── GP1  (Beetle pad 1)
@@ -47,6 +48,12 @@ T5 pin 2 (GND) ─────────────────────�
 
 T3 pin 4 (3.3 V) ──[100k]──┬──[100k]── GND
                            └────────────── GP26 (Beetle pad 26)
+
+T3, optional (pull-ups to the switch's 3.3 V, not to the Beetle's):
+T3 pin 3 (SDA) ──┬─────────────────────── GP4  (Beetle pad 4)
+                 └──[4.7k]── T3 pin 4 (3.3 V)
+T3 pin 1 (SCL) ──┬─────────────────────── GP5  (Beetle pad 5)
+                 └──[4.7k]── T3 pin 4 (3.3 V)
 ```
 
 **Power the Beetle from USB, not from the switch.** Don't connect the switch's 3.3 V to the Beetle's
@@ -145,6 +152,8 @@ answers at that address, served by the Beetle.
 - **Graphs:** in the menu.
 - **HTTPS:** `https on` in the command box, then https://192.168.10.247.
 - **SNMP:** `snmp on`, then `snmpwalk -v2c -c public 192.168.10.247 1.3.6.1.2.1.2`.
+- **T3** (if wired): `t3 test` compares register access over T3 with the bridge's, including a write
+  each way. If it passes, `t3 on 400` moves plain register access onto T3.
 
 ## Things to note on the bench
 

@@ -97,6 +97,47 @@ static void put32(uint8_t *p, uint32_t v)
 	p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24;
 }
 
+/* A register write as the chip takes it, whichever path it came by */
+static void sim_reg_write(uint16_t a, uint32_t v)
+{
+	regs[a] = v;
+	if (a == 0x5cac)
+		tbl_ctrl(regs[a]);
+	if (a == 0x0f60)
+		stat_get(regs[a]);
+	/* Engines the modules poll finish at once here */
+	if (a == 0x5cac || a == 0x0418)		/* TBL_CTRL, I2C_CTRL */
+		regs[a] &= ~1u;
+	else if (a == 0x53d4)			/* L2_TBL_FLUSH_CTRL */
+		regs[a] = 0;
+}
+
+/* T3: the same registers over I2C, behaving as told */
+enum { T3_GOOD, T3_DEAD, T3_DROPS_WRITES, T3_FAILS } t3_mode = T3_DEAD;
+static uint32_t t3_ops, bridge_reg_ops;
+
+bool t3_bus_up(void) { return true; }
+void t3_bus_speed(uint16_t khz) { (void)khz; }
+
+bool t3_bus_read(uint16_t reg, uint32_t *v)
+{
+	if (t3_mode == T3_DEAD || t3_mode == T3_FAILS)
+		return false;
+	t3_ops++;
+	*v = regs[reg];
+	return true;
+}
+
+bool t3_bus_write(uint16_t reg, uint32_t v)
+{
+	if (t3_mode == T3_DEAD || t3_mode == T3_FAILS)
+		return false;
+	t3_ops++;
+	if (t3_mode == T3_GOOD)
+		sim_reg_write(reg, v);
+	return true;	/* T3_DROPS_WRITES: acknowledged, without effect */
+}
+
 int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size_t n2,
 		   void *reply, size_t rmax, size_t *rlen)
 {
@@ -109,25 +150,15 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 	switch (type) {
 	case REQ_REG_READ:
 		if (n != 2) return ST_BAD_LENGTH;
+		bridge_reg_ops++;
 		put32(r, regs[p[0] | p[1] << 8]);
 		out = 4;
 		break;
 	case REQ_REG_WRITE:
 		if (n != 6) return ST_BAD_LENGTH;
-	{
-		uint16_t a = p[0] | p[1] << 8;
-		regs[a] = get32(p + 2);
-		if (a == 0x5cac)
-			tbl_ctrl(regs[a]);
-		if (a == 0x0f60)
-			stat_get(regs[a]);
-		/* Engines the modules poll finish at once here */
-		if (a == 0x5cac || a == 0x0418)		/* TBL_CTRL, I2C_CTRL */
-			regs[a] &= ~1u;
-		else if (a == 0x53d4)			/* L2_TBL_FLUSH_CTRL */
-			regs[a] = 0;
+		sim_reg_write(p[0] | p[1] << 8, get32(p + 2));
+		bridge_reg_ops++;
 		break;
-	}
 	case REQ_PHY_READ: {
 		if (n != 4 || p[0] > 15) return ST_BAD_ARGUMENT;
 		uint16_t v = phy[p[0]][p[1] & 31][p[2] & 63];
@@ -574,6 +605,55 @@ int main(void)
 	      && sf.tx_power == 5012 && sf.rx_power == 2512, "SFP diagnostics read");
 	rtl_sfp_read(1, &sf);
 	check(!sf.present, "SFP slot 2 empty");
+
+	/* T3: "t3 test" before anything moves over */
+	t3_mode = T3_DEAD;
+	cmd("t3 test");
+	check(strstr((char *)outbuf, "no answer on T3") != NULL, "t3 test: no answer on the bus");
+	t3_mode = T3_DROPS_WRITES;
+	regs[0x06f4] = 0x1234;
+	cmd("t3 test");
+	check(strstr((char *)outbuf, "PASS  chip ID matches") && strstr((char *)outbuf, "FAIL  written over T3")
+	      && strstr((char *)outbuf, "keep register access on the bridge") && regs[0x06f4] == 0x1234,
+	      "t3 test: writes without effect are caught, the test register restored");
+	t3_mode = T3_GOOD;
+	cmd("t3 test");
+	check(strstr((char *)outbuf, "PASS  written over T3, read back over the bridge")
+	      && strstr((char *)outbuf, "PASS  written over the bridge, read back over T3") && strstr((char *)outbuf, "T3 works")
+	      && regs[0x06f4] == 0x1234, "t3 test: reads and writes both ways");
+	cmd("t3");
+	check(strstr((char *)outbuf, "T3 off") != NULL, "the test leaves register access on the bridge");
+
+	/* "t3 on": plain register access over T3, batched reads still over the bridge */
+	cmd("t3 on 400");
+	uint32_t b0 = bridge_reg_ops, t0 = t3_ops;
+	rtl_http_get("/status.json");
+	check(bridge_reg_ops == b0 && t3_ops > t0, "t3 on: /status.json's registers go over T3, none over the bridge");
+	int sr0 = stat_reads;
+	struct rtl_port ptmp[RTL_MAX_PORTS];
+	rtl_ports_read(ptmp, RTL_MAX_PORTS);
+	/* (STAT_READ itself is off since the older-bridge test above: the
+	 * firmware remembers a bridge without it until it restarts) */
+	(void)sr0;
+	check(ptmp[0].in_octets == stat_value(machine.phys_to_log_port[0], 0)
+	      && ptmp[0].in_errors == (uint32_t)(stat_value(machine.phys_to_log_port[0], 48) >> 32),
+	      "  counters read right with T3 on");
+	r1 = requests;
+	rtl_http_get("/vlanlist");
+	outbuf[slen] = 0;
+	check(strstr((char *)outbuf, "\"id\":10,") && requests - r1 < 100, "  /vlanlist still through TBL_READ");
+
+	/* T3 failing: each access falls back to the bridge, then T3 is dropped */
+	t3_mode = T3_FAILS;
+	regs[0x0340] = 0x1680;	/* TM_RESULT: 45 degC */
+	for (int i = 0; i < 4; i++)
+		rtl_status_read(&st);
+	check(st.chip_temp == 0x1680, "T3 failing: values still right, from the bridge");
+	cmd("t3");
+	check(strstr((char *)outbuf, "T3 off") && !strstr((char *)outbuf, "errors 0x00000000"),
+	      "  and after 10 failures in a row, register access is back on the bridge");
+	t3_mode = T3_GOOD;
+	cmd("t3 off");
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

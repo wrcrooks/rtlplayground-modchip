@@ -106,10 +106,44 @@ back to isolated if that rail drops, for example with the board on a bench probe
 ## Not done yet
 
 - **RP2350 firmware updates through the web UI.** Flash the RP2350 by SWD, or over USB on the Beetle.
-- **Register access over T3 (I²C).** Every access goes over the UART for now. T3 needs its write
-  format confirmed on hardware first (ARCHITECTURE.md, bring-up step 2).
 - **TLS 1.3.** HTTPS speaks TLS 1.2. Every current browser accepts that.
 - **SNMP writes, v3 and traps.** The agent is read-only SNMPv2c.
+
+## Register access over T3
+
+Register reads and writes go over the bridge by default. T3, the RTL8372's I²C slave interface at
+0x5C, is the other path: I2C1 on GP10/GP11 on the mod chip, I2C0 on GP4/GP5 on the Beetle.
+
+```
+t3 test                   compare T3 with the bridge: chip ID, and a write/read-back each way
+t3 on [100|400|1000]      plain register access over T3, at that many kHz (default 100)
+t3                        on or off, speed, reads, writes and errors
+t3 off                    back to the bridge
+```
+
+**`t3 test`** is bring-up step 2 (ARCHITECTURE.md).
+- **What it does:** reads the chip ID over both paths, then writes the seconds-counter register over
+  T3 and reads it back over the bridge, and the other way round. It restores the register afterwards.
+- **What it doesn't do:** move register access anywhere. Run `t3 on` only once it passes.
+- **Why a write test:** the write format (register address high byte first, the value low byte first,
+  one transfer) comes from [vDorst/rtl-rs](https://github.com/vDorst/rtl-rs). It isn't confirmed on
+  this switch yet.
+
+**With T3 on:**
+- **Plain register access** goes over T3.
+- **Batched reads stay on the bridge:** `TBL_READ` and `STAT_READ`, since one bridge request there
+  replaces dozens of register accesses.
+- **Failures:** a failed transfer falls back to the bridge for that access, and 10 failures in a row
+  turn T3 off with a console message.
+
+**Status.** The Bridge Link card on the dashboard shows which path registers use, and `/metrics.json`
+has the counts.
+
+**Saving it.** `t3 on` is a command like any other, so the web UI saves it with the config, and it
+comes back on at the next replay.
+
+**Pull-ups.** The mod chip has 4.7 kΩ pull-ups on T3. On a test rig, wire them to the switch's 3.3 V
+(T3 pin 4).
 
 ## Switch firmware updates
 
@@ -289,6 +323,9 @@ without it they are skipped. `run_snmp.py` also needs net-snmp's command-line to
   - a forced SFP speed reaching `SDS_CONFIG`;
   - the `https` and `snmp` commands, and the history that saves them;
   - the ports as the SNMP agent reads them;
+  - `t3 test` against a T3 that doesn't answer, one that takes writes without effect, and one that
+    works; `t3 on` moving plain register access over while batched reads stay on the bridge; and a
+    failing T3 falling back, then turning itself off;
   - all ports' counters in one `STAT_READ`, the same as counter by counter from an older bridge;
   - link events, IGMP membership from v2 and v3 reports and leaves, STP root and LACP partner
     changes, SFP diagnostics.

@@ -21,4 +21,6 @@ void httpd_tls_stop(void);
 
 void snmp_second(void);
 
+void t3_power(bool on);		/* the T3 bus, with the switch's power */
+
 #endif

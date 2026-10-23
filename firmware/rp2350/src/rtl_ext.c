@@ -10,6 +10,10 @@
  *   snmp community <name>
  *   snmp location <text>
  *   snmp contact <text>
+ *   t3                       status of register access over T3 (I2C)
+ *   t3 on [100|400|1000]     register access over T3, at that many kHz
+ *   t3 off                   register access over the bridge
+ *   t3 test                  check T3 reads and writes against the bridge
  *
  * They reach the parser through its CMD_PARSER_EXT hook, so like its own
  * commands they land in the command history and the saved configuration.
@@ -108,6 +112,100 @@ static bool parse_snmp(void)
 }
 
 
+bool rtl_bridge_reg_read(uint16_t reg, uint32_t *v);
+bool rtl_bridge_reg_write(uint16_t reg, uint32_t v);
+
+/* RTL837X_REG_SEC_COUNTER: RTLPlayground's seconds counter, which the
+ * bridge leaves alone, so a test can write it */
+#define T3_TEST_REG		0x06f4
+
+static void t3_line(bool ok, __code const char *what)
+{
+	print_string(ok ? "  PASS  " : "  FAIL  ");
+	print_string(what);
+	write_char('\n');
+}
+
+
+/*
+ * Bring-up step 2: the chip ID read over T3 and over the bridge must match,
+ * and a value written on one path must read back on the other. Register
+ * access stays where it is; turn T3 on afterwards if all passes.
+ */
+static void t3_test(void)
+{
+	uint32_t a, b, orig;
+	bool ok = true;
+
+	if (!plat_t3_raw_read(RTL837X_REG_CHIP_ID, &a)) {
+		ext_error("no answer on T3: check SDA/SCL, the pull-ups to the switch's 3.3 V, and that the IF_SEL straps select I2C\n");
+		return;
+	}
+	print_string("T3 chip ID ");
+	print_long(a);
+	write_char('\n');
+	ok &= rtl_bridge_reg_read(RTL837X_REG_CHIP_ID, &b) && a == b;
+	t3_line(ok, "chip ID matches the bridge's");
+	if (!ok || !rtl_bridge_reg_read(T3_TEST_REG, &orig)) {
+		ext_error("T3 reads don't match the bridge\n");
+		return;
+	}
+	bool w1 = plat_t3_raw_write(T3_TEST_REG, 0x5a5a1234) && rtl_bridge_reg_read(T3_TEST_REG, &b) && b == 0x5a5a1234;
+	t3_line(w1, "written over T3, read back over the bridge");
+	bool w2 = rtl_bridge_reg_write(T3_TEST_REG, 0xa5a5edcb) && plat_t3_raw_read(T3_TEST_REG, &a) && a == 0xa5a5edcb;
+	t3_line(w2, "written over the bridge, read back over T3");
+	rtl_bridge_reg_write(T3_TEST_REG, orig);
+	if (!w1 || !w2) {
+		ext_error("T3 writes don't work this way: keep register access on the bridge\n");
+		return;
+	}
+	print_string("T3 works; \"t3 on 400\" moves register access over\n");
+}
+
+
+static bool parse_t3(void)
+{
+	struct plat_t3 st;
+
+	if (cmd_words_len == 1) {
+		plat_t3_status(&st);
+		print_string("T3 ");
+		print_string(!st.up ? "down (switch unpowered)" : st.enabled ? "on" : "off");
+		print_string(", ");
+		itoa_short(st.khz);
+		print_string(" kHz, reads ");
+		print_long(st.reads);
+		print_string(", writes ");
+		print_long(st.writes);
+		print_string(", errors ");
+		print_long(st.errors);
+		write_char('\n');
+	} else if (cmd_compare(1, "on") && cmd_words_len <= 3) {
+		uint16_t khz = 0;
+		if (cmd_words_len == 3) {
+			if (cmd_compare(2, "100"))
+				khz = 100;
+			else if (cmd_compare(2, "400"))
+				khz = 400;
+			else if (cmd_compare(2, "1000"))
+				khz = 1000;
+			else {
+				ext_error("t3 on [100|400|1000]\n");
+				return true;
+			}
+		}
+		plat_t3_enable(true, khz);
+	} else if (cmd_words_len == 2 && cmd_compare(1, "off")) {
+		plat_t3_enable(false, 0);
+	} else if (cmd_words_len == 2 && cmd_compare(1, "test")) {
+		t3_test();
+	} else {
+		ext_error("t3 [on [100|400|1000]|off|test]\n");
+	}
+	return true;
+}
+
+
 /* CMD_PARSER_EXT, see CMakeLists.txt: true if the command was ours */
 bool rtl_cmd_ext(void)
 {
@@ -115,6 +213,8 @@ bool rtl_cmd_ext(void)
 		return parse_https();
 	if (cmd_compare(0, "snmp"))
 		return parse_snmp();
+	if (cmd_compare(0, "t3"))
+		return parse_t3();
 	return false;
 }
 

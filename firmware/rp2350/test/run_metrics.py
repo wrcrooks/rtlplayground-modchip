@@ -48,6 +48,7 @@ def main():
     check(not m["sfp"][1]["present"], "an empty slot")
     check(m["modchip"]["load"] == 12.5 and m["modchip"]["temp"] == 38.2, "mod chip load and temperature")
     check(m["bridge"]["link_load"] == 10.0 and m["bridge"]["frames_ps"] == 20, "bridge link load, frames/s")
+    check(m["t3"] == {"up": True, "enabled": True, "khz": 400, "reads": 1000, "writes": 200, "errors": 1}, "T3 status")
     check(m["events"] == [{"seq": 1, "t": 4000, "port": 4, "link": 0, "mbps": 0}], "link events")
     print("FAILED" if failures else "all passed")
     return 1 if failures else 0

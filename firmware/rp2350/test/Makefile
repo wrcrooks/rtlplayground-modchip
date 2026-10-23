@@ -10,7 +10,7 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c rtl837x_port.c rtl837x_st
 	rtl837x_lacp.c rtl837x_igmp.c rtl837x_lldp.c rtl837x_bandwidth.c rtl837x_storm.c \
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
-SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c \
+SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
 	$(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \

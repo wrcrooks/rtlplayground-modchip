@@ -390,9 +390,32 @@ void reg_read(uint16_t reg_addr)
 	 * firmware advanced it in its tick, so here it reads our uptime. */
 	if (reg_addr == RTL837X_REG_SEC_COUNTER)
 		v = plat_uptime_s();
+	else if (plat_t3_read(reg_addr, &v))
+		;	/* over T3, when enabled ("t3 on") */
 	else if (bridge_request(REQ_REG_READ, p, 2, NULL, 0, r, 4, &n) == ST_OK && n == 4)
 		v = get32(r);
 	sfr_put32(v);
+}
+
+
+/* The bridge's REG_READ/REG_WRITE, whatever the routing: for "t3 test" */
+bool rtl_bridge_reg_read(uint16_t reg, uint32_t *v)
+{
+	uint8_t p[2] = { reg, reg >> 8 }, r[4];
+	size_t n;
+
+	if (bridge_request(REQ_REG_READ, p, 2, NULL, 0, r, 4, &n) != ST_OK || n != 4)
+		return false;
+	*v = get32(r);
+	return true;
+}
+
+
+bool rtl_bridge_reg_write(uint16_t reg, uint32_t v)
+{
+	uint8_t p[6] = { reg, reg >> 8, v, v >> 8, v >> 16, v >> 24 };
+
+	return bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL) == ST_OK;
 }
 
 
@@ -417,7 +440,8 @@ void reg_write(uint16_t reg_addr)
 		return;
 	/* Any write may change what a table read returns */
 	tbl_invalidate();
-	bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL);
+	if (!plat_t3_write(reg_addr, get32(p + 2)))
+		bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL);
 }
 
 

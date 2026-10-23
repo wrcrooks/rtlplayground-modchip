@@ -122,8 +122,15 @@ A rough estimate, from published Cortex-M benchmarks rather than measurement on 
   this board.
 - **Register format.** The address is 16 bits, high byte first; data is 32 bits, low byte first (see
   `doc/devices/SWTG024AS.md` in RTLPlayground). `firmware/micropython/read_chip_id.py` checks the read path.
-- **Write format.** Unconfirmed: the doc shows the device address repeated mid-write. Check it on the
-  register the bridge leaves unused (`RTL837X_REG_SEC_COUNTER`, 0x06f4) before relying on writes.
+- **Write format.** Very likely one plain 6-byte transfer: register address high byte first, then the
+  value low byte first, with no repeated device address. The doc suggested a repeat.
+  [vDorst/rtl-rs](https://github.com/vDorst/rtl-rs), a Rust library for this same slave interface,
+  writes this way. Its SFP-EEPROM, PHY and SerDes access through registers works only if those writes
+  do. The firmware uses this format; `t3 test` confirms it on the switch at hand (bring-up step 2).
+- **Other engines.** rtl-rs also shows the PHY (SMI, 0x6438-0x6444), SerDes (indirect, 0x3F8-0x400)
+  and SFP I²C master (0x414-0x424) engines reachable through plain registers, so over T3 too. The
+  bridge drives those engines, so the RP2350 leaves them to it: two masters interleaving on one engine
+  would corrupt each other's operations.
 - **Pull-ups.** The mod chip carries 4.7 kΩ pull-ups to the switch's 3.3 V. That's fine alongside any
   the switch board may have.
 - **Empty footprints U4 and U10.** These sit on the same lines: U4 is an I²C EEPROM and U10 an SPI
@@ -485,8 +492,9 @@ from the first outline as follows:
 - **One core.** Everything runs from one main loop, as on the 8051. Register access over the bridge
   blocks until the reply. The UART is drained into a ring by interrupt, and frames that arrive during
   a request are queued.
-- **Register access.** Over the UART only, for now. I²C on T3 can follow once its write format is
-  confirmed.
+- **Register access.** Over the UART by default. `t3 on` moves plain register reads and writes onto
+  I²C on T3. Batched table and counter reads (`TBL_READ`, `STAT_READ`) stay on the bridge. A failed
+  T3 transfer falls back to the bridge, and 10 in a row turn T3 off again.
 - **Configuration.** RTLPlayground's text config in one raw 4 KiB flash sector rather than LittleFS.
   It is replayed after each `HELLO`.
 - **Bridge requests.** Four were added for the firmware: `TBL_READ` (64 table reads per request),
@@ -504,8 +512,13 @@ arrive: same chip, same pins for the bridge link, and the full firmware.
 
 1. **Chip ID.** Run `firmware/micropython/read_chip_id.py` against T3 with RTLPlayground still running. Expect
    `0x8372xx00` and a ticking seconds counter.
-2. **Writes.** Confirm the T3 write format on `RTL837X_REG_SEC_COUNTER`, then raise the I²C clock to
-   400 kHz and 1 MHz.
+2. **Writes.** Once the bridge runs (steps 4-5), with the mod chip or the Beetle on it: `t3 test` on
+   the console.
+   - **What it checks:** that the chip ID reads the same over T3 and over the bridge, and that a write
+     to `RTL837X_REG_SEC_COUNTER` (0x06f4, which the bridge leaves unused) on either path reads back on
+     the other.
+   - **If it passes:** `t3 on 400`, then try 1 MHz.
+   - Before the bridge, `read_chip_id.py` checks the read path alone.
 3. **Check the headers with a meter.** T3, T5 and T8 pin 4 at 3.3 V; idle levels on T8.
 4. **Flash the bridge.** On the MokerLink, write
    `bridge-…-SWGT024_V2_0_UNMANAGED-compact-flash512k.bin` with the CH341A. Keep the stock and

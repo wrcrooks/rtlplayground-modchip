@@ -88,6 +88,7 @@ def metrics():
                    "timeouts": int(t) // 700, "link_errors": 0, "events_dropped": 0, "rx_overruns": 0, "resets": 0,
                    "rx_frames": int(t * 25), "tx_frames": int(t * 20), "uart_rx": int(t * 9000),
                    "uart_tx": int(t * 4000), "uptime": int(t), "rx_dropped": 0, "bridge_link_errors": 0},
+        "t3": {"up": True, "enabled": True, "khz": 400, "reads": int(t * 25), "writes": int(t * 3), "errors": 0},
         "events": ev,
     }
 

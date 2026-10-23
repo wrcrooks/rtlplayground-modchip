@@ -43,6 +43,25 @@ enum { PLAT_SNMP_ENABLED, PLAT_SNMP_COMMUNITY, PLAT_SNMP_LOCATION, PLAT_SNMP_CON
 bool plat_snmp_set(int what, const char *value);
 const char *plat_snmp_get(int what);	/* ENABLED: non-NULL when on */
 
+/*
+ * T3: register access over the switch's I2C slave interface (t3.c), as an
+ * alternative to the bridge's REG_READ/REG_WRITE. The bus comes up with the
+ * switch's power; register access goes over it only once enabled.
+ */
+struct plat_t3 {
+	bool up;			/* the bus is configured */
+	bool enabled;			/* register access goes over it */
+	uint16_t khz;
+	uint32_t reads, writes, errors;
+};
+void plat_t3_enable(bool on, uint16_t khz);	/* khz 0: keep the speed */
+void plat_t3_status(struct plat_t3 *s);
+bool plat_t3_enabled(void);
+bool plat_t3_read(uint16_t reg, uint32_t *v);	/* counted; false: use the bridge */
+bool plat_t3_write(uint16_t reg, uint32_t v);
+bool plat_t3_raw_read(uint16_t reg, uint32_t *v);	/* whether enabled or not, for "t3 test" */
+bool plat_t3_raw_write(uint16_t reg, uint32_t v);
+
 /* ---- implemented by the RTLPlayground half (rtl_*.c) ---- */
 
 extern volatile uint32_t ticks;			/* 200 Hz, SYS_TICK_HZ */

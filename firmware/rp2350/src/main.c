@@ -255,10 +255,12 @@ static void check_power(void)
 		switch_powered = true;
 		printf("Switch powered, starting the bridge link\n");
 		bridge_init();
+		t3_power(true);
 	} else if (switch_powered && v < SENSE_OFF) {
 		switch_powered = false;
 		printf("Switch unpowered, releasing its pins\n");
 		bridge_deinit();
+		t3_power(false);
 	}
 }
 
