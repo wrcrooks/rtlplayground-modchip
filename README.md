@@ -52,3 +52,10 @@ make -C firmware/rp2350/test PICO_SDK_PATH=...   # framing, a simulated bridge, 
 python3 firmware/micropython/test_bridge_link.py
 python3 hardware/check_sch.py         # ERC, and every pin's net against hardware/expected-nets.json
 ```
+
+## Credits
+
+- [vDorst/rtl-rs](https://github.com/vDorst/rtl-rs), by vDorst: a Rust library and CLI for the RTL837x's
+  slave interface. Its I²C transactions are the reference for the firmware's register access over T3
+  (`t3 on`, `t3 test`), above all the write format, which RTLPlayground's notes left open. It also
+  shows that the PHY, SerDes and SFP engines can be reached through plain registers.
