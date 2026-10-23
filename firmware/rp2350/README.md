@@ -154,7 +154,7 @@ click a legend entry to hide a series. The window is 5 minutes, 15 minutes or an
 | SFP modules | Temperature, supply voltage, laser bias, TX and RX power in dBm, LOS; the powers charted | live only |
 | Mod chip | Main loop load, heap use, temperature, uptime | load and heap |
 | Bridge link | Link load (the busier direction of the UART), CPU-port frames/s in and out, requests/s, timeouts, link errors, frames the 8051 dropped | load and frames/s |
-| Protocols | STP state, root port and topology changes (marked on the chart), LACP ports up and partner changes, IGMP groups, and joins and leaves per minute | IGMP groups |
+| Protocols | STP state, root port and topology changes (marked on the chart), LACP partner changes, IGMP groups, and joins and leaves per minute | IGMP groups |
 
 **Data.** The page loads `/history.bin` once, then polls `/metrics.json` every 2 s. Rates come
 from counter deltas between polls, so a missed poll costs no accuracy.

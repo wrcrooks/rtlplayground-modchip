@@ -388,7 +388,7 @@ function ingest(m){
   if(m.ports.length){push("t_sw",t,m.switch.temp);push("mac",t,m.switch.mac)}
   push("t_mod",t,m.modchip.temp);push("m_load",t,m.modchip.load);
   push("m_heap",t,100*(1-m.modchip.heap_free/m.modchip.heap_total));
-  push("b_load",t,m.bridge.link_load);push("i_groups",t,m.igmp.groups);push("l_up",t,m.lacp.up);
+  push("b_load",t,m.bridge.link_load);push("i_groups",t,m.igmp.groups);
   m.sfp.forEach(function(s){
     if(!s.ddm)return;
     push("t_sfp"+s.slot,t,s.temp);
@@ -489,8 +489,7 @@ function build(){
     S2("b_req","Requests/s",I(5),n1),S2("b_to","Timeouts/s",C("--bad"),n1),
     S2("b_lerr","Link Errors/s",C("--warn"),n1),S2("b_drop","Frames Dropped/s",I(6),n1)]});
   new Chart("c-proto",{legend:"l-proto",fmt:n0,fill:false,floor:2,marks:function(){return marks},series:[
-    S2("i_groups","IGMP Groups",I(0),n0),S2("i_join","IGMP Joins/min",I(1),n1),S2("i_leave","IGMP Leaves/min",I(3),n1),
-    S2("l_up","LACP Ports Up",I(4),n0)]});
+    S2("i_groups","IGMP Groups",I(0),n0),S2("i_join","IGMP Joins/min",I(1),n1),S2("i_leave","IGMP Leaves/min",I(3),n1)]});
 }
 
 function tiles(id,list){
