@@ -21,6 +21,7 @@
 #include "cmd_parser.h"
 #include "cmd_editor.h"
 #include "sfp.h"
+#include "boot.h"
 #include "dhcp.h"
 #include "dns.h"
 #include "ntp.h"
@@ -30,6 +31,7 @@
 
 #include "bridge.h"
 #include "plat.h"
+#include "rtl_metrics.h"
 
 #define STP_TICK_STEP	(SYS_TICK_HZ / STP_HZ)
 #define STP_CATCH_UP	8
@@ -293,6 +295,7 @@ void rtl_second(void)
 {
 	if (!up)
 		return;
+	rtl_metrics_second();
 	handle_button();
 	for (uint8_t sfp = 0; sfp < 2; sfp++) {
 		if (!sfp_read_due[sfp] || --sfp_read_due[sfp])
@@ -329,6 +332,9 @@ void rtl_poll(void)
 
 void rtl_on_link(const uint8_t *links)
 {
+	rtl_metrics_link(links[0] | links[1] << 8 | links[2] << 16 | (uint32_t)links[3] << 24,
+			 links[4] | links[5] << 8 | links[6] << 16 | (uint32_t)links[7] << 24,
+			 links[8] | links[9] << 8 | links[10] << 16 | (uint32_t)links[11] << 24);
 	if (!memcmp(links, links_last, sizeof(links_last)))
 		return;
 	print_string("\n<new link: ");
@@ -427,6 +433,8 @@ uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 		}
 		return 0;
 	}
+	if (igmpEnabled && uip_buf[0] == 0x01 && uip_buf[1] == 0x00 && uip_buf[2] == 0x5e)
+		rtl_metrics_igmp(frame, len);
 	if (igmpEnabled && uip_buf[0] == 0x01 && uip_buf[1] == 0x00 && uip_buf[2] == 0x5e
 	    && igmp_packet_handler()) {
 		if (uip_len)

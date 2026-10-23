@@ -126,61 +126,13 @@ uint8_t rtl_port_count(void)
 }
 
 
-static uint64_t stat_read(uint8_t counter, uint8_t port)
-{
-	uint64_t v;
-
-	STAT_GET(counter, port);
-	reg_read_m(RTL837X_STAT_V_HIGH);
-	v = (uint64_t)((uint32_t)sfr_data[0] << 24 | (uint32_t)sfr_data[1] << 16 | sfr_data[2] << 8 | sfr_data[3]) << 32;
-	reg_read_m(RTL837X_STAT_V_LOW);
-	return v | ((uint32_t)sfr_data[0] << 24 | (uint32_t)sfr_data[1] << 16 | sfr_data[2] << 8 | sfr_data[3]);
-}
-
-
-/* phys counts from 1, as the web UI's port numbers do */
+/* One port; the SNMP agent and the dashboard read them all with rtl_ports_read() */
 bool rtl_port_read(uint8_t phys, struct rtl_port *p)
 {
-	if (phys < 1 || phys > rtl_port_count())
+	struct rtl_port all[RTL_MAX_PORTS];
+
+	if (phys < 1 || phys > rtl_ports_read(all, RTL_MAX_PORTS))
 		return false;
-	uint8_t i = machine.phys_to_log_port[phys - 1];
-
-	memset(p, 0, sizeof(*p));
-	if (port_names[i][0])
-		strncpy(p->name, port_names[i], sizeof(p->name) - 1);
-	else
-		snprintf(p->name, sizeof(p->name), "Port %u", phys);
-	p->sfp = machine.is_sfp[i] != 0;
-	if (p->sfp) {
-		p->enabled = true;
-	} else {
-		phy_read(i, PHY_MMD31, 0xa610);
-		p->enabled = SFR_DATA_8 == 0x20;
-	}
-
-	/* As send_status(): a link bit, then a speed nibble per port */
-	reg_read_m(RTL837X_REG_LINKS_STS);
-	if ((sfr_data[(i / 8) + 1] >> (i % 8)) & 1) {
-		uint8_t b;
-		reg_read_m(i < 8 ? RTL837X_REG_LINKS : RTL837X_REG_LINKS_89);
-		b = sfr_data[3 - ((i & 7) >> 1)];
-		p->link = ((i & 1) ? b >> 4 : b & 0xf) + 1;
-	}
-
-	/* Counter numbers as the web UI's MIB table; 32-bit ones come in pairs, first one high */
-	p->in_octets = stat_read(0, i);
-	p->out_octets = stat_read(1, i);
-	p->in_ucast = stat_read(2, i);
-	p->in_mcast = stat_read(3, i);
-	p->in_bcast = stat_read(4, i);
-	p->out_ucast = stat_read(5, i);
-	p->out_mcast = stat_read(6, i);
-	p->out_bcast = stat_read(7, i);
-	uint64_t v = stat_read(8, i);
-	p->out_discards = v >> 32;
-	p->in_discards = v;
-	v = stat_read(48, i);
-	p->in_errors = v >> 32;
-	p->out_errors = v;
+	*p = all[phys - 1];
 	return true;
 }

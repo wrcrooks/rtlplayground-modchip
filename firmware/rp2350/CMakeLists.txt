@@ -36,10 +36,11 @@ file(WRITE ${GEN}/version.h.new
     "#ifndef VERSION_H\n#define VERSION_H\n#define VERSION_SW \"modchip-${MODCHIP_VERSION}\"\n#define BUILD_DATE \"${BUILD_DATE}\"\n#endif\n")
 configure_file(${GEN}/version.h.new ${GEN}/version.h COPYONLY)
 
-# The web UI and the default config, from the RTLPlayground checkout
-file(GLOB RTLP_HTML ${RTLP}/html/*)
+# The web UI, the mod chip's own pages (web/) and the default config
+file(GLOB RTLP_HTML ${RTLP}/html/* ${CMAKE_CURRENT_LIST_DIR}/web/*)
 add_custom_command(OUTPUT ${GEN}/web_assets.c
-    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/tools/embed_web.py ${GEN}/web_assets.c ${RTLP}/html ${RTLP}/config.txt
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/tools/embed_web.py ${GEN}/web_assets.c ${RTLP}/config.txt
+            ${RTLP}/html ${CMAKE_CURRENT_LIST_DIR}/web
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/tools/embed_web.py ${RTLP_HTML} ${RTLP}/config.txt)
 
 # RTLPlayground's portable modules, compiled unchanged with its host-test
@@ -72,6 +73,7 @@ add_library(rtlp OBJECT
     src/rtl_app.c
     src/rtl_udp.c
     src/rtl_ext.c
+    src/rtl_metrics.c
 )
 target_include_directories(rtlp PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
@@ -108,11 +110,12 @@ add_executable(modchip
     src/snmp.c
     src/snmp_mib.c
     src/snmp_udp.c
+    src/metrics.c
     src/rtl_sfr.S
     ${GEN}/web_assets.c
     $<TARGET_OBJECTS:rtlp>)
 target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge)
-target_compile_definitions(modchip PRIVATE MODCHIP_VERSION="${MODCHIP_VERSION}")
+target_compile_definitions(modchip PRIVATE MODCHIP_VERSION="${MODCHIP_VERSION}" MODCHIP_LINK_BAUD=976562)
 target_compile_options(modchip PRIVATE -Wall)
 target_link_options(modchip PRIVATE -Wl,--wrap=sfp_read_block -Wl,--wrap=handle_sfp)
 # lwIP's SNMP core and MIB-2 groups, without its transport (snmp.c has its own)

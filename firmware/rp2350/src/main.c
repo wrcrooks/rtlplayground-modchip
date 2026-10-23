@@ -9,7 +9,9 @@
  */
 
 #include <stdio.h>
+#include <malloc.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "pico/flash.h"
 #include "pico/rand.h"
@@ -21,6 +23,7 @@
 
 #include "bridge.h"
 #include "net.h"
+#include "metrics.h"
 #include "plat.h"
 
 #define SYS_TICK_MS		5		/* RTLPlayground's SYS_TICK_HZ, 200 */
@@ -65,6 +68,41 @@ uint32_t plat_random32(void)
 uint32_t plat_uptime_s(void)
 {
 	return to_ms_since_boot(get_absolute_time()) / 1000;
+}
+
+
+uint32_t plat_ms(void)
+{
+	return to_ms_since_boot(get_absolute_time());
+}
+
+
+/* For the dashboard: main loop load, heap, the RP2350's own temperature */
+static uint16_t load_pm;
+static int16_t rp_temp;
+
+void plat_sys_read(struct plat_sys *s)
+{
+	extern char end, __HeapLimit;
+	struct mallinfo mi = mallinfo();
+	uint32_t total = &__HeapLimit - &end;
+	uint32_t used = (char *)sbrk(0) - &end;
+
+	s->load_pm = load_pm;
+	s->heap_total = total;
+	s->heap_free = total - used + mi.fordblks;
+	s->temp = rp_temp;
+}
+
+
+/* The sensor on ADC input 4: 0.706 V at 27 degC, -1.721 mV/degC (datasheet) */
+static void read_rp_temp(void)
+{
+	adc_select_input(ADC_TEMPERATURE_CHANNEL_NUM);
+	uint16_t raw = adc_read();
+	adc_select_input(MODCHIP_SW_SENSE_PIN - 26);
+	float v = raw * 3.3f / 4096;
+	rp_temp = (int16_t)((27 - (v - 0.706f) / 0.001721f) * 10);
 }
 
 
@@ -253,6 +291,7 @@ int main(void)
 	gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 	adc_init();
 	adc_gpio_init(MODCHIP_SW_SENSE_PIN);
+	adc_set_temp_sensor_enabled(true);
 	adc_select_input(MODCHIP_SW_SENSE_PIN - 26);
 
 	add_repeating_timer_ms(-SYS_TICK_MS, on_tick, NULL, &tick_timer);
@@ -268,15 +307,22 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 {
 	uint32_t tick_last = ticks;
 	uint32_t second_last = plat_uptime_s();
+	uint64_t busy_us = 0;
+
 	for (;;) {
+		uint64_t pass_start = time_us_64();
+		bool work;
+
 		check_power();
-		bridge_dispatch();
+		work = bridge_dispatch();
 		sys_check_timeouts();
 		net_poll();
 
 		int c = getchar_timeout_us(0);
-		if (c >= 0)
+		if (c >= 0) {
 			rtl_console_input(c);
+			work = true;
+		}
 		rtl_poll();
 
 		/* Catch up a few ticks at most, as RTLPlayground's timers do */
@@ -287,6 +333,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			tick_last++;
 			rtl_tick();
 			net_udp_poll();
+			work = true;
 		}
 
 		if (plat_uptime_s() != second_last) {
@@ -296,7 +343,15 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			net_second();
 			httpd_second();
 			snmp_second();
+			read_rp_temp();
+			metrics_second();
+			load_pm = busy_us > 1000000 ? 1000 : busy_us / 1000;
+			busy_us = 0;
+			work = true;
 		}
 		led_update();
+		/* The share of time spent on passes that had something to do */
+		if (work)
+			busy_us += time_us_64() - pass_start;
 	}
 }

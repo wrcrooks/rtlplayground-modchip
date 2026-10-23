@@ -78,6 +78,7 @@ static void uart_isr(void)
 		}
 		rx_ring[rx_head] = dr;
 		rx_head = next;
+		bridge_stats.uart_rx_bytes++;
 	}
 }
 
@@ -215,6 +216,9 @@ static int request_once(uint8_t type, const void *p1, size_t n1, const void *p2,
 	/* A delimiter first, so the 8051 discards a message cut short earlier */
 	uart_putc_raw(UART, 0);
 	uart_write_blocking(UART, tx_buf, len);
+	bridge_stats.uart_tx_bytes += len + 1;
+	if (type == REQ_TX_FRAME)
+		bridge_stats.tx_frames++;
 
 	absolute_time_t until = make_timeout_time_ms(timeout_ms + len / 64);
 	while (!reply_in && !time_reached(until)) {
@@ -373,9 +377,12 @@ void bridge_second(void)
 }
 
 
-void bridge_dispatch(void)
+bool bridge_dispatch(void)
 {
+	bool any = ev_count != 0;
+
 	bridge_service();
+	any |= ev_count != 0;
 	while (ev_count) {
 		uint16_t len = events[ev_tail].len;
 
@@ -392,6 +399,7 @@ void bridge_dispatch(void)
 			hello_now = true;
 			break;
 		case MSG_RX_FRAME:
+			bridge_stats.rx_frames++;
 			if (up && n > 8)
 				bridge_on_rx_frame(p, ev_cur + 10, n - 8);
 			break;
@@ -411,4 +419,5 @@ void bridge_dispatch(void)
 	}
 	if (hello_now && !up && running)
 		try_hello();
+	return any;
 }

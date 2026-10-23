@@ -17,6 +17,8 @@ What it runs:
   the device.
 - **SNMP.** A read-only SNMPv2c agent: MIB-2, with the switch's ports and their counters in the
   interfaces group and IF-MIB's `ifXTable`.
+- **Graphs.** A dashboard page with animated charts and an hour of history, in the style of
+  OPNsense's. It's linked as "Graphs" in the web UI's menu.
 - **Configuration.** Text commands, replayed after every `HELLO` from the bridge.
 - **Switch reset.** The reset button on the switch still works: hold it more than 3 s to restart, more
   than 10 s to restore the default config.
@@ -45,15 +47,19 @@ Around them:
 | `src/rtl_sfr.S` | Storage for the SFR bytes the modules read results from, laid out so `SFR_DATA_U16` overlaps `SFR_DATA_8`/`SFR_DATA_0` as on the 8051 |
 | `src/rtl_app.c` | `main()`'s setup after `HELLO`, the tick and second timers, CPU-port frame dispatch (STP, LACP, IGMP, then ARP/IPv4 to lwIP), `tcpip_output()` and the JSON route table |
 | `src/rtl_udp.c` | The slice of uIP's UDP API that `syslog.c`, `dns.c` and `ntp.c` use, so they run unchanged over lwIP |
-| `src/rtl_ext.c` | The `https` and `snmp` commands, and the port status and counters for the SNMP agent |
+| `src/rtl_ext.c` | The `https` and `snmp` commands |
+| `src/rtl_metrics.c` | What the dashboard and the SNMP agent read from the switch: ports and counters (one `STAT_READ`), chip temperature, MAC table size, SFP diagnostics, the link change timeline, STP/LACP/IGMP activity |
 | `src/plat.h` | The seam between the two halves. The shim redefines `__naked`, `__data` and similar words that the SDK and lwIP headers use, so neither half includes the other's headers |
 | `src/link.c`, `src/bridge.c` | Bridge protocol v1: COBS/CRC framing, UART RX by interrupt into a 16 KiB ring, one request in flight, unsolicited messages queued and dispatched from the main loop |
 | `src/net.c` | lwIP netif over `TX_FRAME`/`RX_FRAME`, the IP settings shared with the command line, lwIP's DHCP behind `dhcp_start()`, UDP sockets for `rtl_udp.c` |
 | `src/httpd.c` | The web server on lwIP's altcp API: plain TCP on port 80, TLS on port 443 |
 | `src/tls.c`, `src/tls_cert.c` | The HTTPS key and certificate: made with mbedTLS, kept in a flash sector, loaded into altcp_tls |
 | `src/snmp.c`, `src/snmp_mib.c`, `src/snmp_udp.c` | The SNMP agent on lwIP's SNMP core: settings, the MIB, the UDP socket (in place of lwIP's `snmp_raw.c`, so the agent can be switched off) |
+| `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json` and `/history.bin` |
+| `web/dashboard.html` | The dashboard page |
 | `src/main.c` | Power sensing, the 200 Hz tick, the status LED, the config sector, the main loop on its 32 KiB stack |
-| `tools/embed_web.py` | Gzips `html/` into the image, and embeds `config.txt` as the default config |
+| `tools/embed_web.py` | Gzips `html/` and `web/` into the image, adds the Graphs link to `index.html`, and embeds `config.txt` as the default config |
+| `tools/dashboard_preview.py` | The dashboard with simulated data, for working on it without a switch |
 
 **Main loop.** Everything runs from one loop on core 0, as on the 8051. A module's register access
 blocks until the bridge replies. Frames and events that arrive meanwhile are queued and handled on the
@@ -126,7 +132,56 @@ browser shows, the first time.
 **Protocol.** TLS 1.2 with ECDHE over X25519 or P-256, and AES-128-GCM, ChaCha20-Poly1305 or
 AES-256-GCM.
 
-**Memory.** Two TLS connections at a time, about 25 KB each (16 KiB in, 4 KiB out, plus state). A third waits for one to close.
+**Memory.** Two TLS connections at a time, about 25 KB each (16 KiB in, 4 KiB out, plus state).
+
+**Session resumption.** The server keeps 8 TLS sessions for an hour. A browser polling the
+dashboard resumes them instead of repeating the key exchange. A third waits for one to close.
+
+## Graphs
+
+`dashboard.html` (Graphs in the web UI's menu). The charts scroll smoothly; hover for values, and
+click a legend entry to hide a series. The window is 5 minutes, 15 minutes or an hour (`#300`, `#900`,
+`#3600` in the address).
+
+| Chart | What it shows | History |
+|---|---|---|
+| Traffic | All ports stacked, bits/s in above the line, out below | yes |
+| Ports | Each port's in and out, link speed | yes |
+| Packets | Packets/s over all ports: unicast, multicast and broadcast, in and out | yes |
+| Errors and discards | Per second, all ports | yes |
+| Links | Each port's speed over time, ticks at changes, and a list of the last changes | link state yes, changes since boot |
+| Temperatures | Switch chip, mod chip (the RP2350's sensor), SFP modules | chip and mod chip |
+| MAC table | Learned addresses | yes |
+| SFP modules | Temperature, supply voltage, laser bias, TX and RX power in dBm, LOS; the powers charted | live only |
+| Mod chip | Main loop load, heap use, temperature, uptime | load and heap |
+| Bridge link | Link load (the busier direction of the UART), CPU-port frames/s in and out, requests/s, timeouts, link errors, frames the 8051 dropped | load and frames/s |
+| Protocols | STP state, root port and topology changes (marked on the chart), LACP ports up and partner changes, IGMP groups, and joins and leaves per minute | IGMP groups |
+
+**Data.** The page loads `/history.bin` once, then polls `/metrics.json` every 2 s. Rates come
+from counter deltas between polls, so a missed poll costs no accuracy.
+
+**Sampling.** The firmware samples every 10 s whether anyone is watching, and keeps an hour of
+samples in RAM; they're lost at a reboot.
+- **RAM:** about 65 KB for six ports.
+- **`/history.bin`:** the same 65 KB, so about 0.7 s over the bridge link when the page opens.
+- **Layout:** in `src/metrics.c`.
+
+**Cost per poll.** A poll costs about 17 bridge requests:
+- **Counters:** one `STAT_READ` for all ports.
+- **Link state:** 3.
+- **Port enable:** one PHY read per copper port.
+- **Chip temperature and MAC table size:** the rest.
+
+SFP diagnostics are read every 30 s. Polls closer together than a second share one reading.
+
+**Sources of the less obvious numbers:**
+- **IGMP groups:** counted from the reports and leaves the CPU port sees while snooping is on;
+  membership ages out after 260 s.
+- **LACP partner changes:** a port's partner system, key or sync bit changing.
+- **Main loop load:** the share of time spent on loop passes that had something to do.
+
+**Previewing.** `python3 firmware/rp2350/tools/dashboard_preview.py` serves the page with
+simulated data at http://localhost:8080/dashboard.html.
 
 ## SNMP
 
@@ -184,7 +239,8 @@ make -C firmware/rp2350/test PICO_SDK_PATH=/path/to/pico-sdk
 ```
 
 `test_tls` and `test_snmp` build mbedTLS and lwIP from the SDK, so they need `PICO_SDK_PATH`;
-without it they are skipped. `run_snmp.py` also needs net-snmp's command-line tools.
+without it they are skipped. `run_snmp.py` also needs net-snmp's command-line tools, and
+`check_dashboard.js` needs Node.
 
 - **`test_link`** checks the framing against the frames the 8051's own `link.c` produces
   (`firmware/micropython/bridge_vectors.txt`).
@@ -202,10 +258,19 @@ without it they are skipped. `run_snmp.py` also needs net-snmp's command-line to
   - `flash j` through `FLASH_ID`;
   - a forced SFP speed reaching `SDS_CONFIG`;
   - the `https` and `snmp` commands, and the history that saves them;
-  - the ports as the SNMP agent reads them.
+  - the ports as the SNMP agent reads them;
+  - all ports' counters in one `STAT_READ`, the same as counter by counter from an older bridge;
+  - link events, IGMP membership from v2 and v3 reports and leaves, STP root and LACP partner
+    changes, SFP diagnostics.
+- **`test_metrics`** runs `metrics.c` over an hour of simulated traffic. It checks the history ring
+  and `/history.bin` against the traffic. `run_metrics.py` checks `/metrics.json`.
+- **`check_dashboard.js`** runs the dashboard's own script in Node on those two files. It checks the
+  series the charts draw from: rates from counter deltas, packet types, errors, SFP power in dBm, link
+  events, marks, and no negative rates after a counter reset.
 - **`test_tls`** builds mbedTLS on the host with the firmware's configuration, makes a key and
   certificate with `tls_cert.c`, then runs a handshake and a request for each cipher suite and curve.
-  The client verifies the certificate and the name.
+  The client verifies the certificate and the name. A second connection must resume the session
+  without a certificate or key exchange.
 - **`test_snmp`** runs the agent on the host: lwIP with the firmware's options, `snmp.c` and
   `snmp_mib.c`, six simulated ports, and an OS socket in place of `snmp_udp.c`. `run_snmp.py` then
   queries it with `snmpget`, `snmpwalk` and `snmpset`. It checks the system group, every `ifTable`

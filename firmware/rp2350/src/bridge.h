@@ -37,6 +37,10 @@ struct bridge_stats {
 	uint32_t events_dropped;	/* unsolicited messages lost to a full queue */
 	uint32_t rx_overruns;		/* bytes lost to a full UART ring */
 	uint32_t resets;		/* reset pulses sent */
+	uint32_t rx_frames;		/* frames from the CPU port */
+	uint32_t tx_frames;		/* frames sent with TX_FRAME */
+	uint32_t uart_rx_bytes;
+	uint32_t uart_tx_bytes;
 	uint32_t uptime_s;		/* from the last PING */
 	uint16_t bridge_rx_dropped;	/* frames the 8051 dropped, from the last PING */
 	uint16_t bridge_link_errors;	/* messages the 8051 dropped, from the last PING */
@@ -60,8 +64,8 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 
 /* Reads UART bytes and queues what arrives; safe anywhere outside an ISR */
 void bridge_service(void);
-/* Hands queued unsolicited messages to the handlers; main loop only */
-void bridge_dispatch(void);
+/* Hands queued unsolicited messages to the handlers; main loop only. True if any were */
+bool bridge_dispatch(void);
 /* HELLO, PING and reset handling; call once a second from the main loop */
 void bridge_second(void);
 

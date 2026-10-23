@@ -60,6 +60,15 @@ bool rtl_port_read(uint8_t phys, struct rtl_port *p)
 	return true;
 }
 
+uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
+{
+	uint8_t n = 0;
+
+	while (n < max && rtl_port_read(n + 1, &p[n]))
+		n++;
+	return n;
+}
+
 /* ---- the transport: an OS socket ---- */
 
 static int sock = -1;

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "machine.h"
 #include "bridge.h"
 #include "plat.h"
 
@@ -29,6 +30,24 @@ static bool old_bridge;			/* answer as a bridge from before TBL_READ */
 static int sds_configs;
 static uint8_t sds_last[2];
 static bool sfp_module;
+static int stat_reads;
+
+/* The MIB counters: a known value for each port and counter */
+static uint64_t stat_value(uint8_t port, uint8_t cnt)
+{
+	return (uint64_t)(port * 1000 + cnt) << 32 | (uint32_t)((cnt + 1) * 1000003u * (port + 1));
+}
+
+/* STAT_GET: REG_WRITE(STAT_GET, 0, 0, cnt >> 3, cnt << 5 | port << 1 | 1) */
+static void stat_get(uint32_t v)
+{
+	uint8_t cnt = ((v >> 8) & 0xff) << 3 | (v & 0xff) >> 5, port = (v >> 1) & 0xf;
+	uint64_t x = stat_value(port, cnt);
+
+	regs[0x0f64] = x >> 32;
+	regs[0x0f68] = x;
+	regs[0x0f60] = v & ~1u;
+}
 
 /* The table engine, enough of it for VLAN entries */
 static void tbl_ctrl(uint32_t v)
@@ -100,8 +119,10 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 		regs[a] = get32(p + 2);
 		if (a == 0x5cac)
 			tbl_ctrl(regs[a]);
+		if (a == 0x0f60)
+			stat_get(regs[a]);
 		/* Engines the modules poll finish at once here */
-		if (a == 0x5cac || a == 0x0418 || a == 0x0f60)	/* TBL_CTRL, I2C_CTRL, STAT_GET */
+		if (a == 0x5cac || a == 0x0418)		/* TBL_CTRL, I2C_CTRL */
 			regs[a] &= ~1u;
 		else if (a == 0x53d4)			/* L2_TBL_FLUSH_CTRL */
 			regs[a] = 0;
@@ -137,6 +158,12 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 			r[0] = 0x03;	/* encoding */
 			r[1] = 0x0d;	/* 1.3 GBd: 1G */
 		}
+		if (p[1] == 92)
+			r[0] = 0x40;	/* diagnostics implemented */
+		if (p[1] == (0x80 | 96) && p[2] == 10) {
+			static const uint8_t ddm[10] = { 0x23, 0x80, 0x80, 0xe8, 0x0c, 0x1c, 0x13, 0x94, 0x09, 0xd0 };
+			memcpy(r, ddm, 10);	/* 35.5 degC, 3.3 V, 6.2 mA, 501.2 uW, 251.2 uW */
+		}
 		out = p[2];
 		break;
 	case REQ_TBL_READ: {
@@ -153,6 +180,25 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 			put32(r + out + 12, regs[0x5cd4]);
 			put32(r + out + 16, regs[0x5cb0]);
 			out += 20;
+		}
+		break;
+	}
+	case REQ_STAT_READ: {
+		if (old_bridge)
+			return ST_UNKNOWN;
+		uint16_t pmask = p[0] | p[1] << 8;
+		if (n != 3u + p[2] || !p[2] || p[2] > STAT_READ_MAX)
+			return ST_BAD_ARGUMENT;
+		stat_reads++;
+		for (int port = 0; port < 16; port++) {
+			if (!(pmask & (1 << port)))
+				continue;
+			for (int i = 0; i < p[2]; i++) {
+				uint64_t x = stat_value(port, p[3 + i]);
+				put32(r + out, x);
+				put32(r + out + 4, x >> 32);
+				out += 8;
+			}
 		}
 		break;
 	}
@@ -206,6 +252,7 @@ uint32_t plat_random32(void) { return (uint32_t)random(); }
 void plat_sys_led(uint8_t state) { (void)state; }
 void plat_reboot(void) { printf("CHECK FAIL unexpected reboot\n"); exit(1); }
 uint32_t plat_uptime_s(void) { return uptime; }
+uint32_t plat_ms(void) { return uptime * 1000; }
 
 void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len)
 {
@@ -441,9 +488,90 @@ int main(void)
 
 	/* The ports as the SNMP agent reads them */
 	struct rtl_port port;
-	regs[0x0f68] = 1234;		/* STAT_V_LOW: every counter reads 1234 here */
-	check(rtl_port_count() == 6 && rtl_port_read(1, &port) && port.in_octets == 1234 && port.out_errors == 1234
-	      && !strcmp(port.name, "Port 1") && !rtl_port_read(7, &port), "port 1 of %u: counters, name", rtl_port_count());
+	check(rtl_port_count() == 6 && rtl_port_read(1, &port) && !strcmp(port.name, "Port 1") && !rtl_port_read(7, &port),
+	      "port 1 of %u: name", rtl_port_count());
+
+	/* All ports' counters in one STAT_READ; an older bridge gives the same, counter by counter */
+	struct rtl_port pfast[RTL_MAX_PORTS], pslow[RTL_MAX_PORTS];
+	uint32_t r1 = requests;
+	int sr = stat_reads;
+	uint8_t np = rtl_ports_read(pfast, RTL_MAX_PORTS);
+	uint32_t fast_req = requests - r1;
+	extern __code const struct machine machine;
+	uint8_t lp = machine.phys_to_log_port[0];
+	check(np == 6 && stat_reads == sr + 1 && pfast[0].in_octets == stat_value(lp, 0) && pfast[0].out_bcast == stat_value(lp, 7)
+	      && pfast[0].out_discards == (uint32_t)(stat_value(lp, 8) >> 32) && pfast[0].in_discards == (uint32_t)stat_value(lp, 8)
+	      && pfast[0].in_errors == (uint32_t)(stat_value(lp, 48) >> 32), "rtl_ports_read: counters from STAT_READ");
+	old_bridge = true;
+	r1 = requests;
+	rtl_ports_read(pslow, RTL_MAX_PORTS);
+	old_bridge = false;
+	check(!memcmp(pfast, pslow, sizeof(pfast[0]) * np), "an older bridge gives the same counters");
+	printf("COST ports+counters %u requests, %u without STAT_READ\n", fast_req, requests - r1);
+	check(fast_req < 15, "all ports and counters in %u requests", fast_req);
+
+	/* Link events from LINK messages: port 3's logical port comes up at 1G */
+	uint8_t l3 = machine.phys_to_log_port[2];
+	uint8_t lk[12] = { 0 };
+	uint32_t sts = l3 < 8 ? 1u << (16 + l3) : 1u << l3, links = (uint32_t)2 << (4 * (l3 & 7));
+	memcpy(lk, &sts, 4);
+	memcpy(lk + (l3 < 8 ? 4 : 8), &links, 4);
+	rtl_on_link(lk);
+	memset(lk, 0, sizeof(lk));
+	rtl_on_link(lk);
+	struct rtl_link_event evs[8];
+	uint8_t ne = rtl_link_events(evs, 8);
+	check(ne == 2 && evs[0].port == 3 && evs[0].link == 3 && evs[1].port == 3 && evs[1].link == 0 && evs[1].seq > evs[0].seq,
+	      "link events: port 3 up at 1G, then down");
+
+	/* IGMP membership from the reports the CPU port sees */
+	cmd("igmp on");
+	uint8_t ig[64] = { 0x01, 0x00, 0x5e, 0x01, 0x02, 0x03, 2, 2, 2, 2, 2, 2,
+			   0x88, 0x99, 0x04, 0x00, 0x00, 0x00, 0x00, 0x02,	/* CPU tag, port 2 */
+			   0x08, 0x00,						/* IPv4, no 802.1Q tag */
+			   0x46, 0, 0, 32, 0, 0, 0, 0, 1, 2, 0, 0, 10, 0, 0, 9, 239, 1, 2, 3, 0x94, 4, 0, 0,	/* router alert */
+			   0x16, 0, 0, 0, 239, 1, 2, 3 };
+	uint16_t vl;
+	struct rtl_status st;
+	rtl_rx_frame(ig, sizeof(ig), &vl);
+	rtl_status_read(&st);
+	check(st.igmp_on && st.igmp_groups == 1 && st.igmp_joins == 1, "IGMP: a v2 report joins a group");
+	ig[46] = 0x17;
+	rtl_rx_frame(ig, sizeof(ig), &vl);
+	rtl_status_read(&st);
+	check(st.igmp_groups == 0 && st.igmp_leaves == 1, "IGMP: a leave ends it");
+	uint8_t v3[80];
+	memcpy(v3, ig, 46);
+	uint8_t rec[] = { 0x22, 0, 0, 0, 0, 0, 0, 2,	/* v3 report, 2 records */
+			  4, 0, 0, 0, 239, 9, 9, 9,	/* TO_EXCLUDE {}: join */
+			  2, 0, 0, 0, 239, 8, 8, 8 };	/* IS_EXCLUDE {}: join */
+	memcpy(v3 + 46, rec, sizeof(rec));
+	rtl_rx_frame(v3, 46 + sizeof(rec), &vl);
+	rtl_status_read(&st);
+	check(st.igmp_groups == 2, "IGMP: a v3 report with two records");
+
+	/* STP root port and LACP partner changes, counted once a second */
+	extern uint8_t stp_root_port;
+	extern uint16_t lacp_partner_key[10];
+	extern uint8_t lacpEnabled;
+	uint32_t root0 = st.stp_root_changes, lacp0 = st.lacp_changes;
+	stp_root_port = 2;
+	lacpEnabled = 1;
+	ticks_run(200);
+	lacp_partner_key[1] = 0x1234;
+	ticks_run(200);
+	lacpEnabled = 0;
+	rtl_status_read(&st);
+	check(st.stp_root_changes > root0 && st.lacp_changes > lacp0, "STP root port and LACP partner changes counted");
+	check((st.chip_temp == (int16_t)regs[0x0340]) && st.mac_entries == 0, "chip temperature and MAC entries read");
+
+	/* SFP diagnostics from the module in slot 1 (inserted above) */
+	struct rtl_sfp sf;
+	rtl_sfp_read(0, &sf);
+	check(sf.present && sf.ddm && sf.temp == 35 * 256 + 128 && sf.vcc == 33000 && sf.bias == 3100
+	      && sf.tx_power == 5012 && sf.rx_power == 2512, "SFP diagnostics read");
+	rtl_sfp_read(1, &sf);
+	check(!sf.present, "SFP slot 2 empty");
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

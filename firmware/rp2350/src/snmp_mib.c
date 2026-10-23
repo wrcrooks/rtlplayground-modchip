@@ -33,13 +33,7 @@ static void ports_refresh(void)
 
 	if (ports_valid && now - ports_at < PORTS_MAX_AGE_MS)
 		return;
-	n_ports = 0;
-	if (bridge_is_up()) {
-		uint8_t n = rtl_port_count();
-		for (uint8_t i = 1; i <= n && i <= MAX_PORTS; i++)
-			if (rtl_port_read(i, &ports[n_ports]))
-				n_ports++;
-	}
+	n_ports = bridge_is_up() ? rtl_ports_read(ports, MAX_PORTS) : 0;
 	ports_at = now;
 	ports_valid = true;
 }

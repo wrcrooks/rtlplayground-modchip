@@ -14,6 +14,7 @@
 #include "lwip/altcp_tcp.h"
 #include "lwip/altcp_tls.h"
 
+#include "metrics.h"
 #include "net.h"
 #include "plat.h"
 #include "web_assets.h"
@@ -23,6 +24,7 @@
 #define RX_TIMEOUT_S		5
 #define CMD_LINE_MAX		127			/* CMD_BUF_SIZE - 1 */
 #define TLS_CONNS		2			/* each holds about 25 KB of mbedTLS buffers */
+#define METRICS_JSON_MAX	6144
 #define WRITE_MAX		2048			/* below MBEDTLS_SSL_OUT_CONTENT_LEN: one TLS record */
 
 enum { ST_FREE, ST_RX, ST_TX };
@@ -248,6 +250,55 @@ static void serve_asset(struct conn *c, const struct web_asset *a)
 }
 
 
+/* A response we build here: header, then body (taken over and freed) */
+static void respond_body(struct conn *c, const char *mime, uint8_t *body, size_t len)
+{
+	char hdr[160];
+	int n = snprintf(hdr, sizeof(hdr), "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %lu\r\n"
+			 "Cache-Control: no-store\r\nConnection: close\r\n\r\n", mime, (unsigned long)len);
+
+	free(c->resp);
+	c->resp = malloc(n + len);
+	if (!c->resp) {
+		free(body);
+		respond_str(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+		return;
+	}
+	memcpy(c->resp, hdr, n);
+	memcpy(c->resp + n, body, len);
+	free(body);
+	c->resp_len = n + len;
+	c->resp_off = 0;
+	c->state = ST_TX;
+	conn_push(c);
+}
+
+
+/* The dashboard's data, metrics.c */
+static bool handle_metrics(struct conn *c, const char *path)
+{
+	size_t len;
+	uint8_t *body;
+
+	if (!strcmp(path, "/metrics.json")) {
+		body = malloc(METRICS_JSON_MAX);
+		if (!body)
+			return false;
+		len = metrics_json((char *)body, METRICS_JSON_MAX);
+		respond_body(c, "application/json", body, len);
+		return true;
+	}
+	if (!strcmp(path, "/history.bin")) {
+		body = metrics_history(&len);
+		if (!body)
+			return false;
+		respond_body(c, "application/octet-stream", body, len);
+		return true;
+	}
+	return false;
+}
+
+
 static void handle_get(struct conn *c, char *target)
 {
 	char path[64] = "";
@@ -271,6 +322,8 @@ static void handle_get(struct conn *c, char *target)
 		send_unauthorized(c);
 		return;
 	}
+	if (handle_metrics(c, path))
+		return;
 	if (!strcmp(path, "/reset")) {
 		c->reboot_after = true;
 		send_ok(c);

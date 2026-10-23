@@ -15,6 +15,7 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/platform_time.h"
+#include "mbedtls/ssl_cache.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 
@@ -93,9 +94,12 @@ static mbedtls_entropy_context entropy;
 static mbedtls_ctr_drbg_context drbg;
 static mbedtls_x509_crt crt;
 static mbedtls_pk_context key;
+static mbedtls_ssl_cache_context cache;	/* as altcp_tls sets up with ALTCP_MBEDTLS_USE_SESSION_CACHE */
+static mbedtls_ssl_session saved;
+static size_t server_bytes;		/* sent by the server during the last handshake */
 
 /* One connection with the given suite and group (0: the client's defaults) */
-static void session(const char *what, int suite, uint16_t group)
+static void session(const char *what, int suite, uint16_t group, bool resume)
 {
 	static struct queue c2s, s2c;
 	struct end srv_end = { &s2c, &c2s }, cli_end = { &c2s, &s2c };
@@ -120,6 +124,7 @@ static void session(const char *what, int suite, uint16_t group)
 	mbedtls_ssl_conf_rng(&sconf, mbedtls_ctr_drbg_random, &drbg);
 	mbedtls_ssl_conf_rng(&cconf, mbedtls_ctr_drbg_random, &drbg);
 	mbedtls_ssl_conf_own_cert(&sconf, &crt, &key);
+	mbedtls_ssl_conf_session_cache(&sconf, &cache, mbedtls_ssl_cache_get, mbedtls_ssl_cache_set);
 	mbedtls_ssl_conf_authmode(&cconf, MBEDTLS_SSL_VERIFY_REQUIRED);
 	mbedtls_ssl_conf_ca_chain(&cconf, &crt, NULL);
 	if (suite)
@@ -133,12 +138,18 @@ static void session(const char *what, int suite, uint16_t group)
 	}
 	mbedtls_ssl_set_bio(&srv, &srv_end, end_send, end_recv, NULL);
 	mbedtls_ssl_set_bio(&cli, &cli_end, end_send, end_recv, NULL);
+	if (resume)
+		mbedtls_ssl_set_session(&cli, &saved);
+	server_bytes = 0;
 
 	for (int i = 0; i < 100 && (rs || rc); i++) {
 		if (rc)
 			rc = mbedtls_ssl_handshake(&cli);
-		if (rs)
+		if (rs) {
+			size_t before = s2c.len;
 			rs = mbedtls_ssl_handshake(&srv);
+			server_bytes += s2c.len - before;
+		}
 		if ((rc && !pending(rc)) || (rs && !pending(rs)))
 			break;
 	}
@@ -166,6 +177,15 @@ static void session(const char *what, int suite, uint16_t group)
 	snprintf(detail, sizeof(detail), "%s, %s, certificate verified", mbedtls_ssl_get_ciphersuite(&cli),
 		 mbedtls_ssl_get_version(&cli));
 	check(ok && mbedtls_ssl_get_verify_result(&cli) == 0, what, detail, 0);
+	if (!resume) {
+		mbedtls_ssl_session_free(&saved);
+		mbedtls_ssl_session_init(&saved);
+		mbedtls_ssl_get_session(&cli, &saved);
+	} else {
+		/* A full handshake sends the certificate and a signed key exchange */
+		snprintf(detail, sizeof(detail), "the server sent %zu bytes", server_bytes);
+		check(server_bytes < 200, "resumed without certificate or key exchange", detail, 0);
+	}
 out:
 	mbedtls_ssl_free(&srv);
 	mbedtls_ssl_free(&cli);
@@ -195,12 +215,18 @@ int main(void)
 	r = mbedtls_pk_parse_key(&key, der_key, key_len, NULL, 0, mbedtls_ctr_drbg_random, &drbg);
 	check(r == 0 && mbedtls_pk_get_type(&key) == MBEDTLS_PK_ECKEY, "key parses, ECDSA", NULL, r);
 
-	session("client defaults", 0, 0);
-	session("AES-128-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 0);
-	session("ChaCha20-Poly1305", MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, 0);
-	session("AES-256-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 0);
-	session("X25519 offered first", 0, MBEDTLS_SSL_IANA_TLS_GROUP_X25519);
-	session("P-256 only", 0, MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1);
+	mbedtls_ssl_cache_init(&cache);
+	mbedtls_ssl_session_init(&saved);
+	session("AES-128-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 0, false);
+	session("ChaCha20-Poly1305", MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, 0, false);
+	session("AES-256-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 0, false);
+	session("X25519 offered first", 0, MBEDTLS_SSL_IANA_TLS_GROUP_X25519, false);
+	session("P-256 only", 0, MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1, false);
+	session("client defaults", 0, 0, false);
+	char full[64];
+	snprintf(full, sizeof(full), "the server sent %zu bytes", server_bytes);
+	check(server_bytes > 400, "a full handshake for comparison", full, 0);
+	session("a second connection, resuming the session", 0, 0, true);
 
 	printf("%s\n", failures ? "FAILED" : "all passed");
 	return failures ? 1 : 0;

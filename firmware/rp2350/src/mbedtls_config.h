@@ -64,6 +64,7 @@
 #define MBEDTLS_SSL_EXTENDED_MASTER_SECRET
 #define MBEDTLS_SSL_ENCRYPT_THEN_MAC
 #define MBEDTLS_SSL_SERVER_NAME_INDICATION
+#define MBEDTLS_SSL_CACHE_C		/* session resumption, see lwipopts.h */
 
 /* A browser may send full 16 KiB records; ours stay small (httpd.c writes 2 KiB at a time) */
 #define MBEDTLS_SSL_IN_CONTENT_LEN	16384

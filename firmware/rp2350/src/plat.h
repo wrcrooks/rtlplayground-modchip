@@ -21,6 +21,7 @@ uint32_t plat_random32(void);
 void plat_sys_led(uint8_t state);		/* SYS_LED_* */
 void plat_reboot(void);				/* the switch and the RP2350 */
 uint32_t plat_uptime_s(void);
+uint32_t plat_ms(void);
 
 /* The saved configuration: one 4 KiB sector of the RP2350's flash */
 #define PLAT_CONFIG_LEN		0x1000
@@ -95,6 +96,48 @@ struct rtl_port {
 };
 uint8_t rtl_port_count(void);
 bool rtl_port_read(uint8_t phys, struct rtl_port *p);	/* phys from 1 */
+
+/* ---- for the dashboard and the SNMP agent (rtl_metrics.c) ---- */
+
+#define RTL_MAX_PORTS		10
+
+/* All ports, front-panel order, counters in one bridge request; returns how many */
+uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max);
+
+struct rtl_status {
+	int16_t chip_temp;		/* 1/128 degC, TM_RESULT */
+	uint16_t mac_entries;		/* learned addresses, all ports */
+	bool stp_on;
+	uint8_t stp_root_port;		/* STP entity, 0xff: this switch is the root */
+	uint32_t stp_tc;		/* topology changes */
+	uint32_t stp_root_changes;
+	bool lacp_on;
+	uint8_t lacp_ports_up;		/* ports collecting and distributing */
+	uint32_t lacp_changes;		/* partner or sync changes */
+	bool igmp_on;
+	uint16_t igmp_groups;		/* groups with members, as snooped */
+	uint32_t igmp_joins, igmp_leaves;
+};
+void rtl_status_read(struct rtl_status *s);
+
+struct rtl_sfp {
+	bool present, los, ddm;
+	char vendor[17], model[17];
+	int16_t temp;			/* SFF-8472 diagnostics: 1/256 degC */
+	uint16_t vcc;			/* 100 uV */
+	uint16_t bias;			/* 2 uA */
+	uint16_t tx_power, rx_power;	/* 0.1 uW */
+};
+uint8_t rtl_sfp_count(void);
+void rtl_sfp_read(uint8_t slot, struct rtl_sfp *d);	/* reads the module's diagnostics */
+
+struct rtl_link_event {
+	uint32_t seq;
+	uint32_t t_ms;
+	uint8_t port;			/* front-panel number */
+	uint8_t link;			/* 0 down, else as rtl_port.link */
+};
+uint8_t rtl_link_events(struct rtl_link_event *out, uint8_t max);	/* oldest first */
 
 /* The web server's view of RTLPlayground: page_impl.c writes into outbuf */
 #define RTL_SESSION_ID_LEN	12

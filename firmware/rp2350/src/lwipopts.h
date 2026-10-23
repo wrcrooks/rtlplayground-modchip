@@ -66,6 +66,11 @@ void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, un
 #define LWIP_ALTCP_TLS			1
 #define LWIP_ALTCP_TLS_MBEDTLS		1
 #define ALTCP_MBEDTLS_AUTHMODE		MBEDTLS_SSL_VERIFY_NONE
+/* The dashboard polls every 2 s and each response closes its connection:
+ * resumed sessions skip the key exchange and the signature */
+#define ALTCP_MBEDTLS_USE_SESSION_CACHE	1
+#define ALTCP_MBEDTLS_SESSION_CACHE_SIZE	8
+#define ALTCP_MBEDTLS_SESSION_CACHE_TIMEOUT_SECONDS	3600
 
 /* SNMPv2c; snmp.c owns the UDP socket in place of snmp_raw.c */
 #define LWIP_SNMP			1
