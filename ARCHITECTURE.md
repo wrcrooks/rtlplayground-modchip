@@ -54,8 +54,8 @@ its UART. The RP2350 does everything else.
                          │                    │        │  rigid tail
  ┌───────────────────────┴────────────────────┴────────┴────────────────────────┐
  │ mod chip: RP2350A, 16 MiB QSPI flash, ideal diode, reset driver, SWD pads    │
- │  core 1: link driver (UART DMA, COBS/CRC), register access (I²C / RPC)       │
- │  core 0: IP stack, web UI, STP/LACP/IGMP/LLDP, configuration                 │
+ │  main loop: link driver (UART, COBS/CRC), register access by RPC,            │
+ │  IP stack, web UI, STP/LACP/IGMP/LLDP, configuration                         │
  └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -477,22 +477,20 @@ the board's edge, about 2 mm away.
 - the T3, T8 and T5 positions and pitches (photo: 2.0, 2.0 and 2.54 mm), on both switches;
 - whether T5 has pins fitted.
 
-## RP2350 firmware (outline)
+## RP2350 firmware
 
-- **Core 1 (link).** UART RX by DMA into a ring, with a deframer. A request queue enforces one request
-  in flight, with a reply timeout of 100 ms plus the transfer time. I²C register access runs on T3.
-  Events go to core 0 through a FIFO.
-- **Core 0.** lwIP on a virtual netif:
-  - **Receive.** An `RX_FRAME` has its CPU tag stripped, which also gives the ingress port, before it
-    goes to lwIP.
-  - **Transmit.** Output frames go out with `TX_FRAME`; protocol frames get a CPU tag to pick the
-    egress port.
-  - **Applications.** A web UI, which can reuse RTLPlayground's `html/` pages and JSON endpoints, plus
-    STP, LACP, IGMP and LLDP. The latter can come from RTLPlayground's C through a register shim.
-  - **Configuration.** LittleFS in the RP2350's flash, applied after each `HELLO`.
-- **Updates.**
-  - RP2350 firmware: over its web UI, with an A/B or bootloader scheme, or by SWD.
-  - Bridge firmware: through `FLASH_WRITE` staging, as above.
+Written, in `firmware/rp2350/` (its README has the details); not yet run on hardware. It differs
+from the first outline as follows:
+
+- **One core.** Everything runs from one main loop, as on the 8051. Register access over the bridge
+  blocks until the reply. The UART is drained into a ring by interrupt, and frames that arrive during
+  a request are queued.
+- **Register access.** Over the UART only, for now. I²C on T3 can follow once its write format is
+  confirmed.
+- **Configuration.** RTLPlayground's text config in one raw 4 KiB flash sector rather than LittleFS.
+  It is replayed after each `HELLO`.
+- **Updates.** RP2350 firmware by SWD for now. Bridge updates through `FLASH_WRITE` staging aren't
+  wired to the web UI yet.
 
 ## Bring-up plan
 

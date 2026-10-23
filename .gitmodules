@@ -1,0 +1,4 @@
+[submodule "firmware/rp2350/rtlplayground"]
+	path = firmware/rp2350/rtlplayground
+	url = https://github.com/wrcrooks/RTLPlayground.git
+	branch = feat/modchip
