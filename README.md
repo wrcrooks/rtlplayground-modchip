@@ -12,7 +12,8 @@ under a small bridge firmware, and tunnels the rest to the RP2350:
 **Status:** Not tested as I haven't received the assembled PCBs yet.
 
 The design, the link protocol, the pinouts and the mechanical constraints are in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+[ARCHITECTURE.md](ARCHITECTURE.md). To test the firmware before the boards arrive, a Beetle RP2350 on jumper wires
+stands in for the mod chip: [docs/beetle-test-rig.md](docs/beetle-test-rig.md).
 
 | Path | What |
 |---|---|

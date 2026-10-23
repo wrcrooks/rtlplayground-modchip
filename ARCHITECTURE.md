@@ -499,6 +499,9 @@ from the first outline as follows:
 
 ## Bring-up plan
 
+Steps 1-7 can run on a [Beetle RP2350 on jumper wires](docs/beetle-test-rig.md) before the boards
+arrive: same chip, same pins for the bridge link, and the full firmware.
+
 1. **Chip ID.** Run `firmware/micropython/read_chip_id.py` against T3 with RTLPlayground still running. Expect
    `0x8372xx00` and a ticking seconds counter.
 2. **Writes.** Confirm the T3 write format on `RTL837X_REG_SEC_COUNTER`, then raise the I²C clock to

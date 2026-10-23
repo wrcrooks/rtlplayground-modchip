@@ -1,7 +1,17 @@
 cmake_minimum_required(VERSION 3.13)
 
 # Pico SDK 2.x: PICO_SDK_PATH in the environment or on the command line
-set(PICO_BOARD modchip CACHE STRING "Board")
+# modchip: the mod chip itself; beetle: a DFRobot Beetle RP2350 wired to the
+# switch as a stand-in (docs/beetle-test-rig.md)
+set(MODCHIP_BOARD modchip CACHE STRING "Target board: modchip or beetle")
+set_property(CACHE MODCHIP_BOARD PROPERTY STRINGS modchip beetle)
+if (MODCHIP_BOARD STREQUAL "beetle")
+    set(PICO_BOARD modchip_beetle)
+elseif (MODCHIP_BOARD STREQUAL "modchip")
+    set(PICO_BOARD modchip)
+else()
+    message(FATAL_ERROR "MODCHIP_BOARD must be modchip or beetle")
+endif()
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
 option(MODCHIP_RP2354 "RP2354A build: in-package flash, U5 not fitted" OFF)
 if (MODCHIP_RP2354)
@@ -152,9 +162,15 @@ target_link_libraries(modchip
     pico_lwip_netif
     pico_lwip_arch)
 
+# The console: RTT over the mod chip's SWD pads, USB serial on the Beetle
 pico_enable_stdio_uart(modchip 0)
-pico_enable_stdio_usb(modchip 0)
-pico_enable_stdio_rtt(modchip 1)
+if (MODCHIP_BOARD STREQUAL "beetle")
+    pico_enable_stdio_usb(modchip 1)
+    pico_enable_stdio_rtt(modchip 0)
+else()
+    pico_enable_stdio_usb(modchip 0)
+    pico_enable_stdio_rtt(modchip 1)
+endif()
 pico_set_program_name(modchip "RTLPlayground mod chip")
 pico_set_program_version(modchip "${MODCHIP_VERSION}")
 pico_add_extra_outputs(modchip)

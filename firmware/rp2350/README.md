@@ -223,6 +223,9 @@ Options:
 - `-DRTLP_MACHINE=SWGT024_V2_0_MANAGED` for the XikeStor. The default, `SWGT024_V2_0_UNMANAGED`,
   is the MokerLink.
 - `-DMODCHIP_RP2354=ON` for the RP2354A build, which uses the 2 MiB in-package flash.
+- `-DMODCHIP_BOARD=beetle` for a DFRobot Beetle RP2350 wired to the switch as a stand-in for the mod
+  chip. It has the same pins, 2 MiB flash and a USB serial console. Wiring and steps are in
+  [docs/beetle-test-rig.md](../../docs/beetle-test-rig.md).
 
 **Flashing.** There's no USB, so flash over SWD on J5 with a debug probe:
 
