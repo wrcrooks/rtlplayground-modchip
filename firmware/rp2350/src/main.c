@@ -317,6 +317,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 		work = bridge_dispatch();
 		sys_check_timeouts();
 		net_poll();
+		work |= httpd_poll();
 
 		int c = getchar_timeout_us(0);
 		if (c >= 0) {

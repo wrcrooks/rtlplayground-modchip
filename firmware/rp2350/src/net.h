@@ -14,6 +14,7 @@ void net_second(void);
 
 void httpd_init(void);
 void httpd_second(void);
+bool httpd_poll(void);		/* each main loop pass; true if it did something */
 struct altcp_tls_config;
 bool httpd_tls_start(struct altcp_tls_config *conf);
 void httpd_tls_stop(void);

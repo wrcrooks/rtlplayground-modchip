@@ -22,18 +22,20 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd)
 
-all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/test_metrics $(SDK_TESTS)
+all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
+	$(BUILD)/test_upload
 	python3 run_sim.py $(BUILD)/sim
 	python3 run_metrics.py $(BUILD)/test_metrics $(BUILD)
 	node check_dashboard.js ../web/dashboard.html $(BUILD)/history.bin $(BUILD)/metrics.json
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls
 	python3 run_snmp.py $(BUILD)/test_snmp
+	$(BUILD)/test_httpd
 else
-	@echo "SKIP  test_tls, test_snmp: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
+	@echo "SKIP  test_tls, test_snmp, test_httpd: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
 endif
 
 SNMP_SRC = asn1 core mib2 mib2_icmp mib2_interfaces mib2_ip mib2_snmp mib2_system mib2_tcp mib2_udp \
@@ -49,6 +51,17 @@ $(BUILD)/test_snmp: test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modc
 $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/plat.h ../src/bridge.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -I$(RTLP)/modchip/bridge -o $@ test_metrics.c ../src/metrics.c
+
+$(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -o $@ test_upload.c ../src/upload.c ../src/link.c
+
+LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c
+
+$(BUILD)/test_httpd: test_httpd.c ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
+		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c ../src/upload.c ../src/link.c $(LWIP_CORE)
 
 $(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/mbedtls_config.h mbedtls_test_config.h
 	@mkdir -p $(BUILD)

@@ -9,7 +9,8 @@ reaches the switch through it over T5.
 What it runs:
 
 - **Web UI.** RTLPlayground's `html/` UI, unchanged, with the same login, session cookie and JSON
-  endpoints. It also serves `/cmd`, `/config` (download and upload) and `/reset`.
+  endpoints. It also serves `/cmd`, `/config` (download and upload), `/reset`, and `/upload`, the
+  firmware update for the switch's 8051.
 - **Command line.** On the console, and through the web UI's command box.
 - **IP.** lwIP, with static settings or DHCP. The management VLAN is tagged and filtered as before.
 - **Protocols.** DNS, NTP and syslog; STP/RSTP, LACP, IGMP snooping and LLDP.
@@ -104,15 +105,38 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 ## Not done yet
 
-- **Firmware updates through the web UI.** `/upload` answers 501. The plan:
-  - **Bridge:** stage the bridge image with `FLASH_WRITE` and send `REBOOT`; the 8051 installs it.
-  - **RP2350 image:** an A/B or bootloader scheme.
-
-  Until then, flash the RP2350 by SWD.
+- **RP2350 firmware updates through the web UI.** Flash the RP2350 by SWD, or over USB on the Beetle.
 - **Register access over T3 (I²C).** Every access goes over the UART for now. T3 needs its write
   format confirmed on hardware first (ARCHITECTURE.md, bring-up step 2).
 - **TLS 1.3.** HTTPS speaks TLS 1.2. Every current browser accepts that.
 - **SNMP writes, v3 and traps.** The agent is read-only SNMPv2c.
+
+## Switch firmware updates
+
+The web UI's firmware upload (`/upload`) updates the **8051** through the bridge.
+- **What it takes:** any image in the running bridge's layout. That's either a new bridge build, or
+  RTLPlayground itself, to give the switch back its own firmware.
+- **The check:** the image's CRC-16 must hold. RTLPlayground's build sets it and its boot code checks
+  it, and the web UI checks it in the browser too.
+
+**What happens:**
+1. **Staging.** The image streams into the bridge's staging area at `upload_start`. One flash
+   operation (a 4 KiB erase or a 256-byte page write) runs per main loop pass, and TCP flow control
+   holds the browser back. STP, LACP, the dashboard and the rest keep running through the upload,
+   which takes about 2-3 minutes on the MokerLink's W25Q40.
+2. **Read-back.** Once the whole body is in, the staged image is read back and its CRC checked again.
+3. **Verdict.** The browser gets RTLPlayground's verdict, `OK: checksum verified, rebooting` or
+   `NO: <reason>`, only after it has sent the whole body, as with RTLPlayground. Refusals before the
+   upload starts, such as no session or a busy server, wait for the body too.
+4. **Install.** The bridge reboots, and its boot code checks the CRC once more and installs the
+   image, as RTLPlayground does for its own updates. The RP2350 restarts with it.
+
+**Safety:**
+- **Failed uploads.** A failed upload (bad CRC, wrong size, a flash error, a client that goes away)
+  erases the first staging sector, so nothing installable is left for the next boot.
+- **Flash protection.** The bridge accepts erases and writes only above its running image.
+- **Install time.** The install at boot takes as long as an RTLPlayground update: about 2.5 minutes
+  on the MokerLink. Don't power-cycle the switch until it's back.
 
 ## HTTPS
 
@@ -274,6 +298,20 @@ without it they are skipped. `run_snmp.py` also needs net-snmp's command-line to
   series the charts draw from: rates from counter deltas, packet types, errors, SFP power in dBm, marks,
   the port charts grouped by top speed with each port's state, and no negative rates after a counter
   reset.
+- **`test_upload`** streams multipart bodies into a simulated NOR flash, including a real bridge image if
+  given its path. It checks:
+  - one erase per sector and one write per page, never more than one flash operation per call;
+  - the image lands byte for byte, with nothing outside the staging area touched;
+  - bad-CRC, too-long, too-short and malformed uploads are refused, as is a failing flash write;
+  - after any failure or an abort, nothing installable is left behind.
+- **`test_httpd`** runs `httpd.c` and `upload.c` on lwIP with the firmware's options, with a TCP client
+  in the same stack over the loopback interface. It checks:
+  - login, session cookies on the JSON pages and `/cmd`, and a wrong cookie;
+  - firmware uploads as the web UI sends them: a good image staged and answered `OK` before the
+    reboot;
+  - a bad CRC, a wrong-layout image, and an upload without a login each answered `NO` after the
+    whole body, without a reset;
+  - a client that gives up halfway leaves the staging area invalidated.
 - **`test_tls`** builds mbedTLS on the host with the firmware's configuration, makes a key and
   certificate with `tls_cert.c`, then runs a handshake and a request for each cipher suite and curve.
   The client verifies the certificate and the name. A second connection must resume the session

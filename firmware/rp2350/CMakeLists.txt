@@ -115,6 +115,8 @@ add_executable(modchip
     src/link.c
     src/net.c
     src/httpd.c
+    src/upload.c
+    src/upload_bridge.c
     src/tls.c
     src/tls_cert.c
     src/snmp.c

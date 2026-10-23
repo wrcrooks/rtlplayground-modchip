@@ -81,13 +81,26 @@ it low would short the supply. Check with a meter before soldering: the anode re
 The Beetle talks to the 8051 **bridge firmware**, not to RTLPlayground. While the bridge runs, the
 switch has no web UI of its own; it keeps forwarding with the default setup.
 
-1. **Keep recovery images at hand:** the stock dump and an RTLPlayground image for your switch.
-2. **Build the bridge** in RTLPlayground, branch `feat/modchip`, from that repository's root.
-   - MokerLink, 512 KiB flash:
-     `make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact`
-   - XikeStor, 2 MiB flash: `make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_MANAGED`
-3. **Flash it with the CH341A**, switch unpowered. On the MokerLink, write the `…-flash512k.bin`
-   image, which covers the whole chip.
+**Build the bridge** in RTLPlayground, branch `feat/modchip`, from that repository's root. Match
+the layout the switch runs now:
+- **MokerLink, compact RTLPlayground:**
+  `make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact`
+- **XikeStor, standard layout:** `make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_MANAGED`
+
+**Install it, either way:**
+- **From RTLPlayground's web UI.** No programmer needed. Upload the plain image,
+  `output/bridge-…/bridge-<version>-<machine>[-compact].bin`, through the firmware upload.
+  RTLPlayground checks its CRC and installs it at the next boot, like one of its own updates. On the
+  MokerLink, expect about 2-3 minutes for the upload and as long again for the install. Don't
+  power-cycle meanwhile.
+- **With the CH341A**, switch unpowered. On the MokerLink, write the `…-flash512k.bin`, which covers
+  the whole chip.
+
+**Going back to RTLPlayground** works the same way, from the mod chip firmware's web UI. With the
+Beetle running, upload an RTLPlayground image for the same switch and layout. The firmware stages it
+through the bridge, and the 8051 installs it at the next boot. Keep the stock and RTLPlayground
+recovery images, and the CH341A, at hand anyway. The bridge hasn't run on hardware yet, and a bridge
+that doesn't boot can only be fixed with the programmer.
 
 ## Step 1 (optional): MicroPython
 
@@ -139,5 +152,5 @@ answers at that address, served by the Beetle.
   switch leaves the Beetle running. The console then shows `Switch unpowered, releasing its pins`.
 - **Saved settings.** The firmware keeps the config and the HTTPS key in the top two sectors of the
   Beetle's 2 MiB flash. Reflashing the firmware keeps them; a full erase doesn't.
-- **Going back.** RTLPlayground's recovery images bring the stock web UI back. Flash one with the
-  CH341A when you're done.
+- **Going back.** Upload an RTLPlayground image through the web UI (see above), or flash a recovery
+  image with the CH341A.
