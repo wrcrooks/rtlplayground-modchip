@@ -89,6 +89,7 @@ uint16_t rtl_udp_input(int i, const uint8_t *p, uint16_t len, uint8_t **data);
 struct rtl_port {
 	char name[32];
 	uint8_t link;			/* 0 down, else 1 + the speed code: 10M, 100M, 1G, 500M, 10G, 2.5G, 5G */
+	uint16_t max_mbps;		/* the port's top speed */
 	bool enabled;
 	bool sfp;
 	uint64_t in_octets, out_octets, in_ucast, in_mcast, in_bcast, out_ucast, out_mcast, out_bcast;

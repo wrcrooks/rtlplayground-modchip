@@ -25,13 +25,14 @@ def now():
     rates whatever its clock does (headless browsers run on virtual time)"""
     return UP_AT_START + 2 * polls
 PERIOD = 10
-NAMES = ["uplink", "NAS", "Port 3", "Port 4", "AP", "SFP+"]
-LINK = [6, 3, 3, 0, 3, 5]           # 1 + speed code: 2.5G, 1G, 1G, down, 1G, 10G
+NAMES = ["uplink", "NAS", "Port 3", "Port 4", "SFP+ 1", "SFP+ 2"]
+LINK = [6, 3, 3, 0, 5, 3]           # 1 + speed code: 2.5G, 1G, 1G, down, 10G, 1G
+MAX = [2500, 2500, 2500, 2500, 10000, 10000]
 
 
 def rates(t, i):
     """bits/s in and out on port i at uptime t"""
-    base = [300e6, 120e6, 15e6, 0, 40e6, 900e6][i]
+    base = [300e6, 120e6, 15e6, 0, 900e6, 40e6][i]
     if not LINK[i]:
         return 0.0, 0.0
     wave = 1 + 0.6 * math.sin(t / (90 + 40 * i)) + 0.3 * math.sin(t / 17 + i)
@@ -64,7 +65,7 @@ def metrics():
         link = LINK[i]
         if i == 3 and int(t) % 60 < 20:
             link = 3                       # port 4 flaps
-        ports.append({"n": i + 1, "name": NAMES[i], "en": True, "sfp": i == 5, "link": link,
+        ports.append({"n": i + 1, "name": NAMES[i], "en": True, "sfp": i >= 4, "max": MAX[i], "link": link,
                       "mbps": [0, 10, 100, 1000, 500, 10000, 2500, 5000][link], "c": counters(t, i)})
     ev = []
     for k in range(int(t) // 60 - 3, int(t) // 60 + 1):

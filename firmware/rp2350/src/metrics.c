@@ -291,8 +291,8 @@ size_t metrics_json(char *buf, size_t max)
 		const struct rtl_port *p = &ports[i];
 		add(&o, "%s{\"n\":%u,\"name\":", i ? "," : "", i + 1);
 		add_str(&o, p->name);
-		add(&o, ",\"en\":%s,\"sfp\":%s,\"link\":%u,\"mbps\":%u,\"c\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%lu,%lu]}",
-		    b(p->enabled), b(p->sfp), p->link, p->link < 8 ? speed_mbps[p->link] : 0,
+		add(&o, ",\"en\":%s,\"sfp\":%s,\"max\":%u,\"link\":%u,\"mbps\":%u,\"c\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%lu,%lu]}",
+		    b(p->enabled), b(p->sfp), p->max_mbps, p->link, p->link < 8 ? speed_mbps[p->link] : 0,
 		    (unsigned long long)p->in_octets, (unsigned long long)p->out_octets,
 		    (unsigned long long)p->in_ucast, (unsigned long long)p->in_mcast, (unsigned long long)p->in_bcast,
 		    (unsigned long long)p->out_ucast, (unsigned long long)p->out_mcast, (unsigned long long)p->out_bcast,

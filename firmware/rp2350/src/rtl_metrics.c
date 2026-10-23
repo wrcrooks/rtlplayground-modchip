@@ -154,6 +154,10 @@ uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
 		else
 			snprintf(o->name, sizeof(o->name), "Port %u", k + 1);
 		o->sfp = machine.is_sfp[i] != 0;
+		/* The machine definitions don't say; on the RTL8372/8373 boards the
+		 * cages are SFP+ and the copper PHYs (RTL8221/8224) 2.5G. Boards
+		 * with 10G copper PHYs (machine.n_10g) would report those as 2.5G. */
+		o->max_mbps = o->sfp ? 10000 : 2500;
 		if (o->sfp) {
 			o->enabled = true;
 		} else {

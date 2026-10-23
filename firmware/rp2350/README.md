@@ -146,10 +146,9 @@ click a legend entry to hide a series. The window is 5 minutes, 15 minutes or an
 | Chart | What it shows | History |
 |---|---|---|
 | Traffic | All ports stacked, bits/s in above the line, out below | yes |
-| Ports | Each port's in and out, link speed | yes |
+| Ports | One chart per top speed (2.5 Gb/s copper, 10 Gb/s SFP+), the ports' in and out overlaid; each port's current state (link speed, down or off) in the legend | yes |
 | Packets | Packets/s over all ports: unicast, multicast and broadcast, in and out | yes |
 | Errors and discards | Per second, all ports | yes |
-| Links | Each port's speed over time, ticks at changes, and a list of the last changes | link state yes, changes since boot |
 | Temperatures | Switch chip, mod chip (the RP2350's sensor), SFP modules | chip and mod chip |
 | MAC table | Learned addresses | yes |
 | SFP modules | Temperature, supply voltage, laser bias, TX and RX power in dBm, LOS; the powers charted | live only |
@@ -173,6 +172,10 @@ samples in RAM; they're lost at a reboot.
 - **Chip temperature and MAC table size:** the rest.
 
 SFP diagnostics are read every 30 s. Polls closer together than a second share one reading.
+
+**Port top speeds.** RTLPlayground's machine definitions don't say, so the firmware assumes SFP+
+for the cages and 2.5G for the copper ports, as on the SWTG024AS. A board with 10G copper PHYs would
+show those ports in the 2.5 Gb/s chart.
 
 **Sources of the less obvious numbers:**
 - **IGMP groups:** counted from the reports and leaves the CPU port sees while snooping is on;
@@ -265,8 +268,9 @@ without it they are skipped. `run_snmp.py` also needs net-snmp's command-line to
 - **`test_metrics`** runs `metrics.c` over an hour of simulated traffic. It checks the history ring
   and `/history.bin` against the traffic. `run_metrics.py` checks `/metrics.json`.
 - **`check_dashboard.js`** runs the dashboard's own script in Node on those two files. It checks the
-  series the charts draw from: rates from counter deltas, packet types, errors, SFP power in dBm, link
-  events, marks, and no negative rates after a counter reset.
+  series the charts draw from: rates from counter deltas, packet types, errors, SFP power in dBm, marks,
+  the port charts grouped by top speed with each port's state, and no negative rates after a counter
+  reset.
 - **`test_tls`** builds mbedTLS on the host with the firmware's configuration, makes a key and
   certificate with `tls_cert.c`, then runs a handshake and a request for each cipher suite and curve.
   The client verifies the certificate and the name. A second connection must resume the session

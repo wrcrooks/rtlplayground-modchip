@@ -509,6 +509,8 @@ int main(void)
 	check(!memcmp(pfast, pslow, sizeof(pfast[0]) * np), "an older bridge gives the same counters");
 	printf("COST ports+counters %u requests, %u without STAT_READ\n", fast_req, requests - r1);
 	check(fast_req < 15, "all ports and counters in %u requests", fast_req);
+	check(pfast[0].max_mbps == 2500 && pfast[3].max_mbps == 2500 && pfast[4].max_mbps == 10000 && pfast[5].max_mbps == 10000 && pfast[5].sfp,
+	      "top speeds: ports 1-4 copper 2.5G, 5-6 SFP+ 10G");
 
 	/* Link events from LINK messages: port 3's logical port comes up at 1G */
 	uint8_t l3 = machine.phys_to_log_port[2];

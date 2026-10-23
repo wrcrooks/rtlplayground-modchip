@@ -55,7 +55,6 @@ check(S.rx1 && S.rx1.length === 360, "history: 360 samples for port 1");
 const near = (a, b) => Math.abs(a - b) <= Math.abs(b) * 0.001 + 1;
 check(near(S.rx1[359][1], 100e6) && near(S.tx3[359][1], 150e6), "history: port rates in bits/s");
 check(near(S.err2[359][1], 3) && near(S.dis2[359][1], 1), "history: errors and discards per second");
-check(S.link4[359][1] === 0 && S.link1[359][1] === 3, "history: link states");
 check(near(S.t_sw[359][1], 45.5) && near(S.m_load[359][1], 12.5) && near(S.b_load[359][1], 10), "history: temperature, loads");
 check(S.rx1[359][0] - S.rx1[358][0] === 10000, "history: 10 s apart");
 check(near(S.p_ib[359][1], 6) && S.p_im[359][1] === 0 && S.p_iu[359][1] > 40000, "history: packets/s by type");
@@ -75,7 +74,6 @@ m2.bridge.requests += 100;
 m2.bridge.timeouts += 2;
 m2.igmp.joins += 1;
 m2.stp.tc += 1;
-m2.events.push({ seq: 2, t: m2.t - 500, port: 4, link: 3, mbps: 1000 });
 ctx.ingest(m1);
 ctx.ingest(m2);
 check(near(S.rx2[S.rx2.length - 1][1], 200e6) && near(S.tx2[S.tx2.length - 1][1], 100e6), "live: port rates from deltas");
@@ -85,9 +83,18 @@ check(near(S.b_req[S.b_req.length - 1][1], 50) && near(S.b_to[S.b_to.length - 1]
 check(near(S.i_join[S.i_join.length - 1][1], 30), "live: IGMP joins per minute");
 check(near(S.o_tx1[S.o_tx1.length - 1][1], -3.0) && near(S.o_rx1[S.o_rx1.length - 1][1], -6.0), "live: SFP power in dBm");
 check(near(S.t_sfp1[S.t_sfp1.length - 1][1], 35.5), "live: SFP temperature");
-const ev = vm.runInContext("events", ctx), marks = vm.runInContext("marks", ctx);
-check(ev.length === 2 && ev[1].link === 3, "live: link events, without duplicates");
+const marks = vm.runInContext("marks", ctx);
 check(marks.length === 1 && /topology/.test(marks[0].what), "live: an STP topology change marked");
+
+// Port charts: one per top speed, slowest first, each port's state in its legend
+const groups = ctx.speedGroups(m1.ports);
+check(groups.length === 2 && groups[0].mbps === 2500 && groups[0].ports.map((p) => p.n).join() === "1,2,3,4"
+      && groups[1].mbps === 10000 && groups[1].ports.map((p) => p.n).join() === "5,6", "ports grouped by top speed: 1-4, 5-6");
+check(ctx.speedName(2500) === "2.5 Gb/s" && ctx.speedName(10000) === "10 Gb/s", "group titles");
+const pc = vm.runInContext("portCharts", ctx);
+check(pc[1] === pc[4] && pc[5] === pc[6] && pc[1] !== pc[5], "ports 1-4 share a chart, 5-6 another");
+check(pc[4].badges[4].textContent === "down" && pc[1].badges[1].textContent === "1G", "state badges: port 4 down, port 1 at 1G");
+check(pc[1].series().length === 8, "the 2.5 Gb/s chart overlays 4 ports, in and out");
 
 // A switch reboot clears the counters: no negative rates
 const m3 = JSON.parse(JSON.stringify(m2));

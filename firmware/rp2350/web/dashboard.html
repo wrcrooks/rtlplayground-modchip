@@ -50,7 +50,7 @@ main{padding:18px 20px;display:grid;grid-template-columns:repeat(auto-fill,minma
 .card h2{font-size:14px;font-weight:650;margin-bottom:8px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .card h2 .hint{font-weight:400;font-size:12px;color:var(--fg2)}
 .chart{position:relative;height:180px}
-.chart.tall{height:260px}.chart.short{height:120px}.chart.lanes{height:auto}
+.chart.tall{height:260px}.chart.short{height:120px}
 .chart canvas{position:absolute;inset:0;width:100%;height:100%}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--fg2);margin-top:6px}
 .legend span{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
@@ -62,13 +62,13 @@ main{padding:18px 20px;display:grid;grid-template-columns:repeat(auto-fill,minma
 .tile .k{font-size:11px;color:var(--fg2)}
 .tile .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
 .tile .v small{font-size:12px;font-weight:400;color:var(--fg2)}
-.ports{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr));gap:12px}
+.ports{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(460px,100%),1fr));gap:12px}
 .scroll{overflow-x:auto}
 .port{border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
 .port .hd{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:4px}
 .port .hd .nm{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .badge{font-size:11px;font-weight:600;border-radius:10px;padding:1px 8px;background:var(--panel2);color:var(--fg2)}
-.port .rt{font-size:12px;color:var(--fg2);font-variant-numeric:tabular-nums;display:flex;gap:12px}
+.legend .badge{margin-left:2px}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th{text-align:left;font-weight:600;color:var(--fg2);font-size:12px;padding:4px 8px;border-bottom:1px solid var(--bd)}
 td{padding:4px 8px;border-bottom:1px solid var(--bd);font-variant-numeric:tabular-nums}
@@ -111,7 +111,7 @@ td.num,th.num{text-align:right}
   </section>
 
   <section class="card wide">
-    <h2>Ports <span class="hint">in and out, bits/s</span></h2>
+    <h2>Ports <span class="hint">by top speed, in above the line, out below</span></h2>
     <div class="ports" id="ports"></div>
   </section>
 
@@ -125,12 +125,6 @@ td.num,th.num{text-align:right}
     <h2>Errors and discards <span class="hint">per second</span></h2>
     <div class="chart"><canvas id="c-errs"></canvas></div>
     <div class="legend" id="l-errs"></div>
-  </section>
-
-  <section class="card wide">
-    <h2>Links <span class="hint">speed over time, and changes</span></h2>
-    <div class="chart lanes"><canvas id="c-links"></canvas></div>
-    <div class="scroll"><table id="events"><thead><tr><th>Time</th><th>Port</th><th>Change</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section class="card">
@@ -187,7 +181,7 @@ td.num,th.num{text-align:right}
 var POLL_MS=2000, KEEP_MS=3700e3, DELAY_MS=2200;
 var SPEED_VAR=["","--s10","--s100","--s1000","--s1000","--s10g","--s2g5","--s5g"];
 var SPEED_TXT=["down","10M","100M","1G","500M","10G","2.5G","5G"];
-var win=300e3, offset=null, prev=null, ports=[], lastSeq=0, events=[], charts=[];
+var win=300e3, offset=null, prev=null, ports=[], charts=[];
 var S={};	/* series: key -> [[time, value], ...], time in local ms */
 
 function $(id){return document.getElementById(id)}
@@ -237,12 +231,13 @@ function Chart(id,opt){
 Chart.prototype.series=function(){return typeof this.opt.series==="function"?this.opt.series():this.opt.series};
 /* One legend entry per series, or per group of them (a port's in and out) */
 Chart.prototype.legend=function(){
-  var self=this,l=$(this.opt.legend),seen={};l.innerHTML="";this.items=[];
+  var self=this,l=$(this.opt.legend),seen={};l.innerHTML="";this.items=[];this.badges={};
   this.series().forEach(function(s){
     var g=s.group||s.key;
     if(seen[g]){seen[g].ss.push(s);return}
     var sp=el("span",{},[el("b"),document.createTextNode((s.group?s.glabel:s.label)+" "),el("em")]);
     sp.firstChild.style.background=s.color();
+    if(s.port){var bd=el("span",{class:"badge"});sp.insertBefore(bd,sp.lastChild);self.badges[s.port]=bd}
     if(self.off[g])sp.className="off";
     sp.onclick=function(){self.off[g]=!self.off[g];sp.className=self.off[g]?"off":""};
     l.appendChild(sp);seen[g]={ss:[s],em:sp.lastChild};self.items.push(seen[g]);
@@ -355,35 +350,6 @@ Chart.prototype.draw=function(now){
   }
 };
 
-/* Link lanes: one row per port, coloured by speed, ticks where it changed */
-function Lanes(id){this.cv=$(id);this.ctx=this.cv.getContext("2d");charts.push(this);this.visible=true}
-Lanes.prototype.draw=function(now){
-  var n=ports.length,cv=this.cv,dpr=window.devicePixelRatio||1,w=cv.parentNode.clientWidth,lh=16,h=Math.max(1,n)*(lh+6)+22;
-  cv.style.position="static";cv.style.height=h+"px";
-  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
-  var c=this.ctx,L=66,R=8,pw=w-L-R,t1=now-DELAY_MS,t0=t1-win;
-  c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);c.font="11px system-ui,sans-serif";c.textBaseline="middle";
-  ports.forEach(function(p,k){
-    var y=k*(lh+6)+2,a=S["link"+p.n]||[];
-    c.fillStyle=css("--fg2");c.textAlign="right";c.fillText(p.name.length>8?"Port "+p.n:p.name,L-6,y+lh/2);
-    c.fillStyle=css("--panel2");c.fillRect(L,y,pw,lh);
-    for(var j=0;j<a.length;j++){
-      var s=a[j][0],e=j+1<a.length?a[j+1][0]:t1;if(e<t0||s>t1)continue;
-      if(e-s>POLL_MS*8&&j+1<a.length)e=s+POLL_MS*8;	/* a gap in the data */
-      var v=a[j][1];if(!v)continue;
-      c.fillStyle=css(SPEED_VAR[v]||"--fg2");
-      var x0=L+Math.max(0,(s-t0)/win)*pw,x1=L+Math.min(1,(e-t0)/win)*pw;c.fillRect(x0,y,Math.max(1,x1-x0),lh);
-    }
-    events.forEach(function(ev){if(ev.port!==p.n||ev.t<t0||ev.t>t1)return;
-      var x=Math.round(L+(ev.t-t0)/win*pw)+.5;c.strokeStyle=css(ev.link?"--ok":"--bad");c.lineWidth=2;
-      c.beginPath();c.moveTo(x,y-2);c.lineTo(x,y+lh+2);c.stroke();c.lineWidth=1});
-  });
-  c.fillStyle=css("--fg2");c.textAlign="center";c.textBaseline="top";
-  var step=win<=300e3?60e3:win<=900e3?180e3:600e3,yb=n*(lh+6)+4;
-  for(var tt=Math.ceil(t0/step)*step;tt<=t1;tt+=step){var d=new Date(tt);
-    c.fillText(d.getHours()+":"+String(d.getMinutes()).padStart(2,"0"),L+(tt-t0)/win*pw,yb)}
-};
-
 /* ---- the data ---- */
 function rate(key,t,c,p,dt){if(p!=null&&c>=p)push(key,t,(c-p)/dt)}
 
@@ -419,7 +385,6 @@ function ingest(m){
     if(m.stp.root_changes>prev.stp.root_changes)marks.push({t:t,color:css("--bad"),what:"STP root port change"});
     if(m.lacp.changes>prev.lacp.changes)marks.push({t:t,color:css("--ac"),what:"LACP partner change"});
   }
-  m.ports.forEach(function(p){push("link"+p.n,t,p.en?p.link:0)});
   if(m.ports.length){push("t_sw",t,m.switch.temp);push("mac",t,m.switch.mac)}
   push("t_mod",t,m.modchip.temp);push("m_load",t,m.modchip.load);
   push("m_heap",t,100*(1-m.modchip.heap_free/m.modchip.heap_total));
@@ -430,8 +395,6 @@ function ingest(m){
     if(s.tx_uw>0)push("o_tx"+s.slot,t,10*Math.log10(s.tx_uw/1000));
     if(s.rx_uw>0)push("o_rx"+s.slot,t,10*Math.log10(s.rx_uw/1000));
   });
-  m.events.forEach(function(e){if(e.seq>lastSeq){lastSeq=e.seq;events.push({t:e.t+offset,port:e.port,link:e.link,mbps:e.mbps})}});
-  while(events.length>64)events.shift();
   prev=m;
   render(m);
 }
@@ -457,7 +420,6 @@ function loadHistory(buf){
       var e=d.getUint16(q+16,true)/period,ds=d.getUint16(q+18,true)/period;
       push("err"+pn,t,e);push("dis"+pn,t,ds);er+=e;di+=ds;
       ip+=d.getUint32(q+8,true);op+=d.getUint32(q+12,true);
-      push("link"+pn,t,d.getUint8(q+20));
     }
     push("e_err",t,er);push("e_dis",t,di);
     var im=d.getUint32(o+20,true),ib=d.getUint32(o+24,true),om=d.getUint32(o+28,true),ob=d.getUint32(o+32,true);
@@ -468,6 +430,13 @@ function loadHistory(buf){
 
 /* ---- the page ---- */
 var built=false,portCharts={};
+/* Ports by top speed, slowest first: [{mbps, ports}] */
+function speedGroups(list){
+  var by={};
+  list.forEach(function(p){var k=p.max||0;(by[k]=by[k]||[]).push(p)});
+  return Object.keys(by).map(Number).sort(function(a,b){return a-b}).map(function(k){return {mbps:k,ports:by[k]}});
+}
+function speedName(mbps){return !mbps?"Other":mbps>=1000?mbps/1000+" Gb/s":mbps+" Mb/s"}
 function S2(key,label,color,fmt,neg){return {key:key,label:label,color:color,fmt:fmt,neg:neg}}
 function G(s,group,glabel){s.group=group;s.glabel=glabel;return s}
 function C(v){return function(){return css(v)}}
@@ -478,15 +447,22 @@ function build(){
   new Chart("c-traffic",{legend:"l-traffic",stack:true,mirror:true,fmt:bps,floor:1000,series:function(){
     var s=[];ports.forEach(function(p,i){s.push(G(S2("rx"+p.n,p.name+" in",I(i),bps),"p"+p.n,p.name));});
     ports.forEach(function(p,i){s.push(G(S2("tx"+p.n,p.name+" out",I(i),bps,true),"p"+p.n,p.name));});return s}});
+  /* One chart per top speed, the ports overlaid; colours as in the traffic chart */
   var pc=$("ports");pc.innerHTML="";
-  ports.forEach(function(p,i){
-    var box=el("div",{class:"port"},[
-      el("div",{class:"hd"},[el("span",{class:"nm"}),el("span",{class:"badge"})]),
-      el("div",{class:"chart short"},[el("canvas",{id:"c-port"+p.n})]),
-      el("div",{class:"rt"},[el("span"),el("span"),el("span")])]);
+  speedGroups(ports).forEach(function(g){
+    var id="grp"+g.mbps,box=el("div",{class:"port"},[
+      el("div",{class:"hd"},[el("span",{class:"nm",text:speedName(g.mbps)+" ports"})]),
+      el("div",{class:"chart"},[el("canvas",{id:"c-"+id})]),
+      el("div",{class:"legend",id:"l-"+id})]);
     pc.appendChild(box);
-    portCharts[p.n]={box:box,ch:new Chart("c-port"+p.n,{fmt:bps,mirror:true,floor:1000,series:[
-      S2("rx"+p.n,"in",C("--c1"),bps),S2("tx"+p.n,"out",C("--c2"),bps,true)]})};
+    var series=[];
+    g.ports.forEach(function(p){
+      var i=ports.indexOf(p),rx=G(S2("rx"+p.n,p.name+" in",I(i),bps),"p"+p.n,p.n+" "+p.name);
+      rx.port=p.n;series.push(rx);
+      series.push(G(S2("tx"+p.n,p.name+" out",I(i),bps,true),"p"+p.n,p.n+" "+p.name));
+    });
+    var ch=new Chart("c-"+id,{legend:"l-"+id,fmt:bps,mirror:true,fill:false,floor:1000,series:series});
+    g.ports.forEach(function(p){portCharts[p.n]=ch});
   });
   new Chart("c-pkts",{legend:"l-pkts",fmt:pps,mirror:true,floor:10,series:[
     S2("p_iu","in unicast",I(0),pps),S2("p_im","in multicast",I(5),pps),S2("p_ib","in broadcast",I(2),pps),
@@ -494,7 +470,6 @@ function build(){
   new Chart("c-errs",{legend:"l-errs",fmt:function(v){return v.toFixed(v<10?2:0)},floor:1,series:[
     S2("e_err","errors",C("--bad"),function(v){return v.toFixed(2)+"/s"}),
     S2("e_dis","discards",C("--warn"),function(v){return v.toFixed(2)+"/s"})]});
-  new Lanes("c-links");
   new Chart("c-temp",{legend:"l-temp",zero:false,fill:false,fmt:function(v){return v.toFixed(0)},series:function(){
     var s=[S2("t_sw","switch chip",I(3),function(v){return v.toFixed(1)+" °C"}),
       S2("t_mod","mod chip",I(4),function(v){return v.toFixed(1)+" °C"})];
@@ -527,21 +502,12 @@ function tiles(id,list){
 function render(m){
   if(!built&&m.ports.length)build();
   if(!built)return;
+  /* Each port's state, now: its link speed, down, or switched off */
   m.ports.forEach(function(p){
-    var pcs=portCharts[p.n];if(!pcs)return;
-    var hd=pcs.box.firstChild;hd.firstChild.textContent=p.n+"  "+p.name+(p.sfp?"  (SFP)":"");
-    var bd=hd.lastChild;bd.textContent=!p.en?"off":SPEED_TXT[p.link]||"?";
+    var ch=portCharts[p.n],bd=ch&&ch.badges[p.n];if(!bd)return;
+    bd.textContent=!p.en?"off":p.link?SPEED_TXT[p.link]||"up":"down";
     bd.style.background=p.en&&p.link?css(SPEED_VAR[p.link]):"";bd.style.color=p.en&&p.link?"#fff":"";
-    var rt=pcs.box.lastChild.children;
-    rt[0].textContent="in "+(last("rx"+p.n)!=null?bps(last("rx"+p.n)):"–");
-    rt[1].textContent="out "+(last("tx"+p.n)!=null?bps(last("tx"+p.n)):"–");
-    var e=last("err"+p.n);rt[2].textContent=e?e.toFixed(2)+" err/s":"";
   });
-  var tb=$("events").tBodies[0];tb.innerHTML="";
-  events.slice(-8).reverse().forEach(function(e){
-    tb.appendChild(el("tr",{},[el("td",{text:clock(e.t)}),el("td",{text:"Port "+e.port}),
-      el("td",{text:e.link?"up, "+SPEED_TXT[e.link]:"down"})]))});
-  if(!events.length)tb.appendChild(el("tr",{},[el("td",{class:"mut",text:"No link changes since the mod chip started"})]));
   var sb=$("sfp").tBodies[0];sb.innerHTML="";
   m.sfp.forEach(function(s){
     var c=[el("td",{text:String(s.slot)}),el("td",{text:s.present?(s.vendor+" "+s.model).trim()||"module":"empty"})];

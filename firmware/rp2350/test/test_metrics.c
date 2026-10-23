@@ -38,7 +38,8 @@ uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
 		memset(&p[i], 0, sizeof(p[i]));
 		snprintf(p[i].name, sizeof(p[i].name), n == 1 ? "uplink \"core\"" : "Port %d", n);
 		p[i].enabled = true;
-		p[i].sfp = n == 6;
+		p[i].sfp = n >= 5;
+		p[i].max_mbps = n >= 5 ? 10000 : 2500;
 		p[i].link = n == 4 ? 0 : 3;
 		p[i].in_octets = (uint64_t)(t * 100e6 * n / 8);
 		p[i].out_octets = (uint64_t)(t * 50e6 * n / 8);

@@ -38,6 +38,7 @@ def main():
     check(len(p) == 6 and all(len(x["c"]) == 12 for x in p), "six ports with twelve counters each")
     check(p[0]["name"] == 'uplink "core"', "port names are escaped")
     check(p[0]["mbps"] == 1000 and p[3]["link"] == 0 and p[5]["sfp"], "link speed, a down port, an SFP port")
+    check([x["max"] for x in p] == [2500] * 4 + [10000] * 2, "top speeds: 2.5G copper, 10G SFP+")
     check(abs(m["switch"]["temp"] - 45.5) < 0.01 and m["switch"]["mac"] == 17, "switch temperature, MAC entries")
     check(m["stp"] == {"on": True, "root_port": 255, "tc": 2, "root_changes": 0}, "STP")
     check(m["igmp"]["groups"] == 3 and m["igmp"]["joins"] == 9, "IGMP")
