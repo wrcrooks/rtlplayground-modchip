@@ -122,12 +122,15 @@ t3 off                    back to the bridge
 ```
 
 **`t3 test`** is bring-up step 2 (ARCHITECTURE.md).
-- **What it does:** reads the chip ID over both paths, then writes the seconds-counter register over
-  T3 and reads it back over the bridge, and the other way round. It restores the register afterwards.
+- **What it does:** reads the chip ID over both paths, then writes a table engine input
+  (`TBL_DATA_IN_C`, 0x5CC0) over T3 and reads it back over the bridge, and the other way round. It
+  restores the register afterwards. A failed check prints the value read back.
 - **What it doesn't do:** move register access anywhere. Run `t3 on` only once it passes.
 - **Why a write test:** the write format (register address high byte first, the value low byte first,
-  one transfer) comes from [vDorst/rtl-rs](https://github.com/vDorst/rtl-rs). It isn't confirmed on
-  this switch yet.
+  one transfer) comes from [vDorst/rtl-rs](https://github.com/vDorst/rtl-rs). It passes on the
+  MokerLink (Beetle rig, 2026-10-24), and 400 kHz runs without errors.
+- **Not the seconds counter:** 0x06F4 reads back 0 after any write on the RTL8372, so it can't
+  serve as a test register.
 
 **With T3 on:**
 - **Plain register access** goes over T3.
@@ -138,6 +141,23 @@ t3 off                    back to the bridge
 
 **Status.** The Bridge Link card on the dashboard shows which path registers use, and `/metrics.json`
 has the counts.
+
+## Bridge link diagnostics
+
+For bring-up, when the bridge doesn't answer:
+
+```
+bridge                    up or down; requests, timeouts, link errors, resets; UART bytes and frames
+bridge log                the 8051's last 2 KiB of output (it prints at boot, before a console is open)
+bridge raw                the first 4 KiB received after power-up, as hex, and the frame being decoded
+bridge probe              GP0/GP1 as inputs with pull-downs for 2 s: idle level and edges on each
+bridge hold on|off        stop sending HELLO and PING, only listen
+```
+
+- **`bridge probe`:** the switch's TX idles high, its RX floats low. A running bridge beacons once a
+  second, so a connected one shows edges on GP1. No edges with GP1 high: the 8051 isn't sending.
+- **`bridge raw`:** COBS leaves text readable, so log lines and the HELLO fields show in the dump.
+- **`bridge hold on`:** tells hangs the host triggers from hangs the bridge gets into on its own.
 
 **Saving it.** `t3 on` is a command like any other, so the web UI saves it with the config, and it
 comes back on at the next replay.

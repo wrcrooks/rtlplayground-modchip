@@ -302,6 +302,11 @@ static char snmp_comm[33] = "public";
 static int newcerts;
 bool plat_https_enable(bool on) { https_on = on; return true; }
 bool plat_https_enabled(void) { return https_on; }
+void plat_bridge_print(void) { }
+void plat_bridge_probe(void) { }
+void plat_bridge_log(void) { }
+void plat_bridge_raw(void) { }
+void plat_bridge_hold(bool on) { (void)on; }
 bool plat_https_newcert(void) { newcerts++; return true; }
 void plat_https_status(char *fp, size_t len) { snprintf(fp, len, "AA:BB"); }
 bool plat_snmp_set(int what, const char *v)

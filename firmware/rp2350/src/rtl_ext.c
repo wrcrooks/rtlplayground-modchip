@@ -115,9 +115,18 @@ static bool parse_snmp(void)
 bool rtl_bridge_reg_read(uint16_t reg, uint32_t *v);
 bool rtl_bridge_reg_write(uint16_t reg, uint32_t v);
 
-/* RTL837X_REG_SEC_COUNTER: RTLPlayground's seconds counter, which the
- * bridge leaves alone, so a test can write it */
-#define T3_TEST_REG		0x06f4
+/* RTL837x_TBL_DATA_IN_C: a table engine input, which acts only when the
+ * host writes TBL_CTRL, so a test can write it. (The seconds counter at
+ * 0x06f4 reads back 0 after any write on the RTL8372.) */
+#define T3_TEST_REG		0x5cc0
+
+static void t3_value(__code const char *what, uint32_t v)
+{
+	print_string(what);
+	print_long(v);
+	write_char('\n');
+}
+
 
 static void t3_line(bool ok, __code const char *what)
 {
@@ -150,10 +159,16 @@ static void t3_test(void)
 		ext_error("T3 reads don't match the bridge\n");
 		return;
 	}
+	b = 0;
 	bool w1 = plat_t3_raw_write(T3_TEST_REG, 0x5a5a1234) && rtl_bridge_reg_read(T3_TEST_REG, &b) && b == 0x5a5a1234;
 	t3_line(w1, "written over T3, read back over the bridge");
+	if (!w1)
+		t3_value("  wrote 0x5a5a1234, read ", b);
+	a = 0;
 	bool w2 = rtl_bridge_reg_write(T3_TEST_REG, 0xa5a5edcb) && plat_t3_raw_read(T3_TEST_REG, &a) && a == 0xa5a5edcb;
 	t3_line(w2, "written over the bridge, read back over T3");
+	if (!w2)
+		t3_value("  wrote 0xa5a5edcb, read ", a);
 	rtl_bridge_reg_write(T3_TEST_REG, orig);
 	if (!w1 || !w2) {
 		ext_error("T3 writes don't work this way: keep register access on the bridge\n");
@@ -215,6 +230,26 @@ bool rtl_cmd_ext(void)
 		return parse_snmp();
 	if (cmd_compare(0, "t3"))
 		return parse_t3();
+	if (cmd_compare(0, "bridge") && cmd_words_len == 1) {
+		plat_bridge_print();
+		return true;
+	}
+	if (cmd_compare(0, "bridge") && cmd_words_len == 2 && cmd_compare(1, "log")) {
+		plat_bridge_log();
+		return true;
+	}
+	if (cmd_compare(0, "bridge") && cmd_words_len == 3 && cmd_compare(1, "hold")) {
+		plat_bridge_hold(cmd_compare(2, "on"));
+		return true;
+	}
+	if (cmd_compare(0, "bridge") && cmd_words_len == 2 && cmd_compare(1, "raw")) {
+		plat_bridge_raw();
+		return true;
+	}
+	if (cmd_compare(0, "bridge") && cmd_words_len == 2 && cmd_compare(1, "probe")) {
+		plat_bridge_probe();
+		return true;
+	}
 	return false;
 }
 

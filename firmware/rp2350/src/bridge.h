@@ -51,6 +51,9 @@ extern struct bridge_stats bridge_stats;
 
 void bridge_init(void);
 void bridge_deinit(void);
+void bridge_raw(void);			/* "bridge raw": what arrived after power-up */
+void bridge_hold(bool on);		/* "bridge hold on|off": stop sending requests */			/* "bridge raw": what arrived after power-up */
+void bridge_probe(void);		/* the "bridge probe" wiring check */
 bool bridge_is_up(void);
 
 /*

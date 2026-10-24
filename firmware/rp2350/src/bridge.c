@@ -35,6 +35,11 @@ static volatile uint16_t rx_head;	/* written by the ISR */
 static uint16_t rx_tail;
 
 static struct link_rx rx;
+/* The first bytes after power-up, for "bridge raw" */
+#define RAW_KEEP		4096
+static uint8_t raw_keep[RAW_KEEP];
+static uint16_t raw_n;
+static bool hold;		/* "bridge hold": send nothing, only listen */
 static uint8_t tx_buf[LINK_ENC_MAX];
 static uint8_t seq;
 
@@ -78,8 +83,81 @@ static void uart_isr(void)
 		}
 		rx_ring[rx_head] = dr;
 		rx_head = next;
+		if (raw_n < RAW_KEEP)
+			raw_keep[raw_n++] = dr;
 		bridge_stats.uart_rx_bytes++;
 	}
+}
+
+
+/*
+ * Wiring check: GP0 and GP1 as plain inputs with pull-downs for 2 s,
+ * counting edges. An idle UART output reads high; an open wire reads low.
+ * The bridge beacons each second, so a connected, running one shows edges.
+ */
+void bridge_probe(void)
+{
+	static const uint pins[2] = { MODCHIP_BRIDGE_TX_PIN, MODCHIP_BRIDGE_RX_PIN };
+	unsigned edges[2] = { 0, 0 };
+	bool idle[2], last[2];
+
+	for (int i = 0; i < 2; i++) {
+		gpio_set_function(pins[i], GPIO_FUNC_SIO);
+		gpio_set_dir(pins[i], false);
+		gpio_pull_down(pins[i]);
+	}
+	sleep_us(200);
+	for (int i = 0; i < 2; i++)
+		idle[i] = last[i] = gpio_get(pins[i]);
+	absolute_time_t end = make_timeout_time_ms(2000);
+	while (!time_reached(end))
+		for (int i = 0; i < 2; i++) {
+			bool v = gpio_get(pins[i]);
+			if (v != last[i]) {
+				edges[i]++;
+				last[i] = v;
+			}
+		}
+	for (int i = 0; i < 2; i++)
+		printf("GP%u (%s): idles %s with a pull-down, %u edges in 2 s\n", pins[i],
+		       i ? "UART RX, to T5 pin 1" : "UART TX, to T5 pin 3", idle[i] ? "high" : "low", edges[i]);
+	gpio_set_function(MODCHIP_BRIDGE_TX_PIN, UART_FUNCSEL_NUM(UART, MODCHIP_BRIDGE_TX_PIN));
+	gpio_set_function(MODCHIP_BRIDGE_RX_PIN, UART_FUNCSEL_NUM(UART, MODCHIP_BRIDGE_RX_PIN));
+	gpio_pull_up(MODCHIP_BRIDGE_RX_PIN);
+	link_rx_reset(&rx);
+}
+
+
+static void hexdump(const uint8_t *p, unsigned n)
+{
+	for (unsigned i = 0; i < n; i += 16) {
+		printf("%04x ", i);
+		for (unsigned j = i; j < i + 16; j++)
+			j < n ? printf(" %02x", p[j]) : printf("   ");
+		printf("  ");
+		for (unsigned j = i; j < i + 16 && j < n; j++)
+			putchar_raw(p[j] >= 0x20 && p[j] < 0x7f ? p[j] : '.');
+		printf("\n");
+	}
+}
+
+
+/* "bridge raw": the first bytes received since power-up, and the frame
+ * being decoded now */
+void bridge_raw(void)
+{
+	printf("first %u bytes received since power-up:\n", raw_n);
+	hexdump(raw_keep, raw_n);
+	printf("frame being decoded: %u bytes, %u left in block, %s\n", rx.len, rx.left,
+	       rx.bad ? "bad" : "ok");
+	hexdump(rx.buf, rx.len < 256 ? rx.len : 256);
+}
+
+
+void bridge_hold(bool on)
+{
+	hold = on;
+	printf("bridge %s\n", on ? "on hold: no HELLO, only listening" : "active");
 }
 
 
@@ -94,6 +172,7 @@ void bridge_init(void)
 	gpio_pull_up(MODCHIP_BRIDGE_RX_PIN);
 
 	rx_head = rx_tail = 0;
+	raw_n = 0;
 	link_rx_reset(&rx);
 	ev_head = ev_tail = ev_count = 0;
 	irq_set_exclusive_handler(UART_IRQ_NUM(UART), uart_isr);
@@ -350,6 +429,8 @@ void bridge_second(void)
 		return;
 	since_reset_s++;
 	silent_s++;
+	if (hold)
+		return;
 	if (!up) {
 		try_hello();
 		if (!up && seen && silent_s >= SILENT_RESET_S)

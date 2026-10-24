@@ -41,6 +41,11 @@
 static repeating_timer_t tick_timer;
 static uint8_t led_state = SYS_LED_SLOW;
 static bool switch_powered;
+/* The 8051's recent output, for "bridge log": it prints at boot, often
+ * before anyone has the console open */
+#define LOG_KEEP	2048
+static char log_keep[LOG_KEEP];
+static size_t log_keep_n;		/* bytes ever stored; the ring holds the last LOG_KEEP */
 
 /* ---- what plat.h asks of this half ---- */
 
@@ -111,6 +116,53 @@ void plat_sys_led(uint8_t state)
 	led_state = state & 3;
 	if (bridge_is_up())
 		bridge_request(REQ_SET_LED, &led_state, 1, NULL, 0, NULL, 0, NULL);
+}
+
+
+void plat_bridge_print(void)
+{
+	const struct bridge_stats *s = &bridge_stats;
+
+	printf("bridge %s, requests %lu, timeouts %lu, link errors %lu, resets %lu\n"
+	       "UART rx %lu bytes (overruns %lu), tx %lu bytes; frames rx %lu, tx %lu\n",
+	       bridge_is_up() ? "up" : "down", (unsigned long)s->requests, (unsigned long)s->timeouts,
+	       (unsigned long)s->link_errors, (unsigned long)s->resets, (unsigned long)s->uart_rx_bytes,
+	       (unsigned long)s->rx_overruns, (unsigned long)s->uart_tx_bytes,
+	       (unsigned long)s->rx_frames, (unsigned long)s->tx_frames);
+}
+
+
+void plat_bridge_log(void)
+{
+	size_t start = log_keep_n > LOG_KEEP ? log_keep_n - LOG_KEEP : 0;
+
+	printf("--- 8051 output, %u bytes in all%s ---\n", (unsigned)log_keep_n,
+	       start ? ", the last 2 KiB" : "");
+	for (size_t i = start; i < log_keep_n; i++)
+		putchar_raw(log_keep[i % LOG_KEEP]);
+	printf("\n--- end ---\n");
+}
+
+
+void plat_bridge_hold(bool on)
+{
+	bridge_hold(on);
+}
+
+
+void plat_bridge_raw(void)
+{
+	bridge_raw();
+}
+
+
+void plat_bridge_probe(void)
+{
+	if (!switch_powered) {
+		printf("switch unpowered, pins released\n");
+		return;
+	}
+	bridge_probe();
 }
 
 
@@ -198,6 +250,8 @@ void bridge_on_log(const char *text, size_t len)
 {
 	static bool line_start = true;
 
+	for (size_t i = 0; i < len; i++)
+		log_keep[log_keep_n++ % LOG_KEEP] = text[i];
 	for (size_t i = 0; i < len; i++) {
 		if (line_start)
 			printf("[8051] ");
