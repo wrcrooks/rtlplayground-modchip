@@ -10,6 +10,9 @@
 #include "lwip/apps/snmp_mib2.h"
 
 #include "bridge.h"
+#ifndef MODCHIP_VERSION		/* the host tests define it */
+#include "modchip_version.h"
+#endif
 #include "net.h"
 #include "plat.h"
 #include "snmp_modchip.h"

@@ -8,6 +8,7 @@
 #include "pico/stdlib.h"
 #include "hardware/irq.h"
 #include "hardware/uart.h"
+#include "hardware/watchdog.h"
 
 #include "bridge.h"
 #include "link.h"
@@ -302,6 +303,7 @@ static int request_once(uint8_t type, const void *p1, size_t n1, const void *p2,
 	absolute_time_t until = make_timeout_time_ms(timeout_ms + len / 64);
 	while (!reply_in && !time_reached(until)) {
 		bridge_service();
+		watchdog_update();	/* a bounded wait: see WATCHDOG_MS in main.c */
 		if (!reply_in)
 			tight_loop_contents();
 	}

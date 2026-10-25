@@ -19,6 +19,7 @@ struct plat_sys {
 	uint16_t load_pm;		/* main loop busy, per mille, over the last second */
 	uint32_t heap_free, heap_total;
 	int16_t temp;			/* RP2350, 0.1 degC */
+	bool watchdog_reset;		/* this boot followed a watchdog timeout */
 };
 void plat_sys_read(struct plat_sys *s);
 

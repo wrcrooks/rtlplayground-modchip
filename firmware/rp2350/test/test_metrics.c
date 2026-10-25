@@ -104,6 +104,7 @@ void plat_sys_read(struct plat_sys *s)
 	s->heap_free = 200 * 1024;
 	s->heap_total = 270 * 1024;
 	s->temp = 382;
+	s->watchdog_reset = true;
 }
 
 static uint32_t u32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }

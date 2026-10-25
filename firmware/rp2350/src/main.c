@@ -13,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "pico/binary_info.h"
 #include "pico/flash.h"
 #include "pico/rand.h"
 #include "pico/stdlib.h"
@@ -24,6 +25,7 @@
 #include "bridge.h"
 #include "net.h"
 #include "metrics.h"
+#include "modchip_version.h"
 #include "plat.h"
 
 #define SYS_TICK_MS		5		/* RTLPlayground's SYS_TICK_HZ, 200 */
@@ -41,6 +43,16 @@
 static repeating_timer_t tick_timer;
 static uint8_t led_state = SYS_LED_SLOW;
 static bool switch_powered;
+/*
+ * The watchdog restarts the RP2350 when the firmware stops making progress:
+ * a panic (lwIP's asserts end in one), a hard fault, a loop that never
+ * returns. The main loop feeds it, and so do the waits that have their own
+ * time limits (plat_delay_ms(), a bridge request's reply), so a slow or
+ * silent 8051 never sets it off. 8 s is far above any single wait: making
+ * a certificate takes under 1 s, RTLPlayground's longest delay 3 s.
+ */
+#define WATCHDOG_MS		8000
+static bool watchdog_reset;		/* this boot followed a watchdog timeout */
 /* The 8051's recent output, for "bridge log": it prints at boot, often
  * before anyone has the console open */
 #define LOG_KEEP	2048
@@ -59,8 +71,10 @@ void plat_delay_ms(uint32_t ms)
 {
 	absolute_time_t until = make_timeout_time_ms(ms);
 
-	while (!time_reached(until))
+	while (!time_reached(until)) {
 		bridge_service();
+		watchdog_update();
+	}
 }
 
 
@@ -97,6 +111,7 @@ void plat_sys_read(struct plat_sys *s)
 	s->heap_total = total;
 	s->heap_free = total - used + mi.fordblks;
 	s->temp = rp_temp;
+	s->watchdog_reset = watchdog_reset;
 }
 
 
@@ -163,6 +178,16 @@ void plat_bridge_probe(void)
 		return;
 	}
 	bridge_probe();
+}
+
+
+/* "watchdog test": the main loop stops (interrupts stay on), as in a hang */
+void plat_watchdog_test(void)
+{
+	printf("Stopping the main loop: the watchdog restarts the RP2350 within %d s\n", WATCHDOG_MS / 1000);
+	stdio_flush();
+	for (;;)
+		tight_loop_contents();
 }
 
 
@@ -338,10 +363,15 @@ static void __attribute__((noreturn, noinline)) run_main_loop(void)
 }
 
 
+bi_decl(bi_program_version_string(MODCHIP_VERSION));
+
 int main(void)
 {
 	stdio_init_all();
+	watchdog_reset = watchdog_enable_caused_reboot();
 	printf("\nRTLPlayground mod chip, firmware " MODCHIP_VERSION "\n");
+	if (watchdog_reset)
+		printf("Restarted by the watchdog: the firmware had stopped\n");
 
 	gpio_init(PICO_DEFAULT_LED_PIN);
 	gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
@@ -365,9 +395,12 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 	uint32_t second_last = plat_uptime_s();
 	uint64_t busy_us = 0;
 
+	watchdog_enable(WATCHDOG_MS, true);
 	for (;;) {
 		uint64_t pass_start = time_us_64();
 		bool work;
+
+		watchdog_update();
 
 		check_power();
 		work = bridge_dispatch();

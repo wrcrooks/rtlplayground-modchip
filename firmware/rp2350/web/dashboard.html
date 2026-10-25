@@ -519,7 +519,8 @@ function render(m){
   if(!m.sfp.length)sb.appendChild(el("tr",{},[el("td",{class:"mut",text:"No SFP slots on this switch"})]));
   tiles("t-mod",[["Load",n1(m.modchip.load)+"<small> %</small>"],
     ["Heap Free",Math.round(m.modchip.heap_free/1024)+"<small> KiB</small>"],
-    ["Temperature",n1(m.modchip.temp)+"<small> °C</small>"],["Uptime",dur(m.uptime)]]);
+    ["Temperature",n1(m.modchip.temp)+"<small> °C</small>"],["Uptime",dur(m.uptime)],
+    ["Last Restart",m.modchip.watchdog_reset?"<span style='color:var(--bad)'>Watchdog</span>":"Normal"]]);
   var b=m.bridge;
   tiles("t-bridge",[["State",m.bridge_up?"Up":"<span style='color:var(--bad)'>Down</span>"],
     ["Link Load",n1(b.link_load)+"<small> %</small>"],["Timeouts",String(b.timeouts)],

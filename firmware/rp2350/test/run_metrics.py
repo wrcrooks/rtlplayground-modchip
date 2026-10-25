@@ -47,6 +47,7 @@ def main():
           and abs(s["bias"] - 6.2) < 0.01 and abs(s["tx_uw"] - 501.2) < 0.05, "SFP diagnostics in natural units")
     check(not m["sfp"][1]["present"], "an empty slot")
     check(m["modchip"]["load"] == 12.5 and m["modchip"]["temp"] == 38.2, "mod chip load and temperature")
+    check(m["modchip"]["watchdog_reset"] is True, "a watchdog restart is reported")
     check(m["bridge"]["link_load"] == 10.0 and m["bridge"]["frames_ps"] == 20, "bridge link load, frames/s")
     check(m["t3"] == {"up": True, "enabled": True, "khz": 400, "reads": 1000, "writes": 200, "errors": 1}, "T3 status")
     check(m["events"] == [{"seq": 1, "t": 4000, "port": 4, "link": 0, "mbps": 0}], "link events")

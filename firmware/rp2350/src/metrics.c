@@ -319,8 +319,9 @@ size_t metrics_json(char *buf, size_t max)
 			    d->temp / 256.0, d->vcc / 10000.0, d->bias * 0.002, d->tx_power / 10.0, d->rx_power / 10.0);
 		add(&o, "}");
 	}
-	add(&o, "],\"modchip\":{\"load\":%.1f,\"heap_free\":%lu,\"heap_total\":%lu,\"temp\":%.1f},",
-	    sys.load_pm / 10.0, (unsigned long)sys.heap_free, (unsigned long)sys.heap_total, sys.temp / 10.0);
+	add(&o, "],\"modchip\":{\"load\":%.1f,\"heap_free\":%lu,\"heap_total\":%lu,\"temp\":%.1f,\"watchdog_reset\":%s},",
+	    sys.load_pm / 10.0, (unsigned long)sys.heap_free, (unsigned long)sys.heap_total, sys.temp / 10.0,
+	    sys.watchdog_reset ? "true" : "false");
 	const struct bridge_stats *bs = &bridge_stats;
 	add(&o, "\"bridge\":{\"link_load\":%.1f,\"frames_ps\":%u,\"requests\":%lu,\"timeouts\":%lu,\"link_errors\":%lu,"
 	    "\"events_dropped\":%lu,\"rx_overruns\":%lu,\"resets\":%lu,\"rx_frames\":%lu,\"tx_frames\":%lu,"

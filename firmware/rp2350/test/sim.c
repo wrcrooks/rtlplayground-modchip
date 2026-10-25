@@ -303,6 +303,7 @@ static int newcerts;
 bool plat_https_enable(bool on) { https_on = on; return true; }
 bool plat_https_enabled(void) { return https_on; }
 void plat_bridge_print(void) { }
+void plat_watchdog_test(void) { }
 void plat_bridge_probe(void) { }
 void plat_bridge_log(void) { }
 void plat_bridge_raw(void) { }

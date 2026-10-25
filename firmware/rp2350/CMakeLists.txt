@@ -32,19 +32,16 @@ if (NOT EXISTS ${RTLP}/cmd_parser.c)
     message(FATAL_ERROR "rtlplayground/ is empty: git submodule update --init")
 endif()
 
+# The version comes from git on every build (tools/version.cmake), not only
+# when CMake configures: generated/version.h and generated/modchip_version.h
 find_package(Git QUIET)
-execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --dirty --tags
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    OUTPUT_VARIABLE MODCHIP_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if (NOT MODCHIP_VERSION)
-    set(MODCHIP_VERSION unknown)
-endif()
-string(TIMESTAMP BUILD_DATE "%Y-%m-%d %H:%M:%S")
 set(GEN ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GEN})
-file(WRITE ${GEN}/version.h.new
-    "#ifndef VERSION_H\n#define VERSION_H\n#define VERSION_SW \"modchip-${MODCHIP_VERSION}\"\n#define BUILD_DATE \"${BUILD_DATE}\"\n#endif\n")
-configure_file(${GEN}/version.h.new ${GEN}/version.h COPYONLY)
+set(VERSION_CMD ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_LIST_DIR} -DGEN=${GEN} -DGIT=${GIT_EXECUTABLE}
+    -P ${CMAKE_CURRENT_LIST_DIR}/tools/version.cmake)
+execute_process(COMMAND ${VERSION_CMD})
+add_custom_target(modchip_version COMMAND ${VERSION_CMD}
+    BYPRODUCTS ${GEN}/version.h ${GEN}/modchip_version.h VERBATIM)
 
 # The web UI, the mod chip's own pages (web/) and the default config
 file(GLOB RTLP_HTML ${RTLP}/html/* ${CMAKE_CURRENT_LIST_DIR}/web/*)
@@ -85,6 +82,8 @@ add_library(rtlp OBJECT
     src/rtl_ext.c
     src/rtl_metrics.c
 )
+add_dependencies(rtlp modchip_version)
+
 target_include_directories(rtlp PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
     ${CMAKE_CURRENT_LIST_DIR}/stub
@@ -128,8 +127,9 @@ add_executable(modchip
     src/rtl_sfr.S
     ${GEN}/web_assets.c
     $<TARGET_OBJECTS:rtlp>)
-target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge)
-target_compile_definitions(modchip PRIVATE MODCHIP_VERSION="${MODCHIP_VERSION}" MODCHIP_LINK_BAUD=976562)
+target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge ${GEN})
+add_dependencies(modchip modchip_version)
+target_compile_definitions(modchip PRIVATE MODCHIP_LINK_BAUD=976562)
 target_compile_options(modchip PRIVATE -Wall)
 target_link_options(modchip PRIVATE -Wl,--wrap=sfp_read_block -Wl,--wrap=handle_sfp)
 # lwIP's SNMP core and MIB-2 groups, without its transport (snmp.c has its own)
@@ -177,5 +177,4 @@ else()
     pico_enable_stdio_rtt(modchip 1)
 endif()
 pico_set_program_name(modchip "RTLPlayground mod chip")
-pico_set_program_version(modchip "${MODCHIP_VERSION}")
 pico_add_extra_outputs(modchip)

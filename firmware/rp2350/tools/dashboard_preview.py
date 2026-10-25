@@ -83,7 +83,7 @@ def metrics():
                  "tx_uw": 520 + 10 * math.sin(t / 70), "rx_uw": 260 + 30 * math.sin(t / 90)},
                 {"slot": 2, "present": False, "los": True, "vendor": "", "model": "", "ddm": False}],
         "modchip": {"load": 8 + 6 * abs(math.sin(t / 30)) + random.random(), "heap_free": 190000 + random.randint(0, 9000),
-                    "heap_total": 276000, "temp": 39 + math.sin(t / 500)},
+                    "heap_total": 276000, "temp": 39 + math.sin(t / 500), "watchdog_reset": False},
         "bridge": {"link_load": 12 + 8 * abs(math.sin(t / 40)), "frames_ps": 25, "requests": int(t * 30),
                    "timeouts": int(t) // 700, "link_errors": 0, "events_dropped": 0, "rx_overruns": 0, "resets": 0,
                    "rx_frames": int(t * 25), "tx_frames": int(t * 20), "uart_rx": int(t * 9000),

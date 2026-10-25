@@ -230,6 +230,10 @@ bool rtl_cmd_ext(void)
 		return parse_snmp();
 	if (cmd_compare(0, "t3"))
 		return parse_t3();
+	if (cmd_compare(0, "watchdog") && cmd_words_len == 2 && cmd_compare(1, "test")) {
+		plat_watchdog_test();
+		return true;
+	}
 	if (cmd_compare(0, "bridge") && cmd_words_len == 1) {
 		plat_bridge_print();
 		return true;

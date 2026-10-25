@@ -20,6 +20,7 @@ void plat_delay_ms(uint32_t ms);		/* keeps the bridge link serviced */
 uint32_t plat_random32(void);
 void plat_sys_led(uint8_t state);		/* SYS_LED_* */
 void plat_reboot(void);				/* the switch and the RP2350 */
+void plat_watchdog_test(void);			/* "watchdog test": stop, so the watchdog restarts us */
 void plat_bridge_print(void);			/* link state and counters, for "bridge" */
 void plat_bridge_log(void);			/* "bridge log": the 8051's recent output */
 void plat_bridge_hold(bool on);			/* "bridge hold on|off" */

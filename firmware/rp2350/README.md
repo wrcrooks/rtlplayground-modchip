@@ -167,6 +167,22 @@ comes back on at the next replay.
 **Pull-ups.** The mod chip has 4.7 kΩ pull-ups on T3. On a test rig, wire them to the switch's 3.3 V
 (T3 pin 4).
 
+## Watchdog
+
+The RP2350's watchdog restarts the mod chip when the firmware stops making progress: a panic (lwIP's
+asserts end in one), a hard fault, or a loop that never returns. Without it, any of these needed a
+hand on the reset button.
+
+- **Timeout:** 8 s, far above any single wait. Making a certificate takes under 1 s, and
+  RTLPlayground's longest delay is 3 s.
+- **Fed by:** the main loop, and the waits that have their own time limits: `plat_delay_ms()` and a
+  bridge request's reply. So a slow or silent 8051 never sets it off; the bridge's own PING and
+  reset handling deals with that.
+- **Reported:** `"watchdog_reset": true` in the `modchip` section of `/metrics.json`, "Last Restart:
+  Watchdog" on the dashboard's Mod Chip card, and a line on the console at boot.
+- **`watchdog test`:** stops the main loop on purpose, to check the watchdog on the hardware. The
+  mod chip comes back within 8 s.
+
 ## Switch firmware updates
 
 The web UI's firmware upload (`/upload`) updates the **8051** through the bridge.
@@ -302,6 +318,10 @@ git submodule update --init
 cmake -S firmware/rp2350 -B firmware/rp2350/build -G Ninja -DPICO_SDK_PATH=/path/to/pico-sdk
 ninja -C firmware/rp2350/build          # build/modchip.uf2, .elf, .bin
 ```
+
+**Version.** `git describe --always --dirty --tags` of this repository, taken on every build by
+`tools/version.cmake`, so a build from an edited tree says `-dirty`. The headers it writes, and so
+the build date, change only when that version does.
 
 Options:
 
