@@ -37,8 +37,10 @@ compile them, with `test/sdcc_shim.h` forced in:
 - the machine definition.
 
 One change in the submodule serves the mod chip: `cmd_parser.c` hands commands it doesn't know to
-`CMD_PARSER_EXT` when that is defined, as it is only here. That is how the `https` and `snmp` commands
-reach the parser, so the web UI saves them with the rest of the config.
+`CMD_PARSER_EXT` when that is defined, as it is only here. That is how the `https`, `snmp` and `t3`
+commands reach the parser. The web UI's Save keeps only the commands its `CONF_CMDS` list knows, so
+`tools/embed_web.py` adds these to it, and `test/check_conf_merge.js` checks the result against the
+submodule's `app.js`.
 
 Around them:
 
@@ -193,6 +195,11 @@ The web UI's firmware upload (`/upload`) updates the **8051** through the bridge
   on the MokerLink. Don't power-cycle the switch until it's back.
 
 ## HTTPS
+
+**Web UI.** System > Services has an HTTPS switch (added to RTLPlayground's page by
+`tools/embed_web.py`). It shows the running state, the certificate's fingerprint and a link to the
+HTTPS address. Turning it off from a page opened over HTTPS asks first. Like the other switches there,
+it takes effect at once; Save to flash keeps it.
 
 ```
 https on          # TLS on port 443; HTTP on port 80 stays

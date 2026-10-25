@@ -13,6 +13,7 @@
 #include "lwip/altcp.h"
 #include "lwip/altcp_tcp.h"
 #include "lwip/altcp_tls.h"
+#include "lwip/tcp.h"
 
 #include "bridge.h"
 #include "metrics.h"
@@ -821,6 +822,23 @@ bool httpd_tls_start(struct altcp_tls_config *conf)
 void httpd_tls_stop(void)
 {
 	if (listen_tls) {
+		/* altcp_tls's close clears the inner pcb's callbacks, and tcp_poll()
+		 * asserts on a listening pcb; altcp_tcp's close reads a poll field
+		 * that a listening pcb doesn't have. Close the TCP listener
+		 * underneath with tcp_close() instead, then the empty wrappers. */
+		struct altcp_pcb *inner = listen_tls->inner_conn;
+
+		listen_tls->inner_conn = NULL;
+		if (inner) {
+			struct tcp_pcb *tl = inner->state;
+
+			inner->state = NULL;
+			if (tl) {
+				tcp_arg(tl, NULL);
+				tcp_close(tl);
+			}
+			altcp_close(inner);
+		}
 		altcp_close(listen_tls);
 		listen_tls = NULL;
 	}

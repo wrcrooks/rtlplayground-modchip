@@ -22,7 +22,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -30,10 +30,13 @@ all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/test_metrics $(BUILD)/test_upload 
 	python3 run_sim.py $(BUILD)/sim
 	python3 run_metrics.py $(BUILD)/test_metrics $(BUILD)
 	node check_dashboard.js ../web/dashboard.html $(BUILD)/history.bin $(BUILD)/metrics.json
+	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS)" > $(BUILD)/system_https.html
+	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls
 	python3 run_snmp.py $(BUILD)/test_snmp
 	$(BUILD)/test_httpd
+	$(BUILD)/test_httpd_tls
 else
 	@echo "SKIP  test_tls, test_snmp, test_httpd: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
 endif
@@ -62,6 +65,17 @@ $(BUILD)/test_httpd: test_httpd.c ../src/httpd.c ../src/upload.c ../src/upload.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
 		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c ../src/upload.c ../src/link.c $(LWIP_CORE)
+
+# The same with TLS (the SDK's altcp_tls_mbedtls.c, as the firmware builds it): HTTPS
+# switched on and off, the listener closed under lwIP's asserts
+$(BUILD)/test_httpd_tls: test_httpd.c ../src/httpd.c ../src/tls_cert.c ../src/lwipopts.h lwip_httpd_tls/lwipopts.h mbedtls_test_config.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -DTEST_HTTPD_TLS -Ilwip_httpd_tls -Ilwip_httpd -I. -I../src -I$(LWIP)/src/include \
+		-I$(RTLP)/modchip/bridge -I$(LWIP)/src/apps/altcp_tls -I$(MBEDTLS)/include -I$(MBEDTLS)/library \
+		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' '-DMODCHIP_VERSION="test"' \
+		-o $@ test_httpd.c ../src/httpd.c ../src/upload.c ../src/link.c ../src/tls_cert.c $(LWIP_CORE) \
+		$(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c \
+		$(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c $(wildcard $(MBEDTLS)/library/*.c)
 
 $(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/mbedtls_config.h mbedtls_test_config.h
 	@mkdir -p $(BUILD)

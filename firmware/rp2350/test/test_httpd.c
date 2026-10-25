@@ -56,8 +56,10 @@ void rtl_http_cmd(char *body)
 }
 uint16_t rtl_http_cont(uint8_t *dst, uint16_t max) { (void)dst; (void)max; return 0; }
 bool rtl_password_ok(const char *v) { return !strncmp(v, "1234", 4) && (!v[4] || v[4] == '&'); }
-/* No TLS on the host, no DHCP options to keep */
+/* No TLS on the host unless TEST_HTTPD_TLS, no DHCP options to keep */
+#ifndef TEST_HTTPD_TLS
 struct altcp_pcb *altcp_tls_wrap(struct altcp_tls_config *config, struct altcp_pcb *inner) { (void)config; (void)inner; return NULL; }
+#endif
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
 size_t metrics_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 uint8_t *metrics_history(size_t *len) { *len = 0; return NULL; }
@@ -170,6 +172,39 @@ static err_t c_connected(void *arg, struct tcp_pcb *pcb, err_t err)
 	return ERR_OK;
 }
 
+#ifdef TEST_HTTPD_TLS
+#include "mbedtls/platform_time.h"
+#include "tls_cert.h"
+
+/* The RP2350's TRNG and clock, as pico_mbedtls and tls.c provide them */
+int mbedtls_hardware_poll(void *data, unsigned char *out, size_t len, size_t *olen)
+{
+	FILE *f = fopen("/dev/urandom", "rb");
+
+	(void)data;
+	*olen = f ? fread(out, 1, len, f) : 0;
+	if (f)
+		fclose(f);
+	return *olen == len ? 0 : -1;
+}
+
+mbedtls_ms_time_t mbedtls_ms_time(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (mbedtls_ms_time_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+
+static bool tls_c_gone;
+static void tls_c_err(void *arg, err_t err)
+{
+	(void)arg;
+	(void)err;
+	tls_c_gone = true;
+}
+#endif
+
 /* One request: returns the response; the main loop runs meanwhile */
 static const char *request(const uint8_t *req, size_t len)
 {
@@ -230,7 +265,7 @@ static void make_image(uint8_t *img, size_t n, unsigned seed)
 	img[n - 1] = c >> 8;
 }
 
-static uint8_t img[IMAGE * 2];
+static uint8_t img[0x80000];	/* up to the standard layout's image, for the wrong-layout case */
 
 int main(void)
 {
@@ -331,6 +366,47 @@ int main(void)
 	      "a client gone halfway: the staging area is invalidated");
 	r = request(req, upload_request(img, IMAGE, cookie));
 	check(strstr(r, "200 OK") != NULL, "  and the next upload goes through");
+
+#ifdef TEST_HTTPD_TLS
+	/* HTTPS on, off and on again, as "https on|off" and the System page's
+	 * switch do it, the second time with a client connected on 443. Closing
+	 * the TLS listener used to trip lwIP's "invalid socket state" assert. */
+	static uint8_t key[1024], crt[1024];
+	size_t kl = sizeof(key), crl = sizeof(crt);
+	check(tls_make_cert("sim-switch", key, &kl, crt, &crl) == 0, "TLS: key and certificate made");
+	for (int round = 0; round < 2; round++) {
+		struct altcp_tls_config *conf = altcp_tls_create_config_server_privkey_cert(key, kl, NULL, 0, crt, crl);
+		check(conf && httpd_tls_start(conf), round ? "TLS: listening on 443 again" : "TLS: listening on 443");
+		struct tcp_pcb *c = NULL;
+		if (round) {
+			ip_addr_t lo;
+			IP_ADDR4(&lo, 127, 0, 0, 1);
+			c = tcp_new();
+			tcp_err(c, tls_c_err);
+			tcp_connect(c, &lo, 443, NULL);
+			for (int i = 0; i < 100; i++) {
+				netif_poll_all();
+				sys_check_timeouts();
+				httpd_poll();
+			}
+			check(c->state == ESTABLISHED, "  a client connects on 443");
+		}
+		httpd_tls_stop();
+		altcp_tls_free_config(conf);
+		for (int i = 0; i < 100; i++) {
+			netif_poll_all();
+			sys_check_timeouts();
+			httpd_poll();
+		}
+		check(true, round ? "  HTTPS off with the client connected" : "  HTTPS off");
+		if (c && !tls_c_gone)
+			tcp_abort(c);
+		if (round)
+			check(tls_c_gone, "  and the client's connection is reset");
+	}
+	r = request((const uint8_t *)"GET /status.json HTTP/1.1\r\n\r\n", 29);
+	check(!strncmp(r, "HTTP/1.1 401", 12), "TLS: HTTP on port 80 still answers");
+#endif
 
 	printf("%s\n", failures ? "FAILED" : "all passed");
 	return failures ? 1 : 0;
