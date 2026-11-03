@@ -6,12 +6,12 @@ RTLP = ../rtlplayground
 MACHINE = SWGT024_V2_0_UNMANAGED
 
 # The RTLPlayground half, built as CMakeLists.txt builds it for the RP2350
-RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c rtl837x_port.c rtl837x_stp.c \
+RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_port.c rtl837x_stp.c \
 	rtl837x_lacp.c rtl837x_igmp.c rtl837x_lldp.c rtl837x_bandwidth.c rtl837x_storm.c \
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	$(BUILD)/web_assets.c sim.c
+	../src/rtl_poe.c $(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
 	-DRTLP_HOST_TEST -DMACHINE_$(MACHINE) -DMACHINE_NAME=$(MACHINE) \
@@ -24,10 +24,11 @@ MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
 SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
-all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
 	$(BUILD)/test_upload
 	python3 run_sim.py $(BUILD)/sim
+	python3 run_sim.py $(BUILD)/sim-poe
 	python3 run_metrics.py $(BUILD)/test_metrics $(BUILD)
 	node check_dashboard.js ../web/dashboard.html $(BUILD)/history.bin $(BUILD)/metrics.json
 	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS)" > $(BUILD)/system_https.html
@@ -101,6 +102,12 @@ $(BUILD)/rtl_sfr.o: ../src/rtl_sfr.S
 
 $(BUILD)/sim: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
 	$(CC) $(SIM_FLAGS) -o $@ $(SIM_SRC) $(BUILD)/rtl_sfr.o
+
+# The same for the PoE board's switch: PoE through the bridge's POE_* requests
+POE_MACHINE = POE_2G040210GSM
+$(BUILD)/sim-poe: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
+	$(CC) $(subst $(MACHINE),$(POE_MACHINE),$(SIM_FLAGS)) -o $@ \
+		$(subst machine/$(MACHINE).c,machine/$(POE_MACHINE).c,$(SIM_SRC)) $(BUILD)/rtl_sfr.o
 
 clean:
 	rm -rf $(BUILD)

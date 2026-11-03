@@ -28,6 +28,7 @@
 #include "syslog.h"
 #include "uip/uip.h"
 #include "httpd/page_impl.h"
+#include "rtl8238.h"
 
 #include "bridge.h"
 #include "plat.h"
@@ -140,6 +141,10 @@ void rtl_bridge_up(void)
 		print_string("Config sector is blank, writing the default config\n");
 		flash_default_config();
 	}
+	/* The 8051 loaded the PoE controller before its HELLO: learn whether it
+	 * runs, before the config's "poe port" lines (rtl_poe.c) */
+	if (machine.pse_rtl8238)
+		pse_read_ports();
 	execute_config();
 	port_l2_static_mgmt(uip_ethaddr.addr, management_vlan, false);
 	hostname_default();
@@ -550,6 +555,8 @@ bool rtl_http_get(char *path)
 		send_isolation();
 	} else if (is_word(q, "/mtu.json")) {
 		send_mtu();
+	} else if (is_word(q, "/poe.json")) {
+		send_poe();
 	} else if (is_word(q, "/lag.json")) {
 		send_lag();
 	} else if (is_word(q, "/stp.json")) {

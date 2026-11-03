@@ -34,7 +34,11 @@ RTLPlayground's chip-level modules there. Build it from that repository's root:
 ```
 make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_UNMANAGED LAYOUT=compact   # MokerLink, 512 KiB
 make -f modchip/bridge/Makefile MACHINE=SWGT024_V2_0_MANAGED                    # XikeStor, 2 MiB
+make -f modchip/bridge/Makefile MACHINE=POE_2G040210GSM                         # MokerLink PoE, 2 MiB
 ```
+
+The PoE switch's controller image goes into that last build with `tools/add_pse_image.py`. The RP2350
+firmware for that board is `-DMODCHIP_BOARD=poe`.
 
 ## Rebuilding the hardware
 

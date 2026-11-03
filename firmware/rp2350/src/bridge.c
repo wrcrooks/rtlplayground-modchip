@@ -21,6 +21,7 @@
 #define TIMEOUT_MS		150	/* 100 ms, the protocol's figure, plus a full frame's transfer */
 #define TIMEOUT_SLOW_MS		500	/* 64 table entries, about 1.3 KB back; SerDes setup */
 #define TIMEOUT_FLASH_MS	3000	/* a sector erase on a W25Q40 takes up to 400 ms, slow writes more */
+#define TIMEOUT_POE_LOAD_MS	20000	/* the RTL8238B image load, about 10 s */
 #define TRIES			3
 
 #define PING_MISSES		3	/* the bridge drops the host after 3 s without a request */
@@ -180,9 +181,11 @@ void bridge_init(void)
 	irq_set_enabled(UART_IRQ_NUM(UART), true);
 	uart_set_irqs_enabled(UART, true, false);	/* RX and RX timeout */
 
+#ifdef MODCHIP_RESET_PIN
 	gpio_init(MODCHIP_RESET_PIN);
 	gpio_put(MODCHIP_RESET_PIN, 0);
 	gpio_set_dir(MODCHIP_RESET_PIN, GPIO_OUT);
+#endif
 
 	up = false;
 	hello_now = true;
@@ -329,10 +332,13 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 		return BRIDGE_TIMEOUT;
 	if (type == REQ_FLASH_ERASE || type == REQ_FLASH_WRITE)
 		timeout = TIMEOUT_FLASH_MS;
-	else if (type == REQ_TBL_READ || type == REQ_FLASH_ID || type == REQ_SDS_CONFIG)
+	else if (type == REQ_TBL_READ || type == REQ_FLASH_ID || type == REQ_SDS_CONFIG
+		 || type == REQ_POE_READ || type == REQ_POE_PORT)
 		timeout = TIMEOUT_SLOW_MS;
+	else if (type == REQ_POE_LOAD)
+		timeout = TIMEOUT_POE_LOAD_MS;
 	/* A frame sent twice is worse than a frame lost; the peer retransmits */
-	if (type == REQ_TX_FRAME || type == REQ_REBOOT)
+	if (type == REQ_TX_FRAME || type == REQ_REBOOT || type == REQ_POE_LOAD)
 		tries = 1;
 	bridge_stats.requests++;
 	while (tries--) {
@@ -412,11 +418,16 @@ static void reset_switch(void)
 {
 	if (since_reset_s < RESET_HOLDOFF_S)
 		return;
+#ifdef MODCHIP_RESET_PIN
 	printf("bridge: not answering, resetting the switch\n");
 	gpio_put(MODCHIP_RESET_PIN, 1);
 	sleep_ms(RESET_PULSE_MS);
 	gpio_put(MODCHIP_RESET_PIN, 0);
 	bridge_stats.resets++;
+#else
+	/* The board has no reset driver: power-cycle the switch by hand */
+	printf("bridge: not answering, and this board can't reset the switch\n");
+#endif
 	since_reset_s = 0;
 	silent_s = 0;
 }

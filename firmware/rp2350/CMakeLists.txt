@@ -1,16 +1,19 @@
 cmake_minimum_required(VERSION 3.13)
 
 # Pico SDK 2.x: PICO_SDK_PATH in the environment or on the command line
-# modchip: the mod chip itself; beetle: a DFRobot Beetle RP2350 wired to the
-# switch as a stand-in (docs/beetle-test-rig.md)
-set(MODCHIP_BOARD modchip CACHE STRING "Target board: modchip or beetle")
-set_property(CACHE MODCHIP_BOARD PROPERTY STRINGS modchip beetle)
+# modchip: the mod chip itself; poe: the mod chip for the MokerLink
+# POE-2G040210GSM (hardware/poe/); beetle: a DFRobot Beetle RP2350 wired to
+# the switch as a stand-in (docs/beetle-test-rig.md)
+set(MODCHIP_BOARD modchip CACHE STRING "Target board: modchip, poe or beetle")
+set_property(CACHE MODCHIP_BOARD PROPERTY STRINGS modchip poe beetle)
 if (MODCHIP_BOARD STREQUAL "beetle")
     set(PICO_BOARD modchip_beetle)
 elseif (MODCHIP_BOARD STREQUAL "modchip")
     set(PICO_BOARD modchip)
+elseif (MODCHIP_BOARD STREQUAL "poe")
+    set(PICO_BOARD modchip_poe)
 else()
-    message(FATAL_ERROR "MODCHIP_BOARD must be modchip or beetle")
+    message(FATAL_ERROR "MODCHIP_BOARD must be modchip, poe or beetle")
 endif()
 set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
 option(MODCHIP_RP2354 "RP2354A build: in-package flash, U5 not fitted" OFF)
@@ -25,8 +28,14 @@ set(CMAKE_C_STANDARD 11)
 pico_sdk_init()
 
 # RTLPlayground's board definition: SWGT024_V2_0_UNMANAGED (MokerLink) or
-# SWGT024_V2_0_MANAGED (XikeStor); the hardware is the same SWTG024AS board
-set(RTLP_MACHINE SWGT024_V2_0_UNMANAGED CACHE STRING "RTLPlayground machine")
+# SWGT024_V2_0_MANAGED (XikeStor), the same SWTG024AS board; POE_2G040210GSM
+# for the PoE board, its default
+if (MODCHIP_BOARD STREQUAL "poe")
+    set(RTLP_MACHINE_DEFAULT POE_2G040210GSM)
+else()
+    set(RTLP_MACHINE_DEFAULT SWGT024_V2_0_UNMANAGED)
+endif()
+set(RTLP_MACHINE ${RTLP_MACHINE_DEFAULT} CACHE STRING "RTLPlayground machine")
 set(RTLP ${CMAKE_CURRENT_LIST_DIR}/rtlplayground)
 if (NOT EXISTS ${RTLP}/cmd_parser.c)
     message(FATAL_ERROR "rtlplayground/ is empty: git submodule update --init")
@@ -56,6 +65,7 @@ add_library(rtlp OBJECT
     ${RTLP}/cmd_parser.c
     ${RTLP}/cmd_editor.c
     ${RTLP}/httpd/page_impl.c
+    ${RTLP}/httpd/page_poe.c
     ${RTLP}/rtl837x_port.c
     ${RTLP}/rtl837x_stp.c
     ${RTLP}/rtl837x_lacp.c
@@ -81,6 +91,7 @@ add_library(rtlp OBJECT
     src/rtl_udp.c
     src/rtl_ext.c
     src/rtl_metrics.c
+    src/rtl_poe.c
 )
 add_dependencies(rtlp modchip_version)
 

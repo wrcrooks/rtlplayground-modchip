@@ -135,5 +135,6 @@ DRC errors or warnings and is fully connected.
 5. **Measure the height.** The board sits on J1's plastic spacer, about 2.5 mm above the switch PCB.
    It is 1.0 mm thick and its tallest part reaches 1.1 mm above it. Trim J1's pins flush on top, and
    check the lid's clearance over T7.
-6. **Remember the firmware.** The 8051 bridge in RTLPlayground's `feat/modchip` has no
-   `POE_2G040210GSM` build yet.
+6. **Firmware.** Build the RP2350's with `-DMODCHIP_BOARD=poe` (`firmware/rp2350/README.md`) and the
+   8051 bridge with `MACHINE=POE_2G040210GSM`, plus the PoE image (RTLPlayground's
+   `modchip/bridge/README.md`). Neither has run on this switch yet.

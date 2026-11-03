@@ -331,6 +331,25 @@ Options:
 - `-DMODCHIP_BOARD=beetle` for a DFRobot Beetle RP2350 wired to the switch as a stand-in for the mod
   chip. It has the same pins, 2 MiB flash and a USB serial console. Wiring and steps are in
   [docs/beetle-test-rig.md](../../docs/beetle-test-rig.md).
+- `-DMODCHIP_BOARD=poe` for the mod chip on the MokerLink POE-2G040210GSM
+  ([hardware/poe/](../../hardware/poe/README.md)); `RTLP_MACHINE` then defaults to
+  `POE_2G040210GSM`. The differences are below.
+
+**The PoE board** (`boards/modchip_poe.h`) uses the same GPIOs as the first board, on other headers.
+The UART is on GP0/GP1 to T9, and the slave interface on GP10/GP11 to T7. Its flash is 2 MiB, a
+W25Q16JV or an RP2354A's own; the same build runs on both. Otherwise:
+
+- **No T8 header.**
+- **No reset driver.** When the bridge stops answering, the firmware reports it on the console but
+  can't reset the switch; power-cycle it instead.
+- **PoE.** Only the 8051 reaches the RTL8238B PoE controller, and it loads the controller's image at
+  boot. `src/rtl_poe.c` implements RTLPlayground's `rtl8238.h` over the bridge's `POE_READ`,
+  `POE_PORT` and `POE_LOAD` requests. The `poe` command, the saved `poe port <n> on|off` lines and
+  the web UI's PoE tab (`/poe.json`) work as on RTLPlayground. They do nothing unless the bridge's
+  HELLO has `HELLO_POE`.
+- **The bridge image.** Build it with `MACHINE=POE_2G040210GSM` (RTLPlayground's
+  `modchip/bridge/README.md`). Add the PoE image to it with `tools/add_pse_image.py`, or PoE stays
+  off.
 
 **Flashing.** There's no USB, so flash over SWD on J5 with a debug probe:
 

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "machine.h"
+#include "rtl8238.h"
 #include "bridge.h"
 #include "plat.h"
 
@@ -31,6 +32,11 @@ static int sds_configs;
 static uint8_t sds_last[2];
 static bool sfp_module;
 static int stat_reads;
+
+/* The RTL8238B behind the bridge's POE_* requests, on a PoE machine: port 1
+ * powers a class 0 device at 53.5 V and 120 mA, ports 2-4 are empty */
+static uint8_t poe_loaded = 1, poe_en[4] = { 1, 1, 1, 1 };
+static int poe_loads;
 
 /* The MIB counters: a known value for each port and counter */
 static uint64_t stat_value(uint8_t port, uint8_t cnt)
@@ -256,6 +262,33 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 			tx_len[n_tx++] = n - 1;
 		}
 		break;
+	case REQ_POE_READ:
+		if (!(bridge_hello.flags & HELLO_POE))
+			return ST_UNKNOWN;
+		r[0] = poe_loaded;
+		r[1] = poe_loaded ? 4 : 0;
+		out = 2;
+		for (int i = 0; poe_loaded && i < 4; i++) {
+			uint16_t ir = i ? 0 : 3933,	/* 120 mA */ vr = i ? 0 : 535 * 512 / 10;
+			uint8_t q[8] = { i ? 6 : 4, i ? 0 : 0xc, !i && poe_en[i], poe_en[i], ir, ir >> 8, vr, vr >> 8 };
+			memcpy(r + out, q, 8);
+			out += 8;
+		}
+		break;
+	case REQ_POE_PORT:
+		if (!(bridge_hello.flags & HELLO_POE))
+			return ST_UNKNOWN;
+		if (n != 2 || p[0] < 1 || p[0] > 4)
+			return ST_BAD_ARGUMENT;
+		poe_en[p[0] - 1] = p[1];
+		break;
+	case REQ_POE_LOAD:
+		if (!(bridge_hello.flags & HELLO_POE))
+			return ST_UNKNOWN;
+		poe_loads++;
+		r[0] = poe_loaded;
+		out = 1;
+		break;
 	case REQ_SET_LED:
 	case REQ_FLASH_ERASE:
 	case REQ_FLASH_WRITE:
@@ -381,13 +414,21 @@ int main(void)
 	memcpy(bridge_hello.mac, "\x06\x0f\x00\xdd\x3b\x3e", 6);
 	bridge_hello.flash_size = 0x80000;
 	strcpy(bridge_hello.machine, "SWGT024 V2.0 Unmanaged");
+	extern __code const struct machine machine;
+	if (machine.pse_rtl8238) {
+		bridge_hello.flags |= HELLO_POE;
+		bridge_hello.flash_size = 0x200000;
+		/* A saved config that turns port 3's PoE off, as the web UI saves it */
+		static const char saved[] = "ip 192.168.10.247\npoe port 3 off\n";
+		memcpy(config, saved, sizeof(saved));	/* with its NUL, as the firmware saves it */
+	}
 
 	rtl_boot();
 	rtl_bridge_up();
 	const uint8_t *ip = (const uint8_t *)uip_hostaddr;
 	check(ip[0] == 192 && ip[1] == 168 && ip[2] == 10 && ip[3] == 247, "default config replayed: ip %u.%u.%u.%u",
 	      ip[0], ip[1], ip[2], ip[3]);
-	check(config[0] == 'i', "blank config sector got the default config");
+	check(config[0] == 'i', machine.pse_rtl8238 ? "the saved config replayed" : "blank config sector got the default config");
 	check(!strcmp(hostname, "RTLPlayground-dd3b3e"), "hostname from the MAC: %s", hostname);
 	check(!memcmp(rtl_mac(), bridge_hello.mac, 6), "MAC from HELLO");
 	check(!strstr(console, "ERROR"), "no errors replaying the config");
@@ -401,6 +442,33 @@ int main(void)
 	for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++)
 		body(routes[i]);
 	check(!rtl_http_get("/nothing.json"), "unknown route left to the caller");
+
+	/* PoE: the controller's state through the bridge, the config's poe lines replayed */
+	rtl_http_get("/information.json");
+	outbuf[slen] = 0;
+	if (machine.pse_rtl8238) {
+		check(strstr((char *)outbuf, "\"poe\":1") != NULL, "information.json announces PoE");
+		check(pse_loaded && poe_en[2] == 0 && poe_en[0] && poe_en[1] && poe_en[3],
+		      "PoE: controller running, the saved \"poe port 3 off\" applied");
+		body("/poe.json");
+		check(strstr((char *)outbuf, "\"portNum\":1,\"det\":4,\"cls\":12,\"on\":1,\"en\":1,\"i\":\"0f5d\",\"v\":\"6b00\"")
+		      && strstr((char *)outbuf, "\"portNum\":3,\"det\":6,\"cls\":0,\"on\":0,\"en\":0"),
+		      "/poe.json: port 1 powered, port 3 off");
+		cmd("poe port 1 off");
+		check(poe_en[0] == 0 && strstr((char *)outbuf, "200 OK"), "poe port 1 off");
+		cmd("poe port 1 on");
+		cmd("poe");
+		check(strstr((char *)outbuf, "port 1: powered, detect 4, class 0, 53500 mV, 120 mA")
+		      && strstr((char *)outbuf, "port 3: off"), "poe: the readings, converted");
+		cmd("poe load");
+		check(poe_loads == 1, "poe load: one POE_LOAD");
+	} else {
+		check(!strstr((char *)outbuf, "\"poe\""), "no PoE on this switch: information.json says nothing");
+		body("/poe.json");
+		check(strstr((char *)outbuf, "{\"loaded\":0,\"ports\":[]}") != NULL, "/poe.json: not loaded, no ports");
+		cmd("poe");
+		check(strstr((char *)outbuf, "no RTL8238B") != NULL, "poe: no controller");
+	}
 
 	cmd("hostname sim-switch");
 	check(!strcmp(hostname, "sim-switch") && strstr((char *)outbuf, "200 OK"), "POST /cmd: hostname");
