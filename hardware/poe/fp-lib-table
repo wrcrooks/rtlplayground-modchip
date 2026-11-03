@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "LCSC")(type "KiCad")(uri "${KIPRJMOD}/lib/LCSC.pretty")(options "")(descr "Footprints imported from LCSC (easyeda2kicad), reviewed"))
+)

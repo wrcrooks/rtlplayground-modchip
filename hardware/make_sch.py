@@ -325,4 +325,5 @@ def build():
     print("wrote %s: %d parts, %d pins" % (OUT.name, len([i for i in s.items if i[0] == "symbol"]), len(s.expected)))
 
 
-build()
+if __name__ == "__main__":
+    build()
