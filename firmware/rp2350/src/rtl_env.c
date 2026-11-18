@@ -371,12 +371,66 @@ static bool tbl_read(uint32_t ctrl)
 }
 
 
+/*
+ * Port isolation, 0x50c0 + 4 * port: the masks the configuration wrote, and
+ * the 802.1X gate laid over them (dot1x_plat.c). A gated port forwards to the
+ * CPU port only, and is taken out of every other port's mask. Reads return
+ * the configured mask, so "isolate" and the web UI see what was asked for.
+ */
+#define ISO_PORTS	CPU_PORT
+static uint32_t iso_cfg[ISO_PORTS];
+static uint16_t iso_known, iso_gated;
+
+static int iso_port(uint16_t reg)
+{
+	uint16_t off = reg - RTL837X_PORT_ISOLATION_BASE;
+
+	return reg >= RTL837X_PORT_ISOLATION_BASE && off < 4 * ISO_PORTS && !(off & 3) ? off >> 2 : -1;
+}
+
+
+static uint32_t iso_effective(uint8_t port)
+{
+	if ((iso_gated >> port) & 1)
+		return PMASK_CPU;
+	return iso_cfg[port] & ~(uint32_t)iso_gated;
+}
+
+
+static void reg_put(uint16_t reg, uint32_t v);
+static bool reg_get(uint16_t reg, uint32_t *v);
+
+/* From dot1x_plat.c: the ports to gate; from rtl_bridge_up(): none known yet */
+void rtl_iso_gate(uint16_t gated)
+{
+	iso_gated = gated;
+	for (uint8_t port = machine.min_port; port <= machine.max_port && port < ISO_PORTS; port++) {
+		if (!((iso_known >> port) & 1) && reg_get(RTL837X_PORT_ISOLATION_BASE + 4 * port, &iso_cfg[port]))
+			iso_known |= 1 << port;
+		if ((iso_known >> port) & 1)
+			reg_put(RTL837X_PORT_ISOLATION_BASE + 4 * port, iso_effective(port));
+	}
+}
+
+
+void rtl_iso_reset(void)
+{
+	iso_known = 0;
+}
+
+
 void reg_read(uint16_t reg_addr)
 {
 	uint8_t p[2] = { reg_addr, reg_addr >> 8 };
 	uint8_t r[4];
 	size_t n;
 	uint32_t v = 0;
+	int iso = iso_port(reg_addr);
+
+	if (iso >= 0 && ((iso_known >> iso) & 1)) {
+		sfr_put32(iso_cfg[iso]);
+		return;
+	}
 
 	if (shadow_valid) {
 		for (uint8_t k = 0; k < TBL_SHADOW_REGS; k++) {
@@ -429,19 +483,41 @@ void reg_read_m(uint16_t reg_addr)
 }
 
 
+/* A register write straight to the switch, over T3 or the bridge */
+static void reg_put(uint16_t reg, uint32_t v)
+{
+	uint8_t p[6] = { reg, reg >> 8, v, v >> 8, v >> 16, v >> 24 };
+
+	/* Any write may change what a table read returns */
+	tbl_invalidate();
+	if (!plat_t3_write(reg, v))
+		bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL);
+}
+
+
+static bool reg_get(uint16_t reg, uint32_t *v)
+{
+	return plat_t3_read(reg, v) || rtl_bridge_reg_read(reg, v);
+}
+
+
 void reg_write(uint16_t reg_addr)
 {
 	uint8_t p[6] = { reg_addr, reg_addr >> 8, SFR_DATA_0, SFR_DATA_8, SFR_DATA_16, SFR_DATA_24 };
+	int iso = iso_port(reg_addr);
 
 	if (reg_addr == RTL837X_REG_SEC_COUNTER)
 		return;
 	if (reg_addr == RTL837X_TBL_CTRL && (p[2] & (TBL_WRITE | TBL_EXECUTE)) == TBL_EXECUTE
 	    && tbl_read(get32(p + 2)))
 		return;
-	/* Any write may change what a table read returns */
-	tbl_invalidate();
-	if (!plat_t3_write(reg_addr, get32(p + 2)))
-		bridge_request(REQ_REG_WRITE, p, 6, NULL, 0, NULL, 0, NULL);
+	if (iso >= 0) {
+		iso_cfg[iso] = get32(p + 2);
+		iso_known |= 1 << iso;
+		reg_put(reg_addr, iso_effective(iso));
+		return;
+	}
+	reg_put(reg_addr, get32(p + 2));
 }
 
 

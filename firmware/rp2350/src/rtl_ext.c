@@ -20,6 +20,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "rtl837x_common.h"
 #include "rtl837x_sfr.h"
@@ -31,6 +32,7 @@
 #include "cmd_parser.h"
 
 #include "plat.h"
+#include "dot1x.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -222,8 +224,144 @@ static bool parse_t3(void)
 
 
 /* CMD_PARSER_EXT, see CMakeLists.txt: true if the command was ours */
+/*
+ * 802.1X (dot1x.c):
+ *   dot1x                                    status
+ *   dot1x on|off
+ *   dot1x radius <a.b.c.d> [<udp port>]      the RADIUS server, port 1812 by default
+ *   dot1x secret <text>                      its shared secret
+ *   dot1x reauth <60-86400>|off              periodic re-authentication
+ *   dot1x port <n> auto|force-auth|force-unauth
+ *   dot1x port <n> mab on|off                MAC authentication for devices without a supplicant
+ *   dot1x port <n> restart                   authenticate again now
+ */
+uint8_t cmd_parse_port_separator(uint8_t idx);
+extern __xdata uint8_t atoi_results_u8;
+
+static void dot1x_print_status(void)
+{
+	char b[160];
+
+	snprintf(b, sizeof(b), "802.1X %s, RADIUS %u.%u.%u.%u:%u, secret %s, re-authentication %s",
+		 dot1x_cfg.enabled ? "on" : "off", dot1x_cfg.radius_ip[0], dot1x_cfg.radius_ip[1],
+		 dot1x_cfg.radius_ip[2], dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port,
+		 dot1x_cfg.secret[0] ? "set" : "not set", dot1x_cfg.reauth_s ? "" : "off");
+	print_string_x(b);
+	if (dot1x_cfg.reauth_s) {
+		snprintf(b, sizeof(b), "every %lu s", (unsigned long)dot1x_cfg.reauth_s);
+		print_string_x(b);
+	}
+	write_char('\n');
+	for (uint8_t i = machine.min_port; i <= machine.max_port && i < DOT1X_PORTS; i++) {
+		const struct dot1x_status *s = dot1x_port_status(i);
+		static const char *const modes[] = { "force-auth", "auto", "force-unauth" };
+		if (dot1x_cfg.mode[i] == DOT1X_FORCE_AUTH)
+			continue;
+		snprintf(b, sizeof(b), "  port %u: %s%s, %s, %s", machine.log_to_phys_port[i], modes[dot1x_cfg.mode[i] % 3],
+			 dot1x_cfg.mab[i] ? " + MAB" : "", dot1x_state_name(s->state), s->authorized ? "open" : "closed");
+		print_string_x(b);
+		if (s->identity[0]) {
+			snprintf(b, sizeof(b), ", %s %s", s->method == DOT1X_M_MAB ? "MAC" : "user", s->identity);
+			print_string_x(b);
+		}
+		write_char('\n');
+	}
+}
+
+
+/* A decimal number at *s, up to max, then sep (or the end of the word); moves *s past it */
+static bool num(const char **s, unsigned max, char sep, unsigned *v)
+{
+	const char *p = *s;
+
+	*v = 0;
+	if (*p < '0' || *p > '9')
+		return false;
+	while (*p >= '0' && *p <= '9') {
+		*v = *v * 10 + (*p++ - '0');
+		if (*v > max)
+			return false;
+	}
+	if (sep ? *p != sep : (*p && *p != ' '))
+		return false;
+	*s = sep ? p + 1 : p;
+	return true;
+}
+
+
+static bool parse_ip(const char *s, unsigned a[4])
+{
+	return num(&s, 255, '.', &a[0]) && num(&s, 255, '.', &a[1]) && num(&s, 255, '.', &a[2]) && num(&s, 255, 0, &a[3]);
+}
+
+
+static bool parse_dot1x(void)
+{
+	unsigned a[4], port;
+	const char *w;
+
+	if (cmd_words_len == 1) {
+		dot1x_print_status();
+		return true;
+	}
+	if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		dot1x_cfg.enabled = cmd_compare(1, "on");
+	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "radius")
+		   && parse_ip(rest(2), a)) {
+		port = 1812;
+		w = rest(3);
+		if (cmd_words_len == 4 && (!num(&w, 65535, 0, &port) || !port)) {
+			ext_error("dot1x radius <a.b.c.d> [<udp port>]\n");
+			return true;
+		}
+		for (int k = 0; k < 4; k++)
+			dot1x_cfg.radius_ip[k] = a[k];
+		dot1x_cfg.radius_port = port;
+	} else if (cmd_words_len >= 3 && cmd_compare(1, "secret")) {
+		if (strlen(rest(2)) >= sizeof(dot1x_cfg.secret)) {
+			ext_error("the secret is too long\n");
+			return true;
+		}
+		strcpy(dot1x_cfg.secret, rest(2));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "reauth")) {
+		unsigned s = 0;
+		w = rest(2);
+		if (!cmd_compare(2, "off") && (!num(&w, 86400, 0, &s) || s < 60)) {
+			ext_error("dot1x reauth <60-86400>|off\n");
+			return true;
+		}
+		dot1x_cfg.reauth_s = s;
+	} else if (cmd_words_len >= 4 && cmd_compare(1, "port") && cmd_parse_port_separator(cmd_words_b[2])
+		   && atoi_results_u8 < DOT1X_PORTS) {
+		uint8_t p = atoi_results_u8;
+		if (cmd_words_len == 4 && cmd_compare(3, "auto"))
+			dot1x_cfg.mode[p] = DOT1X_AUTO;
+		else if (cmd_words_len == 4 && cmd_compare(3, "force-auth"))
+			dot1x_cfg.mode[p] = DOT1X_FORCE_AUTH;
+		else if (cmd_words_len == 4 && cmd_compare(3, "force-unauth"))
+			dot1x_cfg.mode[p] = DOT1X_FORCE_UNAUTH;
+		else if (cmd_words_len == 5 && cmd_compare(3, "mab") && (cmd_compare(4, "on") || cmd_compare(4, "off")))
+			dot1x_cfg.mab[p] = cmd_compare(4, "on");
+		else if (cmd_words_len == 4 && cmd_compare(3, "restart")) {
+			dot1x_restart(p);
+			return true;
+		} else {
+			ext_error("dot1x port <n> auto|force-auth|force-unauth|restart, dot1x port <n> mab on|off\n");
+			return true;
+		}
+	} else {
+		ext_error("dot1x [on|off|radius <a.b.c.d> [<port>]|secret <text>|reauth <s>|off|port <n> ...]\n");
+		return true;
+	}
+	dot1x_apply();
+	return true;
+}
+
+
 bool rtl_cmd_ext(void)
 {
+	if (cmd_compare(0, "dot1x"))
+		return parse_dot1x();
 	if (cmd_compare(0, "https"))
 		return parse_https();
 	if (cmd_compare(0, "snmp"))

@@ -33,6 +33,10 @@ vm.runInContext(piece("function mergeConf("), ctx);
 const adds = inject.split("\n").filter((l) => /^\s*(CONF_\w+\.push|\/\^)/.test(l)).join("\n");
 check(/CONF_CMDS\.push/.test(adds), "the injected script extends CONF_CMDS");
 vm.runInContext(adds, ctx);
+// The 802.1X script's wrapper round mergeConf (one mode line per port)
+const w0 = inject.indexOf("var merge=mergeConf;"), w1 = inject.indexOf("\n  };", w0);
+check(w0 > 0 && w1 > w0, "the 802.1X script wraps mergeConf");
+vm.runInContext(inject.slice(w0, w1 + 5), ctx);
 
 const merge = (base, log) => vm.runInContext("mergeConf", ctx)(base, [log]);
 const base = ["ip 192.168.10.247", "gw 192.168.10.1", "netmask 255.255.255.0"];
@@ -59,4 +63,20 @@ check(c.filter((l) => /^t3/.test(l)).join("|") === "t3 off", "t3 off replaces t3
 check(!ctx.isConfCmd("t3 test"), "t3 test doesn't count as config");
 
 console.log(failures ? failures + " failed" : "all passed");
+// 802.1X
+check(ctx.isConfCmd("dot1x on") && ctx.isConfCmd("dot1x port 2 auto") && ctx.isConfCmd("dot1x port 2 mab on")
+  && ctx.isConfCmd("dot1x radius 10.1.2.3 1812") && ctx.isConfCmd("dot1x secret a b c") && ctx.isConfCmd("dot1x reauth 3600"),
+  "the dot1x settings count as config");
+check(!ctx.isConfCmd("dot1x") && !ctx.isConfCmd("dot1x port 2 restart"), "dot1x status and restart don't");
+c = merge(base.concat("dot1x port 2 auto", "dot1x port 2 mab on", "dot1x secret old", "dot1x radius 10.0.0.1"),
+  "dot1x port 2 force-unauth\ndot1x port 3 auto\ndot1x secret new one\ndot1x radius 10.0.0.2 1645\ndot1x on\ndot1x port 2 restart");
+check(c.filter((l) => /^dot1x port 2 /.test(l)).sort().join("|") === "dot1x port 2 force-unauth|dot1x port 2 mab on",
+  "a new mode replaces port 2's and keeps its mab line");
+check(c.includes("dot1x port 3 auto") && c.includes("dot1x on"), "port 3 and dot1x on are kept");
+check(c.includes("dot1x secret new one") && !c.includes("dot1x secret old"), "a new secret replaces the old");
+check(c.includes("dot1x radius 10.0.0.2 1645") && !c.includes("dot1x radius 10.0.0.1"), "a new server replaces the old");
+c = merge(c, "dot1x port 2 mab off\ndot1x off");
+check(c.includes("dot1x port 2 mab off") && !c.includes("dot1x port 2 mab on") && c.includes("dot1x off") && !c.includes("dot1x on"),
+  "mab off and dot1x off replace their on lines");
+
 process.exit(failures ? 1 : 0);

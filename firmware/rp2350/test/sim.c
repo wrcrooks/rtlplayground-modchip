@@ -4,6 +4,7 @@
  * SerDes are plain memory, transmitted frames are recorded. Prints CHECK
  * lines and the web endpoints' responses for test/run_sim.py.
  */
+#define _GNU_SOURCE
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -305,6 +306,20 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 
 bool bridge_is_up(void) { return true; }
 
+extern uint8_t sfr_data[4];
+void port_isolate(uint8_t port, uint16_t pmask);
+
+/* dot1x_udp.c's RADIUS socket: the requests, kept */
+static int radius_requests;
+static uint8_t radius_last[1800];
+static uint16_t radius_last_len;
+void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len)
+{
+	radius_requests++;
+	memcpy(radius_last, p, len);
+	radius_last_len = len;
+}
+
 void plat_console_putc(char c)
 {
 	if (console_len < sizeof(console) - 1)
@@ -436,7 +451,7 @@ int main(void)
 	static const char *routes[] = {
 		"/status.json", "/information.json", "/vlan.json?vid=1", "/counters.json?port=1",
 		"/eee.json", "/bandwidth.json", "/storm.json", "/l2.json?idx=0", "/mirror.json",
-		"/isolation.json", "/mtu.json", "/lag.json", "/stp.json", "/lldp.json", "/lacp.json",
+		"/isolation.json", "/mtu.json", "/lag.json", "/stp.json", "/lldp.json", "/lacp.json", "/dot1x.json",
 		"/vlanlist", "/config", "/cmd_log",
 	};
 	for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++)
@@ -747,6 +762,74 @@ int main(void)
 	check(strstr((char *)outbuf, "l2 sticky 3 on") && strstr((char *)outbuf, "l2 static 00:11:22:33:44:55 10 2"),
 	      "the l2 commands land in the history");
 	cmd("l2 sticky 3 off");
+
+	/* 802.1X: port 2 on auto, through the commands, the registers and the frames */
+	{
+		uint8_t l2 = machine.phys_to_log_port[1], l1 = machine.phys_to_log_port[0];
+		/* the masks as configured (STP, isolate): every port and the CPU port */
+		cmd("stp off");
+		port_isolate(l1, 0x3f8);
+		port_isolate(l2, 0x3f8);
+		uint32_t iso1 = regs[0x50c0 + 4 * l1], iso2 = regs[0x50c0 + 4 * l2];
+		cmd("dot1x radius 10.1.2.50");
+		cmd("dot1x secret testing123");
+		cmd("dot1x port 2 auto");
+		cmd("dot1x on");
+		check(strstr((char *)outbuf, "200 OK") && (regs[0x4ed8] & 0x30) == 0x10, "dot1x on: EAPOL (RMA03) trapped to the CPU");
+		check(iso1 == 0x3f8 && regs[0x50c0 + 4 * l2] == 0x200 && regs[0x50c0 + 4 * l1] == (0x3f8 & ~(1u << l2)),
+		      "port 2 gated: it forwards to the CPU only, port 1 no longer to it (%03x, %03x)",
+		      regs[0x50c0 + 4 * l2], regs[0x50c0 + 4 * l1]);
+		rtl_http_get("/isolation.json");
+		outbuf[slen] = 0;
+		check(strstr((char *)outbuf, "200 OK") != NULL, "/isolation.json still answers");
+		reg_read_m(0x50c0 + 4 * l2);
+		check(((uint32_t)sfr_data[0] << 24 | sfr_data[1] << 16 | sfr_data[2] << 8 | sfr_data[3]) == iso2,
+		      "and reads give the configured mask, not the gate");
+
+		/* the port's link comes up: a Request/Identity goes out to it, CPU-tagged */
+		uint8_t lk[12] = { 0 };
+		uint32_t sts = l2 < 8 ? 1u << (16 + l2) : 1u << l2;
+		memcpy(lk, &sts, 4);
+		n_tx = 0;
+		rtl_on_link(lk);
+		ticks_run(200 * 2);
+		int eap_tx = -1;
+		for (int i = 0; i < n_tx; i++)
+			if (tx[i][12] == 0x88 && tx[i][13] == 0x99 && tx[i][20] == 0x88 && tx[i][21] == 0x8e)
+				eap_tx = i;
+		check(eap_tx >= 0 && !memcmp(tx[eap_tx], "\x01\x80\xc2\x00\x00\x03", 6) && tx[eap_tx][19] == (1 << l2 & 0xff)
+		      && tx[eap_tx][18] == (1 << l2 >> 8) && tx[eap_tx][23] == 0 && tx[eap_tx][26] == 1 && tx[eap_tx][30] == 1,
+		      "link up: EAP Request/Identity to port 2, CPU-tagged");
+
+		/* the supplicant answers: a RADIUS Access-Request with its identity */
+		uint8_t f[64] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x03, 0x02, 0, 0, 0, 0, 0x22,
+				  0x88, 0x99, 0x04, 0x00, 0x00, 0x00, 0x00, l2, 0x81, 0x00, 0x00, 0x01,
+				  0x88, 0x8e, 2, 0, 0, 10, 2, tx[eap_tx][27], 0, 10, 1, 'a', 'l', 'i', 'c', 'e' };
+		uint16_t vl;
+		int r0 = radius_requests;
+		check(rtl_rx_frame(f, sizeof(f), &vl) == 0 && radius_requests == r0 + 1 && radius_last[0] == 1,
+		      "EAP Response/Identity: an Access-Request to the server");
+		check(memmem(radius_last, radius_last_len, "alice", 5) != NULL, "  with the user name");
+		/* anything else from the gated port is dropped, its MAC noted */
+		uint8_t g[64];
+		memcpy(g, "\xff\xff\xff\xff\xff\xff\x02\x00\x00\x00\x00\x22\x88\x99\x04\x00\x00\x00\x00", 19);
+		g[19] = l2; memcpy(g + 20, "\x81\x00\x00\x01\x08\x06", 6);
+		check(rtl_rx_frame(g, sizeof(g), &vl) == 0, "an ARP from the gated port is dropped");
+		rtl_http_get("/dot1x.json");
+		outbuf[slen] = 0;
+		check(strstr((char *)outbuf, "\"state\":\"authenticating\"") && strstr((char *)outbuf, "\"user\":\"alice\""),
+		      "/dot1x.json: port 2 authenticating, user alice");
+
+		cmd("dot1x off");
+		check(regs[0x50c0 + 4 * l2] == iso2 && regs[0x50c0 + 4 * l1] == iso1 && (regs[0x4ed8] & 0x30) == 0,
+		      "dot1x off: isolation back as configured, EAPOL forwarded");
+		rtl_http_get("/cmd_log");
+		outbuf[slen] = 0;
+		check(strstr((char *)outbuf, "dot1x port 2 auto") && strstr((char *)outbuf, "dot1x secret testing123"),
+		      "the dot1x commands land in the history");
+		memset(lk, 0, sizeof(lk));
+		rtl_on_link(lk);
+	}
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

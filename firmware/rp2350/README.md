@@ -309,6 +309,80 @@ interfaces are the switch's ports, numbered as on the front panel:
 
 **Counters.** They come from the ASIC's MIB counters, read again at most once a second.
 
+## 802.1X port authentication
+
+The switch is the authenticator. It asks a device on a port set to `auto` for its identity
+(EAP over EAPOL), and relays the EAP conversation to a RADIUS server (RFC 2865, RFC 3579) until the
+server accepts or rejects. The port opens on acceptance. Any EAP method the supplicant and the
+server share works, since the switch only relays: PEAP, EAP-TLS, EAP-TTLS, EAP-MD5.
+
+```
+dot1x on|off
+dot1x radius <a.b.c.d> [<udp port>]     1812 by default
+dot1x secret <text>
+dot1x reauth <60-86400>|off             periodic re-authentication
+dot1x port <n> auto|force-auth|force-unauth
+dot1x port <n> mab on|off               MAC authentication (MAB)
+dot1x port <n> restart
+dot1x                                   status
+```
+
+All but `restart` and the status are configuration lines, which Save keeps. The MAC table tab has an
+802.1X card with the same settings and each port's state.
+
+- **Until a port is authenticated, it carries only EAPOL.** Port isolation does the fencing. The
+  closed port forwards to the CPU port only, and no other port forwards to it. `rtl_env.c` keeps the
+  isolation masks the configuration (`isolate`, STP) wrote, and lays the gate over them, so reads
+  still return the configured masks. The firmware also drops every other frame from a closed port,
+  and flushes the port's learned addresses when it closes.
+- **EAPOL reaches the RP2350** through the reserved-multicast trap for 01:80:C2:00:00:03 (RMA03,
+  register 0x4ed8, by analogy with RTL8367C's register order). The trap is set while 802.1X is on.
+  Replies go out CPU-tagged to the one port.
+- **MAB.** A device that never answers EAPOL is let in by its MAC instead: after three unanswered
+  requests (about 90 s), the source MAC of a frame seen on the port goes to the server as user name
+  and password (`aabbccddeeff`, Service-Type Call-Check).
+- **Timers**, as 802.1X-2004:
+  - 30 s between Request/Identity;
+  - 30 s for the supplicant;
+  - 5 s per RADIUS try, 3 tries;
+  - a 60 s quiet period after a failure.
+
+  The server's Session-Timeout (with Termination-Action RADIUS-Request) overrides `dot1x reauth`.
+  Re-authentication keeps the port open until it fails.
+- **Requests carry:**
+  - User-Name;
+  - NAS-IP-Address;
+  - NAS-Port (the front port);
+  - NAS-Port-Type Ethernet;
+  - Called-Station-Id (the switch's MAC);
+  - Calling-Station-Id (the device's);
+  - Framed-MTU 1400;
+  - State;
+  - EAP-Message, split at 253 bytes;
+  - Message-Authenticator.
+
+  Replies are checked against their Response Authenticator, and against their Message-Authenticator
+  whenever EAP is involved.
+- **Port based.** One authenticated device opens the port for everything behind it, as in
+  802.1X-2004.
+- **Not done:**
+  - RADIUS accounting;
+  - a second server;
+  - dynamic VLAN assignment;
+  - more than one device per port.
+
+**Tested.** On the host only, so far:
+
+- **`test/test_dot1x.c`.** The protocol against a simulated supplicant and RADIUS server: success,
+  rejection, logoff, MAB, a 900-byte EAP exchange, re-authentication, Session-Timeout, a dead server
+  and a wrong secret. It also checks MD5 and HMAC-MD5 against their RFC vectors.
+- **`make -C test dot1x-radius`.** The same code against a real FreeRADIUS 3.2 in Docker: EAP-MD5
+  accepted and rejected, MAB accepted and rejected.
+- **The simulator.** The commands, the trap and isolation registers, the CPU-tagged Request/Identity
+  and the Access-Request it sets off.
+
+Not yet run on a switch: the RMA03 register needs checking there.
+
 ## Build
 
 Pico SDK 2.x (tested with 2.3.1), arm-none-eabi-gcc, CMake and Ninja.

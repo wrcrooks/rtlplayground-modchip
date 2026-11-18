@@ -11,7 +11,7 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	../src/rtl_poe.c $(BUILD)/web_assets.c sim.c
+	../src/rtl_poe.c ../src/dot1x_plat.c ../src/dot1x.c ../src/md5.c $(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
 	-DRTLP_HOST_TEST -DMACHINE_$(MACHINE) -DMACHINE_NAME=$(MACHINE) \
@@ -24,14 +24,15 @@ MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
 SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
-all: $(BUILD)/test_link $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
+	$(BUILD)/test_dot1x
 	$(BUILD)/test_upload
 	python3 run_sim.py $(BUILD)/sim
 	python3 run_sim.py $(BUILD)/sim-poe
 	python3 run_metrics.py $(BUILD)/test_metrics $(BUILD)
 	node check_dashboard.js ../web/dashboard.html $(BUILD)/history.bin $(BUILD)/metrics.json
-	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS)" > $(BUILD)/system_https.html
+	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS + embed_web.DOT1X)" > $(BUILD)/system_https.html
 	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls
@@ -84,6 +85,19 @@ $(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/mbedtls
 		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' -I. \
 		-o $@ test_tls.c ../src/tls_cert.c $(wildcard $(MBEDTLS)/library/*.c)
 
+# 802.1X against a simulated supplicant and RADIUS server; run_dot1x_radius.sh
+# runs test_dot1x_radius against a real FreeRADIUS in Docker (not part of "all")
+$(BUILD)/test_dot1x: test_dot1x.c ../src/dot1x.c ../src/md5.c ../src/dot1x.h ../src/md5.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_dot1x.c ../src/dot1x.c ../src/md5.c
+
+$(BUILD)/test_dot1x_radius: test_dot1x_radius.c ../src/dot1x.c ../src/md5.c ../src/dot1x.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -Wno-unused-result -o $@ test_dot1x_radius.c ../src/dot1x.c ../src/md5.c
+
+dot1x-radius: $(BUILD)/test_dot1x_radius
+	sh run_dot1x_radius.sh $<
+
 $(BUILD)/test_link: test_link.c ../src/link.c ../src/link.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_link.c ../src/link.c
@@ -112,4 +126,4 @@ $(BUILD)/sim-poe: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean
+.PHONY: all clean dot1x-radius

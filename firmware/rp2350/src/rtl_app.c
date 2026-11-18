@@ -30,6 +30,10 @@
 #include "uip/uip.h"
 #include "httpd/page_impl.h"
 #include "rtl8238.h"
+#include "dot1x.h"
+#include "dot1x_plat.h"
+
+void rtl_iso_reset(void);	/* rtl_env.c */
 
 #include "bridge.h"
 #include "plat.h"
@@ -135,6 +139,11 @@ void rtl_bridge_up(void)
 	management_vlan = 1;
 	hostname[0] = NUL;
 
+	/* The 8051 started over: port isolation is at its defaults, every port
+	 * re-authenticates, and the config's dot1x lines set it up again */
+	rtl_iso_reset();
+	dot1x_plat_bridge_up();
+
 	flash_region.addr = CONFIG_START;
 	flash_region.len = 0x100;
 	flash_read_bulk(flash_buf);
@@ -147,6 +156,7 @@ void rtl_bridge_up(void)
 	if (machine.pse_rtl8238)
 		pse_read_ports();
 	execute_config();
+	dot1x_apply();
 	port_l2_static_mgmt(uip_ethaddr.addr, management_vlan, false);
 	hostname_default();
 
@@ -306,6 +316,7 @@ void rtl_second(void)
 	if (!up)
 		return;
 	rtl_metrics_second();
+	dot1x_second();
 	handle_button();
 	for (uint8_t sfp = 0; sfp < 2; sfp++) {
 		if (!sfp_read_due[sfp] || --sfp_read_due[sfp])
@@ -342,9 +353,12 @@ void rtl_poll(void)
 
 void rtl_on_link(const uint8_t *links)
 {
-	rtl_metrics_link(links[0] | links[1] << 8 | links[2] << 16 | (uint32_t)links[3] << 24,
-			 links[4] | links[5] << 8 | links[6] << 16 | (uint32_t)links[7] << 24,
-			 links[8] | links[9] << 8 | links[10] << 16 | (uint32_t)links[11] << 24);
+	uint32_t sts = links[0] | links[1] << 8 | links[2] << 16 | (uint32_t)links[3] << 24;
+	uint32_t l = links[4] | links[5] << 8 | links[6] << 16 | (uint32_t)links[7] << 24;
+	uint32_t l89 = links[8] | links[9] << 8 | links[10] << 16 | (uint32_t)links[11] << 24;
+
+	rtl_metrics_link(sts, l, l89);
+	dot1x_plat_links(sts, l, l89);
 	if (!memcmp(links, links_last, sizeof(links_last)))
 		return;
 	print_string("\n<new link: ");
@@ -425,6 +439,9 @@ void tcpip_output(void)
 uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 {
 	if (!up || len < ETH_TYPE_OFFSET + 2 || len > UIP_CONF_BUFFER_SIZE)
+		return 0;
+	/* EAPOL, and anything from a port 802.1X keeps closed */
+	if (dot1x_plat_rx(frame, len, ETH_TYPE_OFFSET))
 		return 0;
 	memcpy(uip_buf, frame, len);
 	uip_len = len;
@@ -562,6 +579,8 @@ bool rtl_http_get(char *path)
 		send_mtu();
 	} else if (is_word(q, "/poe.json")) {
 		send_poe();
+	} else if (is_word(q, "/dot1x.json")) {
+		send_dot1x();
 	} else if (is_word(q, "/lag.json")) {
 		send_lag();
 	} else if (is_word(q, "/stp.json")) {

@@ -7,8 +7,9 @@ Writes the files of each HTML_DIR gzipped (RTLPlayground's html/, then the
 mod chip's own web/), with the same names and MIME types as RTLPlayground's
 html_data.c, plus "/" for index.html, and config.txt as rtl_default_config.
 index.html gets a "Graphs" entry in its navigation, for dashboard.html, and
-an HTTPS switch in System > Services; the mod chip's commands (https, snmp,
-t3) join the ones the web UI keeps when it saves the config.
+an HTTPS switch in System > Services, and an 802.1X card on the MAC table tab;
+the mod chip's commands (https, snmp, t3, dot1x) join the ones the web UI keeps
+when it saves the config.
 The gzip header carries no timestamp, so the output only changes when the
 inputs do.
 """
@@ -108,6 +109,123 @@ SYSTEM_HTTPS = """<script>
 </script>
 """
 
+# Added to RTLPlayground's index.html, after app.js: 802.1X (dot1x) on the MAC
+# table tab, and its commands for the config merge
+DOT1X = """<script>
+/* Added by the mod chip's build (tools/embed_web.py): 802.1X, see src/dot1x.c */
+(function(){
+  if(typeof CONF_CMDS==="undefined"||!document.getElementById("tab-l2"))return;
+  CONF_CMDS.push(/^dot1x\\s+(on|off)$/,/^dot1x\\s+radius\\s+(\\d{1,3}\\.){3}\\d{1,3}(\\s+\\d{1,5})?$/,/^dot1x\\s+secret\\s+\\S.*$/,
+    /^dot1x\\s+reauth\\s+(\\d+|off)$/,/^dot1x\\s+port\\s+\\d+\\s+(auto|force-auth|force-unauth)$/,/^dot1x\\s+port\\s+\\d+\\s+mab\\s+(on|off)$/);
+  CONF_TOGGLE.push(/^(dot1x)\\s+(on|off)$/,/^(dot1x\\s+port\\s+\\d{1,2}\\s+mab)\\s+(on|off)$/);
+  CONF_OVERWRITE.push(/^dot1x\\s+radius\\b/,/^dot1x\\s+secret\\b/,/^dot1x\\s+reauth\\b/);
+  /* one mode line per port, the last: an overwrite rule on "dot1x port <n>" would take its mab line too */
+  var merge=mergeConf;
+  mergeConf=function(base,texts){
+    var c=merge(base,texts),seen={};
+    for(var i=c.length-1;i>=0;i--){
+      var m=c[i].match(/^dot1x port (\\d{1,2}) (auto|force-auth|force-unauth)$/);
+      if(!m)continue;
+      if(seen[m[1]])c.splice(i,1);else seen[m[1]]=1;
+    }
+    return c;
+  };
+  var tr={
+    en:{x_title:"Port authentication (802.1X)",x_on:"802.1X",x_radius:"RADIUS server",x_secret:"Shared secret",x_unchanged:"unchanged",
+      x_reauth:"Re-authenticate every (s)",x_never:"never",x_mode:"Control",x_mab:"MAB",x_state:"State",x_who:"Device",x_restart:"Restart",
+      x_auto:"auto",x_fauth:"open (no 802.1X)",x_funauth:"blocked",
+      x_note:"On an auto port only 802.1X (EAPOL) passes until the RADIUS server accepts the device; MAB lets in devices without a supplicant by their MAC after about 90 s. Save keeps the settings."},
+    de:{x_title:"Port-Authentifizierung (802.1X)",x_radius:"RADIUS-Server",x_secret:"Gemeinsames Geheimnis",x_unchanged:"unverändert",
+      x_reauth:"Neu authentifizieren alle (s)",x_never:"nie",x_mode:"Steuerung",x_state:"Status",x_who:"Gerät",x_restart:"Neu starten",
+      x_fauth:"offen (kein 802.1X)",x_funauth:"gesperrt",
+      x_note:"An einem Auto-Port läuft nur 802.1X (EAPOL), bis der RADIUS-Server das Gerät annimmt; MAB lässt Geräte ohne Supplicant nach etwa 90 s anhand ihrer MAC zu. Speichern behält die Einstellungen."},
+    es:{x_title:"Autenticación de puertos (802.1X)",x_radius:"Servidor RADIUS",x_secret:"Secreto compartido",x_unchanged:"sin cambios",
+      x_reauth:"Reautenticar cada (s)",x_never:"nunca",x_mode:"Control",x_state:"Estado",x_who:"Dispositivo",x_restart:"Reiniciar",
+      x_fauth:"abierto (sin 802.1X)",x_funauth:"bloqueado",
+      x_note:"En un puerto auto solo pasa 802.1X (EAPOL) hasta que el servidor RADIUS acepta el dispositivo; MAB admite por su MAC, tras unos 90 s, a los dispositivos sin suplicante. Guardar conserva los ajustes."},
+    fr:{x_title:"Authentification des ports (802.1X)",x_radius:"Serveur RADIUS",x_secret:"Secret partagé",x_unchanged:"inchangé",
+      x_reauth:"Réauthentifier toutes les (s)",x_never:"jamais",x_mode:"Contrôle",x_state:"État",x_who:"Appareil",x_restart:"Relancer",
+      x_fauth:"ouvert (sans 802.1X)",x_funauth:"bloqué",
+      x_note:"Sur un port auto, seul 802.1X (EAPOL) passe jusqu'à ce que le serveur RADIUS accepte l'appareil ; MAB admet par leur MAC, après environ 90 s, les appareils sans supplicant. Enregistrer conserve les réglages."},
+    ja:{x_title:"ポート認証 (802.1X)",x_radius:"RADIUS サーバー",x_secret:"共有シークレット",x_unchanged:"変更なし",
+      x_reauth:"再認証の間隔 (秒)",x_never:"しない",x_mode:"制御",x_state:"状態",x_who:"機器",x_restart:"再開",
+      x_fauth:"開放 (802.1X なし)",x_funauth:"遮断",
+      x_note:"auto ポートでは RADIUS サーバーが機器を受け入れるまで 802.1X (EAPOL) だけが通ります。MAB はサプリカントのない機器を約 90 秒後に MAC で受け入れます。保存すると設定が保持されます。"},
+    zh:{x_title:"端口认证 (802.1X)",x_radius:"RADIUS 服务器",x_secret:"共享密钥",x_unchanged:"不变",
+      x_reauth:"重新认证间隔 (秒)",x_never:"从不",x_mode:"控制",x_state:"状态",x_who:"设备",x_restart:"重新开始",
+      x_fauth:"开放 (不认证)",x_funauth:"阻止",
+      x_note:"在 auto 端口上,RADIUS 服务器接受设备之前只放行 802.1X (EAPOL);MAB 约 90 秒后按 MAC 放行没有请求方软件的设备。保存后设置会保留。"}
+  };
+  for(var l in tr)if(LANG[l])for(var k in tr[l])LANG[l][k]=tr[l][k];
+
+  var card=document.createElement("div");card.className="card";
+  card.innerHTML='<h2 data-i18n="x_title"></h2><p class="small mut" data-i18n="x_note"></p>'+
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+    '<label class="row"><span data-i18n="x_on">802.1X</span> <span class="switch"><input type="checkbox" id="x-on"><i></i></span></label>'+
+    '<label><span data-i18n="x_radius"></span> <input class="in mono" id="x-ip" size="15"> : <input class="in" id="x-port" type="number" min="1" max="65535" style="width:6em"></label>'+
+    '<label><span data-i18n="x_secret"></span> <input class="in" id="x-secret" type="password" size="14"></label>'+
+    '<label><span data-i18n="x_reauth"></span> <input class="in" id="x-reauth" type="number" min="60" max="86400" style="width:7em"></label>'+
+    '<button class="ctl" id="x-apply" data-i18n="c_apply"></button></div>'+
+    '<div class="scrollx"><table class="t" id="x-table"><thead><tr><th data-i18n="c_port"></th><th data-i18n="x_mode"></th><th data-i18n="x_mab"></th>'+
+    '<th data-i18n="x_state"></th><th data-i18n="x_who"></th><th></th></tr></thead><tbody></tbody></table></div>';
+  document.getElementById("tab-l2").appendChild(card);
+  $("x-secret").placeholder=t("x_unchanged");$("x-reauth").placeholder=t("x_never");
+  var timer=null,built=false;
+
+  function load(){
+    return getJSON("/dot1x.json").then(function(s){
+      if(!built){
+        $("x-on").checked=!!s.enabled;
+        $("x-ip").value=s.radius;$("x-port").value=s.radius_port;$("x-reauth").value=s.reauth||"";
+      }
+      var tb=$("x-table").tBodies[0];
+      if(!built){
+        tb.innerHTML="";
+        s.ports.forEach(function(p){
+          var tr=tb.insertRow();tr.dataset.port=p.port;
+          var sel=h("select",{class:"in"});
+          [["force-auth","x_fauth"],["auto","x_auto"],["force-unauth","x_funauth"]].forEach(function(o){
+            sel.appendChild(h("option",{value:o[0],text:t(o[1])}));
+          });
+          sel.value=p.mode;
+          var mab=h("input",{type:"checkbox"});mab.checked=!!p.mab;
+          sel.onchange=function(){postCmd("dot1x port "+p.port+" "+sel.value).then(load).catch(function(){})};
+          mab.onchange=function(){postCmd("dot1x port "+p.port+" mab "+(mab.checked?"on":"off")).catch(function(){})};
+          tr.insertCell().textContent=p.port;
+          tr.insertCell().appendChild(sel);
+          tr.insertCell().appendChild(mab);
+          tr.insertCell();tr.insertCell().className="mono";
+          tr.insertCell().appendChild(h("button",{class:"ctl",text:t("x_restart"),onclick:function(){
+            postCmd("dot1x port "+p.port+" restart",true).then(load).catch(function(){})}}));
+        });
+        built=true;
+      }
+      s.ports.forEach(function(p){
+        var tr=tb.querySelector('tr[data-port="'+p.port+'"]');if(!tr)return;
+        tr.cells[3].innerHTML=p.mode==="force-auth"?badge(t("x_fauth")):
+          badge(p.state+(p.method?" ("+p.method+")":""),p.authorized?"ok":(p.state==="held"||p.state==="blocked"?"bad":""));
+        tr.cells[4].textContent=[p.user,p.mac].filter(Boolean).join("  ");
+      });
+    }).catch(function(){});
+  }
+  $("x-apply").addEventListener("click",function(){
+    var c=[],ip=$("x-ip").value.trim(),port=$("x-port").value.trim(),re=$("x-reauth").value.trim(),sec=$("x-secret").value;
+    if(ip)c.push("dot1x radius "+ip+(port?" "+port:""));
+    if(sec)c.push("dot1x secret "+sec);
+    c.push("dot1x reauth "+(re?re:"off"));
+    c.push("dot1x "+($("x-on").checked?"on":"off"));
+    postCmds(c).then(function(){$("x-secret").value="";built=false;load()}).catch(function(){});
+  });
+  var hk=tabHooks.l2,enter=hk&&hk.enter,leave=hk&&hk.leave;
+  if(hk){
+    hk.enter=function(){if(enter)enter.apply(this,arguments);built=false;load();clearInterval(timer);timer=setInterval(load,3000)};
+    hk.leave=function(){if(leave)leave.apply(this,arguments);clearInterval(timer)};
+  }
+  i18nApply();
+})();
+</script>
+"""
+
 MIME = {
     ".html": "text/html",
     ".ico": "image/svg+xml",  # RTLPlayground's favicon.ico is an SVG
@@ -136,7 +254,7 @@ def main():
     for k, p in enumerate(files):
         raw = p.read_bytes()
         if p.name == "index.html":
-            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS).encode() + b"</body>", 1)
+            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS + DOT1X).encode() + b"</body>", 1)
         data = gzip.compress(raw, compresslevel=9, mtime=0)
         src.append("static const uint8_t f%d[%d] = {\n%s\n};" % (k, len(data), c_bytes(data)))
         table.append((("/" + p.name), k, len(data), MIME[p.suffix]))
