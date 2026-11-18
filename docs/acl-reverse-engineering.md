@@ -203,16 +203,20 @@ port value and mask (+0xab and +0xaf, 32-bit) reach the rule.
 - API ports 3, 4, 5 and 9 give bits 7, 8, 3 and 9. That is the stock firmware's own port numbering;
   ports 6-8 come out empty, since this start-up doesn't fully set up its port table.
 
-**Field types** (`results/field-types.txt`, types 0-16 so far). Byte offsets are in the field node:
+**Field types** (`results/field-types.txt`, all 43 types, complete run). Byte offsets are in the field node:
 
 | Types | Slots | Value | Mask | Likely field |
 |---|---|---|---|---|
 | 0, 1 | 3 | 8-13 | 14-19 | MAC (DMAC, SMAC) |
-| 2, 15, 16 | 1 | 10-11 | 14-15 | 16-bit, such as EtherType, L4 ports |
+| 2, 15-18, 21-26 | 1 | 10-11 | 14-15 | 16-bit, such as EtherType, L4 ports |
 | 3, 4 | 1 | split | split | tags: probably several subfields (VID, priority, CFI), more than one value range |
 | 5-8 | 2 | 16-19 | 20-23 | IPv4 address |
-| 9, 10, 13, 14 | 1 | 11 | 15 | 8-bit, such as ToS, protocol, next header |
+| 9, 10, 13, 14, 19, 20 | 1 | 11 | 15 | 8-bit, such as ToS, protocol, next header |
 | 11, 12 | 8 | 8-23 | 24-39 | IPv6 address |
+| 27-42 | 1 | 10-11 | 14-15 | 16-bit; sixteen of them, probably the user-defined field selectors (RTL8367C has 16) |
+
+Types 34-42 land in slots 6, 7, 2, 3, 4, 5, 6, 7, 7: the slot follows the template the type falls in,
+not the type alone.
 
 **Action parameters** (`results/action-params.txt`, all 30 enables).
 - **Words 0 and 1 hold indexes.** Each action group's parameter is mostly a 32-bit word in the action

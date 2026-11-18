@@ -93,3 +93,79 @@ type 15: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
 type 16: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
     value[10] -> {4: ('ff00', '0000')}
     value[11] -> {4: ('00ff', '0000')}
+type 17: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {5: ('ff00', '0000')}
+    value[11] -> {5: ('00ff', '0000')}
+type 18: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {6: ('ff00', '0000')}
+    value[11] -> {6: ('00ff', '0000')}
+type 19: 1 slot(s); mask bytes [15]; value bytes [11]
+    value[11] -> {5: ('00ff', '0000')}
+type 20: 1 slot(s); mask bytes [15]; value bytes [11]
+    value[11] -> {5: ('ff00', '0000')}
+type 21: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {5: ('ff00', '0000')}
+    value[11] -> {5: ('00ff', '0000')}
+type 22: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {6: ('ff00', '0000')}
+    value[11] -> {6: ('00ff', '0000')}
+type 23: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {0: ('ff00', '0000')}
+    value[11] -> {0: ('00ff', '0000')}
+type 24: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {1: ('ff00', '0000')}
+    value[11] -> {1: ('00ff', '0000')}
+type 25: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {2: ('ff00', '0000')}
+    value[11] -> {2: ('00ff', '0000')}
+type 26: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {7: ('ff00', '0000')}
+    value[11] -> {7: ('00ff', '0000')}
+type 27: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {7: ('ff00', '0000')}
+    value[11] -> {7: ('00ff', '0000')}
+type 28: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {5: ('ff00', '0000')}
+    value[11] -> {5: ('00ff', '0000')}
+type 29: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {6: ('ff00', '0000')}
+    value[11] -> {6: ('00ff', '0000')}
+type 30: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {2: ('ff00', '0000')}
+    value[11] -> {2: ('00ff', '0000')}
+type 31: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {3: ('ff00', '0000')}
+    value[11] -> {3: ('00ff', '0000')}
+type 32: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {4: ('ff00', '0000')}
+    value[11] -> {4: ('00ff', '0000')}
+type 33: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {5: ('ff00', '0000')}
+    value[11] -> {5: ('00ff', '0000')}
+type 34: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {6: ('ff00', '0000')}
+    value[11] -> {6: ('00ff', '0000')}
+type 35: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {7: ('ff00', '0000')}
+    value[11] -> {7: ('00ff', '0000')}
+type 36: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {2: ('ff00', '0000')}
+    value[11] -> {2: ('00ff', '0000')}
+type 37: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {3: ('ff00', '0000')}
+    value[11] -> {3: ('00ff', '0000')}
+type 38: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {4: ('ff00', '0000')}
+    value[11] -> {4: ('00ff', '0000')}
+type 39: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {5: ('ff00', '0000')}
+    value[11] -> {5: ('00ff', '0000')}
+type 40: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {6: ('ff00', '0000')}
+    value[11] -> {6: ('00ff', '0000')}
+type 41: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {7: ('ff00', '0000')}
+    value[11] -> {7: ('00ff', '0000')}
+type 42: 1 slot(s); mask bytes [14, 15]; value bytes [10, 11]
+    value[10] -> {7: ('ff00', '0000')}
+    value[11] -> {7: ('00ff', '0000')}
