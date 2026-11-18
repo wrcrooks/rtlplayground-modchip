@@ -17,3 +17,14 @@ enable 15 base 0 40000 0 0 0 | 64=01:err4 65=01:err4 66=ff:err4 67=01:err4
 enable 16 base 0 60000 0 0 0 | -
 enable 17 base 0 80000 0 0 0 | -
 enable 18 base 0 a0000 0 0 0 | -
+enable 19 base 0 100000 0 0 0 | 64=01:err4 65=01:err4 66=ff:err4 67=01:err4
+enable 20 base 0 20000 0 0 0 | -
+enable 21 base 0 80000000 0 0 0 | -
+enable 22 base 0 0 10 0 0 | 71=01->w2^1 71=ff->w2^f
+enable 23 base 8 0 0 0 0 | -
+enable 24 base 10008 0 0 0 0 | -
+enable 25 base 20008 0 0 0 0 | -
+enable 26 base 30008 0 0 0 0 | -
+enable 27 base 0 0 20 0 0 | -
+enable 28 base 0 0 40 0 0 | -
+enable 29 base 0 0 80 0 0 | -

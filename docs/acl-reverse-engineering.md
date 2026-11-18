@@ -214,7 +214,7 @@ port value and mask (+0xab and +0xaf, 32-bit) reach the rule.
 | 9, 10, 13, 14 | 1 | 11 | 15 | 8-bit, such as ToS, protocol, next header |
 | 11, 12 | 8 | 8-23 | 24-39 | IPv6 address |
 
-**Action parameters** (`results/action-params.txt`, enables 0-17 so far).
+**Action parameters** (`results/action-params.txt`, all 30 enables).
 - **Words 0 and 1 hold indexes.** Each action group's parameter is mostly a 32-bit word in the action
   struct, from +30, with only its low byte significant: larger values are refused (error 1).
 - **What each parameter sets:**
@@ -223,4 +223,8 @@ port value and mask (+0xab and +0xaf, 32-bit) reach the rule.
   - enable 3: +52; enable 7: +56; enable 8: +36 into word 1 bit 0;
   - enables 9-10: +40 or +44 into word 1 bits 4+;
   - enables 11-12: +48 or +60 into word 1 bits 10+.
-- **Error 4** for enables 13-15 at +64: probably port masks, which need the port table as well.
+- **Error 4** for enables 13-15 and 19 at +64: probably port masks, which need the port table as well.
+- **The rest (complete run):**
+  - enable 22: +71, low nibble, into word 2 bits 3:0;
+  - enables 16-18, 20-21 and 23-29 take no parameter in +30..+0x6f: their effect is the fixed bits
+    the enable alone sets.
