@@ -192,3 +192,35 @@ to your dump. Set XDATA 0xb325 = 1 (the "switch initialised" flag) and call the 
 2. Probe action parameters with each enable set.
 3. Probe each field type's value offsets.
 4. Write a field-type table for an `acl` command set.
+
+### More emulation results (partial runs, `docs/re/results/`)
+
+**Active port mask.** `emu51.Stock.setup_switch()` sets the HAL control pointer (XDATA 0xb326 → the
+static struct at 0xa980, whose `valid_portmask` at +0x135 is 0x3f8). With it, the config's active
+port value and mask (+0xab and +0xaf, 32-bit) reach the rule.
+
+- Rule word 4 bits 20:11 (field B) are a 10-bit port mask, in the TCAM encoding like everything else.
+- API ports 3, 4, 5 and 9 give bits 7, 8, 3 and 9. That is the stock firmware's own port numbering;
+  ports 6-8 come out empty, since this start-up doesn't fully set up its port table.
+
+**Field types** (`results/field-types.txt`, types 0-16 so far). Byte offsets are in the field node:
+
+| Types | Slots | Value | Mask | Likely field |
+|---|---|---|---|---|
+| 0, 1 | 3 | 8-13 | 14-19 | MAC (DMAC, SMAC) |
+| 2, 15, 16 | 1 | 10-11 | 14-15 | 16-bit, such as EtherType, L4 ports |
+| 3, 4 | 1 | split | split | tags: probably several subfields (VID, priority, CFI), more than one value range |
+| 5-8 | 2 | 16-19 | 20-23 | IPv4 address |
+| 9, 10, 13, 14 | 1 | 11 | 15 | 8-bit, such as ToS, protocol, next header |
+| 11, 12 | 8 | 8-23 | 24-39 | IPv6 address |
+
+**Action parameters** (`results/action-params.txt`, enables 0-17 so far).
+- **Words 0 and 1 hold indexes.** Each action group's parameter is mostly a 32-bit word in the action
+  struct, from +30, with only its low byte significant: larger values are refused (error 1).
+- **What each parameter sets:**
+  - enables 0-1: a 16-bit value at +30 into action word 0 bits 15:4 (a VLAN or policer index);
+  - enables 4-5: +34 into word 0 bits 31:20;
+  - enable 3: +52; enable 7: +56; enable 8: +36 into word 1 bit 0;
+  - enables 9-10: +40 or +44 into word 1 bits 4+;
+  - enables 11-12: +48 or +60 into word 1 bits 10+.
+- **Error 4** for enables 13-15 at +64: probably port masks, which need the port table as well.

@@ -6,8 +6,7 @@ CFG, FLD, ACT, NUM = 0x7000, 0x7100, 0x7200, 0x7400
 def gp(a): return bytes([1, a >> 8, a & 0xff])
 def run(ftype, fill=None, cfg=None, idx=3, act=None):
     st = Stock(F); x = st.cpu.xdata
-    st.init_data()
-    x[0xb325] = 1
+    st.setup_switch()
     st.call(14, 0xa1b4)                 # ACL init, like the stock boot
     st.writes.clear(); st.tables.clear()
     x[CFG:CFG + 0x100] = bytes(cfg or [0] * 0x100)

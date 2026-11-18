@@ -355,6 +355,16 @@ class Stock:
                 raise Stop("data initialisation didn't finish, pc 0x%04x" % c.pc)
         return n
 
+    def setup_switch(self):
+        """What the application's start leaves for the API: the data init,
+        the HAL control pointer (XDATA 0xb326, as bank 3 0xdcde returns it:
+        the static struct at 0xa980, valid_portmask 0x3f8 on this RTL8372
+        build) and the "switch initialised" flag (XDATA 0xb325)"""
+        self.init_data()
+        x = self.cpu.xdata
+        x[0xB326:0xB329] = bytes([0x01, 0xA9, 0x80])
+        x[0xB325] = 1
+
     def call(self, bank, addr, regs=None, max_steps=2_000_000):
         """Run the function at bank:addr until it returns; regs: {n: value} for R0-R7"""
         c = self.cpu

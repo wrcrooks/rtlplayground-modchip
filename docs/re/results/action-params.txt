@@ -1,0 +1,19 @@
+enable  0 base 0 0 0 0 0 | 30=01->w0^1000 30=ff:err1 31=01->w0^10 31=ff->w0^ff0
+enable  1 base 1 0 0 0 0 | 30=01->w0^1000 30=ff:err1 31=01->w0^10 31=ff->w0^ff0
+enable  2 base 2 0 0 0 0 | -
+enable  3 base 3 0 0 0 0 | 52=01:err1 53=01:err1 54=01:err1 55=01->w0^10 55=ff:err1
+enable  4 base 0 0 0 0 0 | 34=01->w0^10000000 34=ff->w0^f0000000 35=01->w0^100000 35=ff->w0^ff00000
+enable  5 base 40000 0 0 0 0 | 34=01->w0^10000000 34=ff->w0^f0000000 35=01->w0^100000 35=ff->w0^ff00000
+enable  6 base 80000 0 0 0 0 | -
+enable  7 base c0000 0 0 0 0 | 56=01:err1 57=01:err1 58=01:err1 59=01->w0^100000 59=ff:err1
+enable  8 base 0 0 0 0 0 | 36=01:err1 37=01:err1 38=01:err1 39=01->w1^1 39=ff:err1
+enable  9 base 0 0 0 0 0 | 40=01:err1 41=01:err1 42=01:err1 43=01->w1^10 43=ff:err1
+enable 10 base 0 8 0 0 0 | 44=01:err1 45=01:err1 46=01:err1 47=01->w1^10 47=ff:err1
+enable 11 base 0 0 0 0 0 | 48=01:err1 49=01:err1 50=01:err1 51=01->w1^400 51=ff:err1
+enable 12 base 0 10000 0 0 0 | 60=01:err1 61=01:err1 62=01:err1 63=01->w1^400 63=ff:err1
+enable 13 base 0 0 0 0 0 | 64=01:err4 65=01:err4 66=ff:err4 67=01:err4
+enable 14 base 0 20000 0 0 0 | 64=01:err4 65=01:err4 66=ff:err4 67=01:err4
+enable 15 base 0 40000 0 0 0 | 64=01:err4 65=01:err4 66=ff:err4 67=01:err4
+enable 16 base 0 60000 0 0 0 | -
+enable 17 base 0 80000 0 0 0 | -
+enable 18 base 0 a0000 0 0 0 | -
