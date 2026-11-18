@@ -729,6 +729,25 @@ int main(void)
 	t3_mode = T3_GOOD;
 	cmd("t3 off");
 
+	/* L2 security: the commands, through the parser, reach the registers and the history */
+	cmd("l2 limit 3 5");
+	check(strstr((char *)outbuf, "200 OK") && regs[0x5384 + 4 * machine.phys_to_log_port[2]] == 5,
+	      "l2 limit 3 5: port 3's learning limit register");
+	cmd("l2 limit 3 off");
+	check(regs[0x5384 + 4 * machine.phys_to_log_port[2]] == 0x1040, "l2 limit 3 off: back to the boot value");
+	cmd("l2 sticky 3 on");
+	check(strstr((char *)outbuf, "200 OK") != NULL, "l2 sticky 3 on");
+	cmd("l2 static 00:11:22:33:44:55 10 2");
+	check(strstr((char *)outbuf, "200 OK") != NULL, "l2 static: accepted");
+	cmd("l2 static 01:00:5e:00:00:01 10 2");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "l2 static: a multicast MAC is refused");
+	ticks_run(200);
+	rtl_http_get("/cmd_log");
+	outbuf[slen] = 0;
+	check(strstr((char *)outbuf, "l2 sticky 3 on") && strstr((char *)outbuf, "l2 static 00:11:22:33:44:55 10 2"),
+	      "the l2 commands land in the history");
+	cmd("l2 sticky 3 off");
+
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");
 	check(rtl_password_ok("secret"), "passwd changes the password");

@@ -71,6 +71,7 @@ add_library(rtlp OBJECT
     ${RTLP}/rtl837x_lacp.c
     ${RTLP}/rtl837x_igmp.c
     ${RTLP}/rtl837x_lldp.c
+    ${RTLP}/rtl837x_l2sec.c
     ${RTLP}/rtl837x_bandwidth.c
     ${RTLP}/rtl837x_storm.c
     ${RTLP}/rtl837x_cabletest.c

@@ -7,7 +7,7 @@ MACHINE = SWGT024_V2_0_UNMANAGED
 
 # The RTLPlayground half, built as CMakeLists.txt builds it for the RP2350
 RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_port.c rtl837x_stp.c \
-	rtl837x_lacp.c rtl837x_igmp.c rtl837x_lldp.c rtl837x_bandwidth.c rtl837x_storm.c \
+	rtl837x_lacp.c rtl837x_igmp.c rtl837x_lldp.c rtl837x_l2sec.c rtl837x_bandwidth.c rtl837x_storm.c \
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \

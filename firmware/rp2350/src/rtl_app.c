@@ -12,6 +12,7 @@
 #include "rtl837x_lacp.h"
 #include "rtl837x_igmp.h"
 #include "rtl837x_lldp.h"
+#include "rtl837x_l2sec.h"
 #include "rtl837x_bandwidth.h"
 #include "rtl837x_cabletest.h"
 #include "rtl837x_flash.h"
@@ -176,6 +177,10 @@ void rtl_tick(void)
 	if (lacpEnabled)
 		lacp_timers();
 	lldp_tick();
+	/* Each entry the sticky walk looks at is several register accesses over
+	 * the bridge or T3: ten walks a second, not one per tick */
+	if (!(ticks % (SYS_TICK_HZ / 10)))
+		l2_sticky_tick();
 	cabletest_tick();
 }
 
