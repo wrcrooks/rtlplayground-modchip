@@ -381,7 +381,14 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 - **The simulator.** The commands, the trap and isolation registers, the CPU-tagged Request/Identity
   and the Access-Request it sets off.
 
-Not yet run on a switch: the RMA03 register needs checking there.
+**On a switch** (the MokerLink on the Beetle rig, one link):
+- RMA03 at 0x4ed8 traps EAPOL to the CPU, and only 01:80:C2:00:00:03.
+- The gate closes the port.
+- Request/Identity goes out, the Response is relayed, and FreeRADIUS 3.2 accepts the Access-Request
+  and answers with an EAP-MD5 challenge.
+
+A full login still needs a second link: on the only link, the server's reply arrives through the
+closed port, which drops it.
 
 ## Build
 
