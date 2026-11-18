@@ -696,6 +696,8 @@ void dot1x_apply(void)
 			/* an auto port that was off or blocked waits for its link (dot1x_link) */
 			if (p->s.state == DOT1X_S_OFF || p->s.state == DOT1X_S_BLOCKED)
 				reset_port(port, DOT1X_S_DOWN);
+			if (dot1x_hw_link(port))
+				dot1x_link(port, true);
 		} else if (p->s.state != want) {
 			reset_port(port, want);
 		}

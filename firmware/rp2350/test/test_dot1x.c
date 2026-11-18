@@ -21,9 +21,11 @@ static uint16_t gate_mask = 0xffff;
 static bool gate_on;
 static int gate_calls;
 static unsigned rnd = 1;
+static uint16_t links_up;		/* what dot1x_hw_link() reports */
 
 uint16_t dot1x_hw_ports(void) { return 0x1f8; }		/* logical 3-8, as an RTL8372 */
 uint8_t dot1x_hw_front_port(uint8_t port) { return port - 2; }
+bool dot1x_hw_link(uint8_t port) { return links_up >> port & 1; }
 void dot1x_hw_random(uint8_t *p, uint8_t n) { while (n--) *p++ = (rnd = rnd * 1103515245 + 12345) >> 16; }
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 192; ip[1] = 168; ip[2] = 10; ip[3] = 247; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }
@@ -413,6 +415,15 @@ int main(void)
 	/* Link down */
 	dot1x_link(6, false);
 	check(!open_(6) && st(6) == DOT1X_S_DOWN, "link down: closed, waiting for the link");
+
+	/* A port set to auto with its link already up: no link change will come */
+	supp[7] = (struct supp){ true, "alice", "secret", { 0x02, 0, 0, 0, 0, 0x07 }, 0, 0, 0, 0 };
+	links_up = 1 << 7;
+	dot1x_cfg.mode[7] = DOT1X_AUTO;
+	dot1x_apply();
+	seconds(2);
+	check(supp[7].id_requests == 1 && st(7) == DOT1X_S_AUTHENTICATED && open_(7),
+	      "auto on a port already up: asked at once, authorized");
 
 	/* Off: everything open, EAPOL no longer trapped */
 	dot1x_cfg.enabled = false;

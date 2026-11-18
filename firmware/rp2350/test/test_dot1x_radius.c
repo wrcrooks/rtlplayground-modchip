@@ -22,6 +22,7 @@ static const uint8_t sw_mac[6] = { 0x06, 0x0f, 0x00, 0xdd, 0x3b, 0x3e };
 
 uint16_t dot1x_hw_ports(void) { return 0x1f8; }
 uint8_t dot1x_hw_front_port(uint8_t port) { return port - 2; }
+bool dot1x_hw_link(uint8_t port) { (void)port; return false; }
 void dot1x_hw_random(uint8_t *p, uint8_t n) { FILE *f = fopen("/dev/urandom", "rb"); fread(p, 1, n, f); fclose(f); }
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 127; ip[1] = 0; ip[2] = 0; ip[3] = 1; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }

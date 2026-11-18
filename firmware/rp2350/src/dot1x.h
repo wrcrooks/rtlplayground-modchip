@@ -86,6 +86,9 @@ const char *dot1x_state_name(uint8_t state);
 /* Valid logical ports, bit per port */
 uint16_t dot1x_hw_ports(void);
 uint8_t dot1x_hw_front_port(uint8_t port);
+/* The link as last reported: links only report changes, so a port set to
+ * auto with its link already up needs this */
+bool dot1x_hw_link(uint8_t port);
 /* An EAPOL PDU to the supplicant on port */
 void dot1x_hw_eapol_tx(uint8_t port, const uint8_t *pdu, uint16_t len);
 void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len);

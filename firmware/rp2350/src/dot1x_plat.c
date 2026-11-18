@@ -158,8 +158,17 @@ bool dot1x_plat_rx(const uint8_t *f, uint16_t len, uint16_t type_at)
 
 
 /* LINK message: links_sts bit 16 + port (8-9: bit port), as rtl_metrics.c reads it */
+static uint32_t link_sts;
+
+bool dot1x_hw_link(uint8_t port)
+{
+	return (link_sts >> (port < 8 ? 16 + port : port)) & 1;
+}
+
+
 void dot1x_plat_links(uint32_t sts, uint32_t links, uint32_t links_89)
 {
+	link_sts = sts;
 	for (uint8_t i = machine.min_port; i <= machine.max_port && i < DOT1X_PORTS; i++) {
 		bool up = (sts >> (i < 8 ? 16 + i : i)) & 1;
 		(void)links; (void)links_89;
