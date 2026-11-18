@@ -138,7 +138,8 @@ to your dump. Set XDATA 0xb325 = 1 (the "switch initialised" flag) and call the 
 
 **What init writes:**
 - 0x4810 = 1;
-- 0x4820-0x4844 = 0 (ten registers, purpose unknown);
+- 0x4820-0x4844: the five templates (see "On a switch" below; an earlier run without the data init
+  read zeros here);
 - 0x4848 + 4·i = 0xff, one register per rule. It holds the action groups the rule uses: rule add
   writes it with bits 0x01-0x80, one per group.
 
@@ -232,3 +233,75 @@ not the type alone.
   - enable 22: +71, low nibble, into word 2 bits 3:0;
   - enables 16-18, 20-21 and 23-29 take no parameter in +30..+0x6f: their effect is the fixed bits
     the enable alone sets.
+
+## On a switch (2026-11-18)
+
+The MokerLink with the Beetle stand-in, running modchip 76a8bc5. The host is on front port 1 (ASIC
+port 4) and pings the switch. `docs/re/hw/acl_hw.py` repeats every check below over the USB
+console (`docs/re/hw/sw.py`), and clears the table afterwards.
+
+**State at reset under RTLPlayground.**
+- The rule table holds random contents, with no valid bit set anywhere.
+- 0x4848-0x49c4 (one per rule) are 0xff; 0x4810-0x4844 are 0.
+
+**Registers.**
+
+| Register | Role | Confirmed by |
+|---|---|---|
+| 0x4818 | ACL enable, a bit per ASIC port (bit 9 is the CPU port) | with no valid rule, the port drops everything |
+| 0x481c | unmatched frames pass, a bit per port | with it set, an empty table passes |
+| 0x4820-0x4844 | templates: 8 field codes each, 2 registers per template | field rules match once written |
+| 0x4848 + 4·i | rule i's action groups (bit per group) | only the groups set apply |
+| 0x4810 | reads back 0 after a write of 1; no effect seen | |
+
+- **Stock's init sets 0x4818 and 0x481c to 0x1f8 (ports 3-8).** That means ACL on and unmatched
+  frames passing on every front port. The CPU port isn't included.
+- **Templates.** Template t uses registers 0x4824 + 8t (slots 0-3, slot 0 in the low byte) and
+  0x4820 + 8t (slots 4-7). Stock's codes, from XDATA 0xa903:
+
+  | Template | Slots 0-7 |
+  |---|---|
+  | 0 | 00 01 02 03 04 05 06 4f |
+  | 1 | 10 11 12 13 34 35 36 40 |
+  | 2 | 12 13 43 44 45 46 47 48 |
+  | 3 | 10 11 49 4a 4b 4c 4d 4e |
+  | 4 | 30 31 32 08 07 41 42 33 |
+
+  RTLPlayground leaves them at 0, so every slot is field 00 (DMAC bits 15:0) until something
+  writes them.
+
+**Rules from the emulated stock driver match on the chip** (rule 0, drop on match):
+
+| Rule | Ping | HTTP | So |
+|---|---|---|---|
+| none | passes | passes | |
+| everything (template 0, no cares) | dropped | dropped | |
+| DMAC = the switch's | dropped | dropped | DMAC in template 0 slots 0-2, slot 0 the low bits |
+| DMAC = another | passes | passes | |
+| SMAC = the host's | dropped | dropped | SMAC in slots 3-5 |
+| type 2 = 0x0800 | dropped | dropped | type 2 is the EtherType (slot 7 of template 0) |
+| types 10, 14 = 1 | dropped | passes | IPv4 protocol / IPv6 next header: field 0x34 low byte |
+| types 9, 13 = 1 | passes | passes | ToS / traffic class (0 here): field 0x34 high byte |
+| types 19, 20 = 1 | passes | passes | field 0x35 high and low byte (TCP flags?): not identified |
+
+**Action group 5, forwarding** (action word 1). Bits 20:17 are a code, and bits 30:21 a port mask,
+1 << (21 + ASIC port). The emulator puts stock's port masks there too.
+
+| Code | Ping | Frames reach the CPU | Likely |
+|---|---|---|---|
+| 0 | passes | yes | forward normally (add the mask's ports?) |
+| 1 | only with the CPU in the mask | only then | redirect to the mask; an empty mask drops |
+| 2, 6, 7 | passes | yes | copy or mirror to the mask (not visible with one link) |
+| 3, 4, 5 | dropped | yes | trap to the CPU; RTLPlayground doesn't answer trapped frames |
+| 8-15 | as code 1 | as code 1 | bit 20 is a flag of its own (stock enable 19) |
+
+- **Groups 0 and 4 with all-zero parameters drop as well.** That fits a VLAN or policer index of 0.
+  So a rule should only set the groups it uses in 0x4848, as stock does.
+- **Not testable with one link:** the copy and mirror codes, and redirecting to another front port.
+  Both need a second host on another port.
+
+**Next.**
+1. Write the stock templates at start-up, and set 0x481c along with 0x4818.
+2. Build an `acl` command set on these encodings (rule = fields + ports + an action), replacing the
+   raw commands for everyday use.
+3. With a second link: the copy, mirror and redirect codes, and the port mask in rule word 4.
