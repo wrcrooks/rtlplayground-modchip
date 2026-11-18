@@ -110,3 +110,85 @@ chip that only stops the switch's own traffic; the RP2350 console over SWD keeps
    - Then move the match to a VLAN, an EtherType, an IP and a port, one at a time.
 5. **Then add a real `acl` command set** to RTLPlayground (on `feat/modchip` first, then upstream),
    built on what is confirmed.
+
+## Findings from emulation (no hardware)
+
+`docs/re/emu51.py` is an 8051 emulator for the stock image. It models:
+- the register engine (SFRs 0xa0-0xa7) and the table engine;
+- the bank-save stack (SFR 0xbb, which has to be a stack);
+- the UART, whose debug prints are kept in `Stock.uart`;
+- Keil's data init (`init_data()`). The image holds a boot stage at 0x0000 and the application, with
+  its own reset code at 0x1000.
+
+It runs the stock driver's functions as they are. `docs/re/probes/` holds the probes; set `STOCK_BIN`
+to your dump. Set XDATA 0xb325 = 1 (the "switch initialised" flag) and call the init at bank 14
+0xa1b4 first.
+
+**Bank 14 functions:**
+
+| Address | Function |
+|---|---|
+| 0xa1b4 | init |
+| 0xa33c | add a field to a rule config |
+| 0xa51a | add a rule (index, config, action, rule count) |
+| 0xba2b | get a rule |
+| 0xc4ea | delete a rule |
+| 0x9795 / 0x9aa6 | raw rule read / write |
+| 0x9e8b / 0xa017 | raw action read / write |
+
+**What init writes:**
+- 0x4810 = 1;
+- 0x4820-0x4844 = 0 (ten registers, purpose unknown);
+- 0x4848 + 4·i = 0xff, one register per rule. It holds the action groups the rule uses: rule add
+  writes it with bits 0x01-0x80, one per group.
+
+**Rule entry, five words, TCAM-encoded.**
+- **Encoding.** For care bit c and value bit d, the data entry (i) holds ¬(d∧c) and the care entry
+  (0x80 + i) holds d∨¬c. Care-entry word 4 bit 21 is the valid bit.
+- **Words 0-3.** Eight 16-bit field slots: word n holds slot 2n+1 in bits 31:16 and slot 2n in 15:0.
+- **Word 4.** Bits 10:0 hold A: bits 2:0 are the template index, bits 3-10 eight care-tag bits.
+  Bits 20:11 hold B, probably the active port mask; still to confirm.
+
+**API structures**, as RTL8367C's `rtk_filter_*`, big-endian, with 3-byte Keil pointers:
+- **Rule config.**
+  - +0: the field list pointer;
+  - +3/+7, +11/+15, +19/+23: care tags 0-2 as (value, mask) pairs of 32-bit words;
+  - +0xb7..0xba and +0xbf..0xc2: more care-tag masks (A bits 6-10);
+  - +0xab and +0xaf: the active-port value and mask (32-bit). They go through `rtk_switch`'s port
+    conversion, which needs `halCtrl->valid_portmask` set. Not done yet;
+  - +0xc3: invert.
+- **Field node.**
+  - +0: the type (u32, 0-42);
+  - +4: the data type;
+  - then value and mask: a MAC has its value at +8..13 and its mask at +14..19;
+  - +0x48: the slot count, +0x4c: slot entries (filled by 0xa33c), +0x6c: next.
+- **Type to field-code table** (XDATA 0xa7ab, 8 codes per type; counts at 0xa780). Some codes:
+
+  | Codes | Field |
+  |---|---|
+  | 00-02 | DMAC |
+  | 03-05 | SMAC |
+  | 06 | EtherType? |
+  | 10-11 / 12-13 | IPv4 SIP / DIP |
+  | 14-17 | L3/L4 fields |
+  | 20-27 / 30-37 | IPv6 addresses |
+  | 40-47 | ranges, VID |
+  | 43/44 | tags |
+
+  The order matches the RTL8367C field type list closely.
+- **Action struct.** A byte of enable flags per action, then parameters:
+  - enables 0-3 select word 0 bits 1:0 (C-VLAN group);
+  - enables 4-7 select word 0 bits 19:18 (S-VLAN group);
+  - enable 10 (drop?) sets word 1 bit 3;
+  - enables 12-19 set word 1 bits 16-20;
+  - enable 21 sets word 1 bit 31;
+  - enables 22, 27-29 set word 2 bits 4-7;
+  - enables 23-26 set word 0 bit 3 and bits 17:16.
+
+  The parameter offsets aren't probed yet.
+
+**Next without hardware:**
+1. Set `valid_portmask` (find `halCtrl` in XDATA, from 0xaea9 onward) and probe the active-port bytes.
+2. Probe action parameters with each enable set.
+3. Probe each field type's value offsets.
+4. Write a field-type table for an `acl` command set.
