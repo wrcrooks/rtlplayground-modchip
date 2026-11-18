@@ -57,9 +57,22 @@ static void stat_get(uint32_t v)
 }
 
 /* The table engine, enough of it for VLAN entries */
+/* The ACL tables, types 1 (rules, care half at entry 0x80 + i) and 2 (actions): five words an entry */
+static uint32_t acl_tbl[3][256][5];
+
 static void tbl_ctrl(uint32_t v)
 {
 	uint16_t entry = v >> 16;
+	uint8_t type = (v >> 8) & 0xff;
+
+	if ((type == 1 || type == 2) && (v & 1) && entry < 256) {
+		for (int i = 0; i < 5; i++) {
+			if (v & 2)
+				acl_tbl[type][entry][i] = regs[0x5cb8 + 4 * i];
+			else
+				regs[0x5ccc + 4 * i] = acl_tbl[type][entry][i];
+		}
+	}
 
 	if (((v >> 8) & 0xff) == 0x03 && (v & 1) && entry < 0x1000) {
 		if (v & 2) {
@@ -830,6 +843,20 @@ int main(void)
 		memset(lk, 0, sizeof(lk));
 		rtl_on_link(lk);
 	}
+
+	/* Raw ACL table access */
+	cmd("acl rule 7 11111111 22222222 33333333 44444444 5 aaaaaaaa bbbbbbbb cccccccc dddddddd e");
+	check(strstr((char *)outbuf, "200 OK") && acl_tbl[1][7][0] == 0x11111111 && acl_tbl[1][7][4] == 5
+	      && acl_tbl[1][0x87][0] == 0xaaaaaaaa && acl_tbl[1][0x87][4] == 0xe, "acl rule 7 ...: data at entry 7, care at 0x87");
+	cmd("acl rule 7");
+	check(strstr((char *)outbuf, "data 11111111 22222222 33333333 44444444 00000005")
+	      && strstr((char *)outbuf, "care aaaaaaaa bbbbbbbb cccccccc dddddddd 0000000e"), "acl rule 7 reads both halves back");
+	cmd("acl action 95 1 2 3 4 5");
+	cmd("acl action 95");
+	check(acl_tbl[2][95][2] == 3 && strstr((char *)outbuf, "action 00000001 00000002 00000003 00000004 00000005"),
+	      "acl action 95: written and read back");
+	cmd("acl rule 96");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "acl rule 96 is out of range");
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");
