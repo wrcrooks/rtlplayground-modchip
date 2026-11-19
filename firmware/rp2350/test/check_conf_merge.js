@@ -79,4 +79,15 @@ c = merge(c, "dot1x port 2 mab off\ndot1x off");
 check(c.includes("dot1x port 2 mab off") && !c.includes("dot1x port 2 mab on") && c.includes("dot1x off") && !c.includes("dot1x on"),
   "mab off and dot1x off replace their on lines");
 
+// ACL (RTLPlayground's acl command; app.js's own patterns)
+check(ctx.isConfCmd("acl 2 tcp dport 80 drop 3") && ctx.isConfCmd("acl meter 1 1000 kbps 16000"), "acl rules and meters count as config");
+check(!ctx.isConfCmd("acl show") && !ctx.isConfCmd("acl counter reset"), "acl show and counter reset don't");
+c = merge(base.concat("acl 3 icmp drop 4", "acl 1 udp dport 53 drop 3", "acl 2 and dip 10.0.0.1"),
+  "acl 1 tcp dport 80 drop 3\nacl show\nacl 5 ethertype 86dd drop 2");
+const rules = c.filter((l) => /^acl \d/.test(l));
+check(rules.join("|") === "acl 1 tcp dport 80 drop 3|acl 2 and dip 10.0.0.1|acl 3 icmp drop 4|acl 5 ethertype 86dd drop 2",
+  "a new acl 1 replaces the old one, and the rules stay in rule order");
+c = merge(c, "acl 1 off");
+check(!c.some((l) => /^acl [12] /.test(l)) && c.includes("acl 3 icmp drop 4"), "acl 1 off removes rule 1 and the and rule joined to it");
+
 process.exit(failures ? 1 : 0);

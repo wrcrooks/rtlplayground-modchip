@@ -316,9 +316,10 @@ match nothing.
 **Priority.** Within an action group, the lowest numbered matching rule wins. A rule without the
 group (0x4848 bit clear) doesn't stop a later rule's.
 
-These are what `firmware/rp2350/src/rtl_acl.c` builds its `acl` commands on.
+DrDoof's [logicog/RTLPlayground#520](https://github.com/logicog/RTLPlayground/pull/520) had worked
+out the same engine independently, on a SWTGW218AS, and goes further: every action group, range
+entries, meters, counters and field selectors. Its `doc/acl.md` agrees with everything above. The
+mod chip now uses that module instead of a command set of its own; see `firmware/rp2350/README.md`.
 
-**Next.**
-1. What separates forwarding codes 0/2 and 3/4/5.
-2. The care tags (rule word 4 bits 3-10), templates 2-4, and the other action groups (VLAN,
-   priority, policing) for further commands.
+**Forwarding codes, as #520 names them:** 0 copy, 1 redirect, 2 mirror, 3 trap to the internal CPU,
+4 to the external one, 5 to both. That matches what was measured above. 6 and 7 aren't used there.

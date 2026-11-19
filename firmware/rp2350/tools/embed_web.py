@@ -226,6 +226,83 @@ DOT1X = """<script>
 </script>
 """
 
+# Added to RTLPlayground's index.html, after app.js: the ACL rules (RTLPlayground's
+# acl command, doc/acl.md) on the MAC table tab
+ACL = r"""<script>
+/* Added by the mod chip's build (tools/embed_web.py): ACL rules, see rtlplayground/doc/acl.md */
+(function(){
+  if(typeof CONF_CMDS==="undefined"||!document.getElementById("tab-l2"))return;
+  var tr={
+    en:{a_title:"Access control (ACL)",a_rule:"Rule",a_match:"Match, actions and ports",a_add:"Add",a_remove:"Remove",
+      a_show:"Counters and meters",a_none:"No rules.",a_other:"Settings",
+      a_note:"The lowest numbered matching rule decides. A rule is acl <1-64> followed by what to match, what to do and the ingress ports, e.g. tcp dport 80 drop 3. Save keeps the rules. Syntax: doc/acl.md."},
+    de:{a_title:"Zugriffskontrolle (ACL)",a_rule:"Regel",a_match:"Bedingung, Aktionen und Ports",a_add:"Hinzufügen",a_remove:"Entfernen",
+      a_show:"Zähler und Meter",a_none:"Keine Regeln.",a_other:"Einstellungen",
+      a_note:"Die passende Regel mit der kleinsten Nummer entscheidet. Eine Regel ist acl <1-64>, dann die Bedingung, die Aktion und die Eingangsports, z. B. tcp dport 80 drop 3. Speichern behält die Regeln. Syntax: doc/acl.md."},
+    es:{a_title:"Control de acceso (ACL)",a_rule:"Regla",a_match:"Condición, acciones y puertos",a_add:"Añadir",a_remove:"Quitar",
+      a_show:"Contadores y medidores",a_none:"No hay reglas.",a_other:"Ajustes",
+      a_note:"Decide la regla coincidente de número más bajo. Una regla es acl <1-64> seguido de la condición, la acción y los puertos de entrada, p. ej. tcp dport 80 drop 3. Guardar conserva las reglas. Sintaxis: doc/acl.md."},
+    fr:{a_title:"Contrôle d'accès (ACL)",a_rule:"Règle",a_match:"Condition, actions et ports",a_add:"Ajouter",a_remove:"Supprimer",
+      a_show:"Compteurs et limiteurs",a_none:"Aucune règle.",a_other:"Réglages",
+      a_note:"La règle correspondante de plus petit numéro décide. Une règle s'écrit acl <1-64> suivi de la condition, de l'action et des ports d'entrée, p. ex. tcp dport 80 drop 3. Enregistrer conserve les règles. Syntaxe : doc/acl.md."},
+    ja:{a_title:"アクセス制御 (ACL)",a_rule:"ルール",a_match:"条件、動作、ポート",a_add:"追加",a_remove:"削除",
+      a_show:"カウンターとメーター",a_none:"ルールはありません。",a_other:"設定",
+      a_note:"一致したルールのうち番号の最も小さいものが決めます。ルールは acl <1-64> の後に条件、動作、入力ポートを書きます (例: tcp dport 80 drop 3)。保存するとルールが保持されます。書式: doc/acl.md。"},
+    zh:{a_title:"访问控制 (ACL)",a_rule:"规则",a_match:"匹配、动作和端口",a_add:"添加",a_remove:"删除",
+      a_show:"计数器和计量器",a_none:"没有规则。",a_other:"设置",
+      a_note:"匹配的规则中编号最小的决定结果。规则写作 acl <1-64>,后接匹配条件、动作和入口端口,例如 tcp dport 80 drop 3。保存后规则会保留。语法见 doc/acl.md。"}
+  };
+  for(var l in tr)if(LANG[l])for(var k in tr[l])LANG[l][k]=tr[l][k];
+
+  var card=document.createElement("div");card.className="card";
+  card.innerHTML='<h2 data-i18n="a_title"></h2><p class="small mut" data-i18n="a_note"></p>'+
+    '<div class="scrollx"><table class="t" id="a-table"><thead><tr><th data-i18n="a_rule"></th><th data-i18n="a_match"></th><th></th></tr></thead><tbody></tbody></table></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">'+
+    '<span class="mono">acl</span><input class="in" id="a-n" type="number" min="1" max="64" style="width:5em">'+
+    '<input class="in mono" id="a-rest" style="flex:1;min-width:16em" placeholder="tcp dport 80 drop 3">'+
+    '<button class="ctl" id="a-add" data-i18n="a_add"></button>'+
+    '<button class="ctl" id="a-show" data-i18n="a_show"></button></div>'+
+    '<pre class="small mono" id="a-out" style="display:none;white-space:pre-wrap"></pre>';
+  document.getElementById("tab-l2").appendChild(card);
+
+  /* The rules as Save would write them: the saved config with the unsaved commands merged in */
+  function load(){
+    return Promise.all([getText("/config").catch(function(){return""}),getText("/cmd_log").catch(function(){return""})]).then(function(r){
+      var cur=r[0].replace(/\0[\s\S]*$/,"").split(/\r?\n/).map(function(l){return l.trim().replace(/\s+/g," ")}).filter(Boolean);
+      var lines=mergeConf(cur,[r[1].replace(/\0[\s\S]*$/,"")]).filter(function(l){return/^acl /.test(l)});
+      var tb=$("a-table").tBodies[0],used={};tb.innerHTML="";$("a-out").style.display="none";
+      lines.forEach(function(l){
+        var m=l.match(/^acl (\d{1,2}) (.*)$/),row=tb.insertRow();
+        row.insertCell().textContent=m?m[1]:t("a_other");
+        row.insertCell().appendChild(h("span",{class:"mono",text:m?m[2]:l.slice(4)}));
+        var c=row.insertCell();
+        if(m){
+          used[m[1]]=1;
+          if(!/^and /.test(m[2]))c.appendChild(h("button",{class:"ctl",text:t("a_remove"),onclick:function(){
+            postCmd("acl "+m[1]+" off").then(load).catch(function(){})}}));
+        }
+      });
+      if(!lines.length)tb.insertRow().insertCell().textContent=t("a_none");
+      if(!$("a-n").value)for(var n=1;n<=64;n++)if(!used[n]){$("a-n").value=n;break;}
+    });
+  }
+  $("a-add").addEventListener("click",function(){
+    var n=$("a-n").value.trim(),rest=$("a-rest").value.trim();
+    if(!n||!rest)return;
+    postCmd("acl "+n+" "+rest).then(function(){$("a-rest").value="";$("a-n").value="";load()}).catch(function(){});
+  });
+  $("a-rest").addEventListener("keydown",function(e){if(e.key==="Enter")$("a-add").click()});
+  /* On request only: acl show clears the meters' exceeded bits, and each call joins the command history */
+  $("a-show").addEventListener("click",function(){
+    postCmd("acl show",true).then(function(r){var o=$("a-out");o.textContent=(r.body||"").trim();o.style.display=""}).catch(function(){});
+  });
+  var hk=tabHooks.l2,enter=hk&&hk.enter;
+  if(hk)hk.enter=function(){if(enter)enter.apply(this,arguments);load().catch(function(){})};
+  i18nApply();
+})();
+</script>
+"""
+
 MIME = {
     ".html": "text/html",
     ".ico": "image/svg+xml",  # RTLPlayground's favicon.ico is an SVG
@@ -254,7 +331,7 @@ def main():
     for k, p in enumerate(files):
         raw = p.read_bytes()
         if p.name == "index.html":
-            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS + DOT1X).encode() + b"</body>", 1)
+            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS + DOT1X + ACL).encode() + b"</body>", 1)
         data = gzip.compress(raw, compresslevel=9, mtime=0)
         src.append("static const uint8_t f%d[%d] = {\n%s\n};" % (k, len(data), c_bytes(data)))
         table.append((("/" + p.name), k, len(data), MIME[p.suffix]))

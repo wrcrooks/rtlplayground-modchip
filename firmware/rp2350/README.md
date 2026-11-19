@@ -396,48 +396,40 @@ FreeRADIUS's challenge.
 
 ## ACL rules
 
-Rules match frames as they enter front ports, and drop, permit, trap, redirect or copy them.
+The `acl` command is RTLPlayground's, from DrDoof's
+[logicog/RTLPlayground#520](https://github.com/logicog/RTLPlayground/pull/520), carried on the fork's
+`feat/modchip` branch until upstream merges it. `rtlplayground/doc/acl.md` has the whole syntax:
+- up to 64 rules on every field the switch can match;
+- drop, permit, redirect, copy, mirror, trap, VLAN, priority, PCP and DSCP actions;
+- meters, counters and field selectors.
 
 ```
-acl                                       the rules, as the lines that make them
-acl <1-96> ports <p,p,...>|all            front ports the rule watches (all by default)
-acl <1-96> dmac|smac <mac> [<mask>]|any
-acl <1-96> ethertype <hex>|any
-acl <1-96> src|dst <a.b.c.d>[/<0-32>]|any
-acl <1-96> proto <0-255>|tcp|udp|icmp|any IPv4 protocol, IPv6 next header
-acl <1-96> sport|dport <0-65535>|any
-acl <1-96> icmp-type <0-255>|any
-acl <1-96> drop|permit|trap
-acl <1-96> redirect|copy <p,p,...|cpu>    only to those ports, or to them as well
-acl <1-96> delete
+acl 1 tcp dport 80 drop 3              keep port 3 off the web pages
+acl 2 icmp dip 192.168.10.247 count 0 1
+acl meter 1 1000 kbps 16000
+acl 3 udp dport 5000 police 1 4
+acl 4 icmp dscp 46 1
+acl 1 off
+acl show                               rules, counters, meters exceeded
 ```
 
-For example, to keep port 3 off the switch's web pages:
-
-```
-acl 1 ports 3
-acl 1 dst 192.168.10.247
-acl 1 proto tcp
-acl 1 dport 80
-acl 1 drop
-```
-
-- **Order.** A rule takes effect once it has an action, and the lowest numbered rule that matches
-  decides. A `permit` ahead of a `drop` makes an exception to it.
-- **Fields.** A rule matches MAC fields (`dmac`, `smac`, `ethertype`) or IP fields (the rest), not
-  both. The chip fills a rule from one of its field templates, and these sit in different ones.
-  `sport` and `icmp-type` share a field, so a rule has one or the other.
-- **Not matched:** frames the switch sends itself. A rule can't block the management CPU's replies,
-  only what reaches it.
-- **Configuration.** These are configuration lines, which Save keeps.
+- **Web UI.** The MAC table tab has an ACL card. It lists the rules as Save would keep them, adds
+  and removes rules, and shows `acl show` on request. It doesn't poll, because `acl show` clears
+  the meters' exceeded bits.
+- **When the 8051 restarts,** the switch's tables reset. `acl_reset()` forgets the rules, and the
+  saved configuration sets them up again.
+- **On this branch the module is built for the RP2350 only** (`RTLP_ACL`): the 8051 image has no
+  room for it, and the mod chip's 8051 only runs the bridge.
 
 **Tested** on the MokerLink (Beetle rig), with a host on port 1 and a NanoPi on port 4:
-- TCP port 80 dropped, while ping still works;
-- a port cut off, and an ICMPv6 `permit` ahead of the `drop` letting its ping through;
-- ICMP to the switch redirected to port 4, copied to it, trapped, and redirected to the CPU.
+- drop, permit ahead of a drop, redirect, copy and trap;
+- a counter, which counted exactly the pings sent;
+- a 64 kbps meter, which cut a ping flood and reported itself exceeded;
+- DSCP 46 remarking, seen in the switch's replies;
+- the web card: add, list, counters and remove.
 
-The layout behind the commands is in `docs/acl-reverse-engineering.md`. The `acl rule|action`
-commands still give raw access to the tables.
+`acltbl rule|action <0-95>` still reads and writes the raw table entries. The layout is in
+`docs/acl-reverse-engineering.md`.
 
 ## Build
 

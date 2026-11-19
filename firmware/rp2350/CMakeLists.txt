@@ -80,6 +80,8 @@ add_library(rtlp OBJECT
     ${RTLP}/rtl837x_leds_dump.c
     ${RTLP}/rtl837x_pins.c
     ${RTLP}/rtl837x_trap.c
+    ${RTLP}/rtl837x_acl.c
+    ${RTLP}/rtl837x_acl_cmd.c
     ${RTLP}/sfp.c
     ${RTLP}/dns.c
     ${RTLP}/dns_cli.c
@@ -91,7 +93,6 @@ add_library(rtlp OBJECT
     src/rtl_app.c
     src/rtl_udp.c
     src/rtl_ext.c
-    src/rtl_acl.c
     src/rtl_metrics.c
     src/rtl_poe.c
     src/dot1x_plat.c
@@ -113,6 +114,7 @@ target_compile_definitions(rtlp PRIVATE
     # lwIP has functions of the same names, taking a netif
     dhcp_start=rtlp_dhcp_start
     dhcp_stop=rtlp_dhcp_stop
+    RTLP_ACL
     # commands of our own, rtl_ext.c
     CMD_PARSER_EXT=rtl_cmd_ext)
 target_compile_options(rtlp PRIVATE

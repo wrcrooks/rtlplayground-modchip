@@ -15,7 +15,7 @@
 #include "rtl8238.h"
 #include "bridge.h"
 #include "plat.h"
-#include "rtl_acl.h"
+#include "rtl837x_acl.h"
 
 struct bridge_hello bridge_hello;
 struct bridge_stats bridge_stats;
@@ -846,76 +846,47 @@ int main(void)
 	}
 
 	/* Raw ACL table access */
-	cmd("acl rule 7 11111111 22222222 33333333 44444444 5 aaaaaaaa bbbbbbbb cccccccc dddddddd e");
+	cmd("acltbl rule 7 11111111 22222222 33333333 44444444 5 aaaaaaaa bbbbbbbb cccccccc dddddddd e");
 	check(strstr((char *)outbuf, "200 OK") && acl_tbl[1][7][0] == 0x11111111 && acl_tbl[1][7][4] == 5
-	      && acl_tbl[1][0x87][0] == 0xaaaaaaaa && acl_tbl[1][0x87][4] == 0xe, "acl rule 7 ...: data at entry 7, care at 0x87");
-	cmd("acl rule 7");
+	      && acl_tbl[1][0x87][0] == 0xaaaaaaaa && acl_tbl[1][0x87][4] == 0xe, "acltbl rule 7 ...: data at entry 7, care at 0x87");
+	cmd("acltbl rule 7");
 	check(strstr((char *)outbuf, "data 11111111 22222222 33333333 44444444 00000005")
-	      && strstr((char *)outbuf, "care aaaaaaaa bbbbbbbb cccccccc dddddddd 0000000e"), "acl rule 7 reads both halves back");
-	cmd("acl action 95 1 2 3 4 5");
-	cmd("acl action 95");
+	      && strstr((char *)outbuf, "care aaaaaaaa bbbbbbbb cccccccc dddddddd 0000000e"), "acltbl rule 7 reads both halves back");
+	cmd("acltbl action 95 1 2 3 4 5");
+	cmd("acltbl action 95");
 	check(acl_tbl[2][95][2] == 3 && strstr((char *)outbuf, "action 00000001 00000002 00000003 00000004 00000005"),
-	      "acl action 95: written and read back");
-	cmd("acl rule 96");
-	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "acl rule 96 is out of range");
+	      "acltbl action 95: written and read back");
+	cmd("acltbl rule 96");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "acltbl rule 96 is out of range");
+	cmd("acltbl rule 7 0 0 0 0 0 0 0 0 0 0");
 
-	/* ACL rules: the words as the stock driver encodes them, checked on a
-	 * switch (docs/re/hw/acl_hw.py), with the ingress ports added; word 4 is 22 bits */
-	static const uint32_t r_dmac[10] = { 0xff22c4c1, 0xfffff9f0, 0xffffffff, 0xffffffff, 0x003fffff,
-					     0x00dd3b3e, 0xffff060f, 0xffffffff, 0xffffffff, 0x002fc7f8 };
-	static const uint32_t r_web[10] = { 0xffffffff, 0x3f57f508, 0xffffffff, 0xffffffaf, 0x003ffffe,
-					    0xffffffff, 0xc0a80af7, 0xffffffff, 0xffff0050, 0x002487f9 };
-	cmd("acl 1 dmac 06:0f:00:dd:3b:3e");
-	check(strstr((char *)outbuf, "200 OK") && regs[0x4818] == 0 && regs[0x4824] == 0x03020100 && regs[0x4840] == 0x33424107,
-	      "acl 1 dmac: templates written, nothing on without an action");
-	cmd("acl 1 drop");
-	bool same = true;
-	for (int i = 0; i < 5; i++)
-		same &= acl_tbl[1][0][i] == r_dmac[i] && acl_tbl[1][0x80][i] == r_dmac[5 + i];
-	check(same && acl_tbl[2][0][1] == 0x00020000 && regs[0x4848] == 0x20 && regs[0x4818] == 0x1f8 && regs[0x481c] == 0x1f8,
-	      "acl 1 drop: rule, action (redirect to no port), group 5, ACL on for the front ports");
-	cmd("acl 2 ports 1,4");
-	cmd("acl 2 dst 192.168.10.247");
-	cmd("acl 2 dport 80");
-	cmd("acl 2 redirect 4,cpu");
-	same = true;
-	for (int i = 0; i < 5; i++)
-		same &= acl_tbl[1][1][i] == r_web[i] && acl_tbl[1][0x81][i] == r_web[5 + i];
-	check(same && acl_tbl[2][1][1] == (1u << 17 | (1u << 7 | 1u << 9) << 21), "acl 2: ports 1,4, dst, dport 80, redirect 4,cpu");
-	cmd("acl 2 smac 02:00:00:00:00:01");
-	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "a rule can't mix MAC and IP fields");
-	cmd("acl");
-	check(strstr((char *)outbuf, "acl 1 dmac 06:0f:00:dd:3b:3e\nacl 1 drop\nacl 2 ports 1,4\nacl 2 dst 192.168.10.247/32\n"
-		     "acl 2 dport 80\nacl 2 redirect 4,cpu\n") != NULL, "acl lists the rules as their lines");
+	/* ACL rules: RTLPlayground's acl command (rtl837x_acl.c) over the bridge */
+	cmd("acl 1 dmac 06:0f:00:dd:3b:3e drop 1");
+	check(strstr((char *)outbuf, "200 OK") && (acl_tbl[1][0x80][4] >> 21 & 1) && regs[0x4818] && regs[0x481c]
+	      && regs[0x4824] == 0x03020100, "acl 1 dmac ... drop 1: a valid rule, the templates, ACL on");
+	cmd("acl 2 udp dport 80 dip 192.168.10.247 redirect 4");
+	check(strstr((char *)outbuf, "200 OK") && (acl_tbl[1][0x81][4] >> 21 & 1), "acl 2 udp dport 80 dip ... redirect 4");
 	rtl_http_get("/cmd_log");
 	outbuf[slen] = 0;
-	check(strstr((char *)outbuf, "acl 2 redirect 4,cpu") != NULL, "the acl commands land in the history");
-	/* After an 8051 restart the listed lines make the same table */
+	check(strstr((char *)outbuf, "acl 2 udp dport 80") != NULL, "the acl commands land in the history");
+	/* The 8051 restarts: the registers are back at their defaults, and the
+	 * saved lines set the rules up again */
 	{
-		static uint32_t before[3][256][5];
-		char lines[512], *l, *e;
-		cmd("acl");
-		outbuf[slen] = 0;
-		l = strstr((char *)outbuf, "acl 1 ");
-		snprintf(lines, sizeof(lines), "%s", l ? l : "");
-		memcpy(before, acl_tbl, sizeof(before));
-		rtl_acl_reset();
+		static uint32_t before[2][5];
+		memcpy(before[0], acl_tbl[1][0x81], 20);
+		memcpy(before[1], acl_tbl[1][1], 20);
+		acl_reset();
 		memset(acl_tbl, 0, sizeof(acl_tbl));
-		for (l = lines; (e = strchr(l, '\n')); l = e + 1) {
-			*e = 0;
-			cmd(l);
-		}
-		bool same = true;
-		for (int i = 0; i < 2; i++)
-			same &= !memcmp(before[1][i], acl_tbl[1][i], 20) && !memcmp(before[1][0x80 + i], acl_tbl[1][0x80 + i], 20)
-				&& !memcmp(before[2][i], acl_tbl[2][i], 20);
-		check(same,
-		      "the listed lines, replayed after a reset, write the same rules and actions");
+		regs[0x4818] = regs[0x481c] = 0;
+		cmd("acl 1 dmac 06:0f:00:dd:3b:3e drop 1");
+		cmd("acl 2 udp dport 80 dip 192.168.10.247 redirect 4");
+		check(!memcmp(before[0], acl_tbl[1][0x81], 20) && !memcmp(before[1], acl_tbl[1][1], 20) && regs[0x4818],
+		      "after acl_reset() the same lines write the same rule");
 	}
-	cmd("acl 1 delete");
-	cmd("acl 2 delete");
-	check(!(acl_tbl[1][0x80][4] >> 21 & 1) && !(acl_tbl[1][0x81][4] >> 21 & 1) && regs[0x4818] == 0 && regs[0x481c] == 0,
-	      "acl <n> delete: invalid, and ACL off with no rule left");
+	cmd("acl 1 off");
+	cmd("acl 2 off");
+	check(!(acl_tbl[1][0x80][4] >> 21 & 1) && !(acl_tbl[1][0x81][4] >> 21 & 1) && regs[0x4818] == 0,
+	      "acl <n> off: invalid, and ACL off with no rule left");
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

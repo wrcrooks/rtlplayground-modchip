@@ -33,7 +33,7 @@
 
 #include "plat.h"
 #include "dot1x.h"
-#include "rtl_acl.h"
+#include "rtl837x_acl.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -362,14 +362,18 @@ static bool parse_dot1x(void)
 /*
  * Raw ACL table access, for working out the entry layout on hardware (see
  * docs/acl-reverse-engineering.md). Not configuration: nothing is saved.
- *   acl rule <0-95>                          the rule's data (entry i) and care (entry 0x80 + i) words
- *   acl rule <0-95> <d0>..<d4> <c0>..<c4>    write both halves, hex words, care first
- *   acl action <0-95> [<w0>..<w4>]           the action entry, read or written
+ *   acltbl rule <0-95>                        the rule's data (entry i) and care (entry 0x80 + i) words
+ *   acltbl rule <0-95> <d0>..<d4> <c0>..<c4>  write both halves, hex words, care first
+ *   acltbl action <0-95> [<w0>..<w4>]         the action entry, read or written
+ * The rules themselves are RTLPlayground's acl command (rtl837x_acl.c).
  * Table type 1 is the rules, 2 the actions; five 32-bit words each, through
  * TBL_CTRL and DATA_IN (0x5cb8) / DATA_OUT (0x5ccc), as the stock firmware's
  * dal_rtl8373_acl.c uses them.
  */
-bool acl_op(uint16_t entry, uint8_t type, bool write, uint32_t *w)
+#define ACL_ENTRIES	96
+#define ACL_WORDS	5
+
+static bool acl_op(uint16_t entry, uint8_t type, bool write, uint32_t *w)
 {
 	uint32_t v;
 
@@ -433,11 +437,11 @@ static bool parse_acl(void)
 	bool rule = cmd_compare(1, "rule");
 
 	if (cmd_words_len < 3 || !(rule || cmd_compare(1, "action")) || !num(&w, ACL_ENTRIES - 1, 0, &idx)) {
-		ext_error("acl rule|action <0-95> [<hex words>]\n");
+		ext_error("acltbl rule|action <0-95> [<hex words>]\n");
 		return true;
 	}
 	if (cmd_words_len == 3) {
-		if (!acl_op(idx, rule ? TBL_ACL_RULE : TBL_ACL_ACTION, false, d)
+		if (!acl_op(idx, rule ? TBL_ACL_RULE : TBL_ACL_ACT, false, d)
 		    || (rule && !acl_op(idx | 0x80, TBL_ACL_RULE, false, c))) {
 			ext_error("the table engine doesn't answer\n");
 			return true;
@@ -448,7 +452,7 @@ static bool parse_acl(void)
 		return true;
 	}
 	if (cmd_words_len != 3 + (rule ? 2 : 1) * ACL_WORDS) {
-		ext_error(rule ? "acl rule <i> <5 data words> <5 care words>\n" : "acl action <i> <5 words>\n");
+		ext_error(rule ? "acltbl rule <i> <5 data words> <5 care words>\n" : "acltbl action <i> <5 words>\n");
 		return true;
 	}
 	for (uint8_t i = 0; i < ACL_WORDS; i++)
@@ -457,7 +461,7 @@ static bool parse_acl(void)
 			return true;
 		}
 	if ((rule && !acl_op(idx | 0x80, TBL_ACL_RULE, true, c))
-	    || !acl_op(idx, rule ? TBL_ACL_RULE : TBL_ACL_ACTION, true, d))
+	    || !acl_op(idx, rule ? TBL_ACL_RULE : TBL_ACL_ACT, true, d))
 		ext_error("the table engine doesn't answer\n");
 	return true;
 }
@@ -465,8 +469,8 @@ static bool parse_acl(void)
 
 bool rtl_cmd_ext(void)
 {
-	if (cmd_compare(0, "acl"))
-		return cmd_words_len >= 2 && (cmd_compare(1, "rule") || cmd_compare(1, "action")) ? parse_acl() : rtl_acl_cmd();
+	if (cmd_compare(0, "acltbl"))
+		return parse_acl();
 	if (cmd_compare(0, "dot1x"))
 		return parse_dot1x();
 	if (cmd_compare(0, "https"))
