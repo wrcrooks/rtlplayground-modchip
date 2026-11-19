@@ -301,8 +301,24 @@ filtering, or the CPU queue).
 - **Groups 0 and 4 with all-zero parameters drop as well.** That fits a VLAN or policer index of 0.
   So a rule should only set the groups it uses in 0x4848, as stock does.
 
+**Rule word 4 bits 20:11 are the ingress port, one bit per ASIC port** (bit 11 + port, the CPU
+at 9). A frame sets its own port's bit, so "any of these ports" is "every other port's bit is 0".
+Setting the members' bits to 1, as the emulated stock driver does, matches one port only; two or more
+match nothing.
+
+**Template 1 on the chip:**
+- slots 0-1: source IPv4 address, low half first;
+- slots 2-3: destination IPv4 address;
+- slot 4: ToS (high byte) and protocol (low byte);
+- slot 5: the L4 source port, and the ICMP type in its high byte;
+- slot 6: the L4 destination port.
+
+**Priority.** Within an action group, the lowest numbered matching rule wins. A rule without the
+group (0x4848 bit clear) doesn't stop a later rule's.
+
+These are what `firmware/rp2350/src/rtl_acl.c` builds its `acl` commands on.
+
 **Next.**
-1. Write the stock templates at start-up, and set 0x481c along with 0x4818.
-2. Build an `acl` command set on these encodings (rule = fields + ports + an action), replacing the
-   raw commands for everyday use.
-3. The port mask in rule word 4, and what separates codes 0/2 and 3/4/5.
+1. What separates forwarding codes 0/2 and 3/4/5.
+2. The care tags (rule word 4 bits 3-10), templates 2-4, and the other action groups (VLAN,
+   priority, policing) for further commands.

@@ -91,6 +91,7 @@ add_library(rtlp OBJECT
     src/rtl_app.c
     src/rtl_udp.c
     src/rtl_ext.c
+    src/rtl_acl.c
     src/rtl_metrics.c
     src/rtl_poe.c
     src/dot1x_plat.c

@@ -32,6 +32,7 @@
 #include "rtl8238.h"
 #include "dot1x.h"
 #include "dot1x_plat.h"
+#include "rtl_acl.h"
 
 void rtl_iso_reset(void);	/* rtl_env.c */
 
@@ -143,6 +144,7 @@ void rtl_bridge_up(void)
 	 * re-authenticates, and the config's dot1x lines set it up again */
 	rtl_iso_reset();
 	dot1x_plat_bridge_up();
+	rtl_acl_reset();
 
 	flash_region.addr = CONFIG_START;
 	flash_region.len = 0x100;

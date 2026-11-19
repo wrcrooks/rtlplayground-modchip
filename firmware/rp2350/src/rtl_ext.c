@@ -33,6 +33,7 @@
 
 #include "plat.h"
 #include "dot1x.h"
+#include "rtl_acl.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -368,12 +369,7 @@ static bool parse_dot1x(void)
  * TBL_CTRL and DATA_IN (0x5cb8) / DATA_OUT (0x5ccc), as the stock firmware's
  * dal_rtl8373_acl.c uses them.
  */
-#define ACL_ENTRIES	96
-#define ACL_WORDS	5
-#define TBL_ACL_RULE	1
-#define TBL_ACL_ACTION	2
-
-static bool acl_op(uint16_t entry, uint8_t type, bool write, uint32_t *w)
+bool acl_op(uint16_t entry, uint8_t type, bool write, uint32_t *w)
 {
 	uint32_t v;
 
@@ -470,7 +466,7 @@ static bool parse_acl(void)
 bool rtl_cmd_ext(void)
 {
 	if (cmd_compare(0, "acl"))
-		return parse_acl();
+		return cmd_words_len >= 2 && (cmd_compare(1, "rule") || cmd_compare(1, "action")) ? parse_acl() : rtl_acl_cmd();
 	if (cmd_compare(0, "dot1x"))
 		return parse_dot1x();
 	if (cmd_compare(0, "https"))

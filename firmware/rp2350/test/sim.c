@@ -15,6 +15,7 @@
 #include "rtl8238.h"
 #include "bridge.h"
 #include "plat.h"
+#include "rtl_acl.h"
 
 struct bridge_hello bridge_hello;
 struct bridge_stats bridge_stats;
@@ -857,6 +858,64 @@ int main(void)
 	      "acl action 95: written and read back");
 	cmd("acl rule 96");
 	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "acl rule 96 is out of range");
+
+	/* ACL rules: the words as the stock driver encodes them, checked on a
+	 * switch (docs/re/hw/acl_hw.py), with the ingress ports added; word 4 is 22 bits */
+	static const uint32_t r_dmac[10] = { 0xff22c4c1, 0xfffff9f0, 0xffffffff, 0xffffffff, 0x003fffff,
+					     0x00dd3b3e, 0xffff060f, 0xffffffff, 0xffffffff, 0x002fc7f8 };
+	static const uint32_t r_web[10] = { 0xffffffff, 0x3f57f508, 0xffffffff, 0xffffffaf, 0x003ffffe,
+					    0xffffffff, 0xc0a80af7, 0xffffffff, 0xffff0050, 0x002487f9 };
+	cmd("acl 1 dmac 06:0f:00:dd:3b:3e");
+	check(strstr((char *)outbuf, "200 OK") && regs[0x4818] == 0 && regs[0x4824] == 0x03020100 && regs[0x4840] == 0x33424107,
+	      "acl 1 dmac: templates written, nothing on without an action");
+	cmd("acl 1 drop");
+	bool same = true;
+	for (int i = 0; i < 5; i++)
+		same &= acl_tbl[1][0][i] == r_dmac[i] && acl_tbl[1][0x80][i] == r_dmac[5 + i];
+	check(same && acl_tbl[2][0][1] == 0x00020000 && regs[0x4848] == 0x20 && regs[0x4818] == 0x1f8 && regs[0x481c] == 0x1f8,
+	      "acl 1 drop: rule, action (redirect to no port), group 5, ACL on for the front ports");
+	cmd("acl 2 ports 1,4");
+	cmd("acl 2 dst 192.168.10.247");
+	cmd("acl 2 dport 80");
+	cmd("acl 2 redirect 4,cpu");
+	same = true;
+	for (int i = 0; i < 5; i++)
+		same &= acl_tbl[1][1][i] == r_web[i] && acl_tbl[1][0x81][i] == r_web[5 + i];
+	check(same && acl_tbl[2][1][1] == (1u << 17 | (1u << 7 | 1u << 9) << 21), "acl 2: ports 1,4, dst, dport 80, redirect 4,cpu");
+	cmd("acl 2 smac 02:00:00:00:00:01");
+	check(!memcmp(outbuf, "HTTP/1.1 400", 12), "a rule can't mix MAC and IP fields");
+	cmd("acl");
+	check(strstr((char *)outbuf, "acl 1 dmac 06:0f:00:dd:3b:3e\nacl 1 drop\nacl 2 ports 1,4\nacl 2 dst 192.168.10.247/32\n"
+		     "acl 2 dport 80\nacl 2 redirect 4,cpu\n") != NULL, "acl lists the rules as their lines");
+	rtl_http_get("/cmd_log");
+	outbuf[slen] = 0;
+	check(strstr((char *)outbuf, "acl 2 redirect 4,cpu") != NULL, "the acl commands land in the history");
+	/* After an 8051 restart the listed lines make the same table */
+	{
+		static uint32_t before[3][256][5];
+		char lines[512], *l, *e;
+		cmd("acl");
+		outbuf[slen] = 0;
+		l = strstr((char *)outbuf, "acl 1 ");
+		snprintf(lines, sizeof(lines), "%s", l ? l : "");
+		memcpy(before, acl_tbl, sizeof(before));
+		rtl_acl_reset();
+		memset(acl_tbl, 0, sizeof(acl_tbl));
+		for (l = lines; (e = strchr(l, '\n')); l = e + 1) {
+			*e = 0;
+			cmd(l);
+		}
+		bool same = true;
+		for (int i = 0; i < 2; i++)
+			same &= !memcmp(before[1][i], acl_tbl[1][i], 20) && !memcmp(before[1][0x80 + i], acl_tbl[1][0x80 + i], 20)
+				&& !memcmp(before[2][i], acl_tbl[2][i], 20);
+		check(same,
+		      "the listed lines, replayed after a reset, write the same rules and actions");
+	}
+	cmd("acl 1 delete");
+	cmd("acl 2 delete");
+	check(!(acl_tbl[1][0x80][4] >> 21 & 1) && !(acl_tbl[1][0x81][4] >> 21 & 1) && regs[0x4818] == 0 && regs[0x481c] == 0,
+	      "acl <n> delete: invalid, and ACL off with no rule left");
 
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");

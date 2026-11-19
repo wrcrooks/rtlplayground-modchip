@@ -394,6 +394,51 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 An EAP login end to end still needs a supplicant on a second port; EAP so far went as far as
 FreeRADIUS's challenge.
 
+## ACL rules
+
+Rules match frames as they enter front ports, and drop, permit, trap, redirect or copy them.
+
+```
+acl                                       the rules, as the lines that make them
+acl <1-96> ports <p,p,...>|all            front ports the rule watches (all by default)
+acl <1-96> dmac|smac <mac> [<mask>]|any
+acl <1-96> ethertype <hex>|any
+acl <1-96> src|dst <a.b.c.d>[/<0-32>]|any
+acl <1-96> proto <0-255>|tcp|udp|icmp|any IPv4 protocol, IPv6 next header
+acl <1-96> sport|dport <0-65535>|any
+acl <1-96> icmp-type <0-255>|any
+acl <1-96> drop|permit|trap
+acl <1-96> redirect|copy <p,p,...|cpu>    only to those ports, or to them as well
+acl <1-96> delete
+```
+
+For example, to keep port 3 off the switch's web pages:
+
+```
+acl 1 ports 3
+acl 1 dst 192.168.10.247
+acl 1 proto tcp
+acl 1 dport 80
+acl 1 drop
+```
+
+- **Order.** A rule takes effect once it has an action, and the lowest numbered rule that matches
+  decides. A `permit` ahead of a `drop` makes an exception to it.
+- **Fields.** A rule matches MAC fields (`dmac`, `smac`, `ethertype`) or IP fields (the rest), not
+  both. The chip fills a rule from one of its field templates, and these sit in different ones.
+  `sport` and `icmp-type` share a field, so a rule has one or the other.
+- **Not matched:** frames the switch sends itself. A rule can't block the management CPU's replies,
+  only what reaches it.
+- **Configuration.** These are configuration lines, which Save keeps.
+
+**Tested** on the MokerLink (Beetle rig), with a host on port 1 and a NanoPi on port 4:
+- TCP port 80 dropped, while ping still works;
+- a port cut off, and an ICMPv6 `permit` ahead of the `drop` letting its ping through;
+- ICMP to the switch redirected to port 4, copied to it, trapped, and redirected to the CPU.
+
+The layout behind the commands is in `docs/acl-reverse-engineering.md`. The `acl rule|action`
+commands still give raw access to the tables.
+
 ## Build
 
 Pico SDK 2.x (tested with 2.3.1), arm-none-eabi-gcc, CMake and Ninja.
