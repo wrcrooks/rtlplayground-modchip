@@ -387,8 +387,12 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 - Request/Identity goes out, the Response is relayed, and FreeRADIUS 3.2 accepts the Access-Request
   and answers with an EAP-MD5 challenge.
 
-A full login still needs a second link: on the only link, the server's reply arrives through the
-closed port, which drops it.
+- MAB, end to end: a device without a supplicant on port 4 (a NanoPi) stays closed through three
+  unanswered requests. The switch then sends its MAC as Call-Check. FreeRADIUS accepts, and the port
+  opens about 90 s after 802.1X was turned on.
+
+An EAP login end to end still needs a supplicant on a second port; EAP so far went as far as
+FreeRADIUS's challenge.
 
 ## Build
 

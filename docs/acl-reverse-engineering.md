@@ -287,21 +287,22 @@ console (`docs/re/hw/sw.py`), and clears the table afterwards.
 **Action group 5, forwarding** (action word 1). Bits 20:17 are a code, and bits 30:21 a port mask,
 1 << (21 + ASIC port). The emulator puts stock's port masks there too.
 
-| Code | Ping | Frames reach the CPU | Likely |
-|---|---|---|---|
-| 0 | passes | yes | forward normally (add the mask's ports?) |
-| 1 | only with the CPU in the mask | only then | redirect to the mask; an empty mask drops |
-| 2, 6, 7 | passes | yes | copy or mirror to the mask (not visible with one link) |
-| 3, 4, 5 | dropped | yes | trap to the CPU; RTLPlayground doesn't answer trapped frames |
-| 8-15 | as code 1 | as code 1 | bit 20 is a flag of its own (stock enable 19) |
+| Code | Effect (second host on front port 4, ASIC 7: its counters and IPv6 ping) |
+|---|---|
+| 0, 2 | forward as usual, and copy to the mask's ports (stock enables 13 and 15) |
+| 1 | redirect: only to the mask's ports; an empty mask drops (stock enable 14) |
+| 3, 4, 5 | trap to the CPU, mask ignored; RTLPlayground doesn't answer trapped frames |
+| 6, 7 | forward as usual, mask ignored |
+| 8-15 | as code 1 here; bit 20 is a flag of its own (stock enable 19) |
+
+What tells 0 from 2, and 3 from 4 and 5, doesn't show in these tests (perhaps VLAN or egress
+filtering, or the CPU queue).
 
 - **Groups 0 and 4 with all-zero parameters drop as well.** That fits a VLAN or policer index of 0.
   So a rule should only set the groups it uses in 0x4848, as stock does.
-- **Not testable with one link:** the copy and mirror codes, and redirecting to another front port.
-  Both need a second host on another port.
 
 **Next.**
 1. Write the stock templates at start-up, and set 0x481c along with 0x4818.
 2. Build an `acl` command set on these encodings (rule = fields + ports + an action), replacing the
    raw commands for everyday use.
-3. With a second link: the copy, mirror and redirect codes, and the port mask in rule word 4.
+3. The port mask in rule word 4, and what separates codes 0/2 and 3/4/5.
