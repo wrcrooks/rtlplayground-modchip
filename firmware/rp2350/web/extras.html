@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Switch features</title>
+<link rel="icon" href="favicon.ico">
+<style>
+/* The RTLPlayground UI's themes (index.html), and series colours for each */
+:root{
+  --bg:#f4f6f8;--panel:#ffffff;--panel2:#eaeef2;--bd:#d7dde4;--fg:#1a222c;--fg2:#5c6773;
+  --ac:#0969da;--ok:#158744;--bad:#cf222e;--warn:#9a6700;--grid:rgba(20,30,40,.08);
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116;--panel:#161b22;--panel2:#1f262e;--bd:#2c333c;--fg:#e6edf3;--fg2:#8d96a0;
+  --ac:#4c8ef7;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--grid:rgba(230,237,243,.08);
+}
+:root[data-theme="sel-dark"]{
+  --bg:#103c48;--panel:#184956;--panel2:#2d5b69;--bd:#2d5b69;--fg:#adbcbc;--fg2:#72898f;
+  --ac:#4695f7;--ok:#75b938;--bad:#fa5750;--warn:#dbb32d;--grid:rgba(173,188,188,.10);
+}
+:root[data-theme="sel-light"]{
+  --bg:#fbf3db;--panel:#ece3cc;--panel2:#d5cdb6;--bd:#d5cdb6;--fg:#53676d;--fg2:#909995;
+  --ac:#0072d4;--ok:#489100;--bad:#d2212d;--warn:#ad8900;--grid:rgba(83,103,109,.12);
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 20px;background:var(--panel);
+  border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+header a,.card a{color:var(--ac)}
+header a{text-decoration:none;font-weight:500}
+header h1{font-size:16px;font-weight:650}
+header .sp{flex:1}
+main{padding:18px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr));gap:16px;max-width:1700px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:0}
+.card.wide{grid-column:1/-1}
+.card h2{font-size:14px;font-weight:650;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.card h2 .sp{flex:1}
+.card p{font-size:12px;color:var(--fg2);margin-bottom:8px}
+.card pre{font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2);border-radius:7px;padding:7px 10px;margin-bottom:8px}
+.f{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.f label{display:inline-flex;gap:6px;align-items:center;font-size:13px}
+input,select,button{font:inherit;font-size:13px;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:4px 8px;min-width:0}
+input[type=number]{width:6.5em}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--ac);outline-offset:1px}
+button{cursor:pointer;background:var(--panel2)}
+button.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+.grow{flex:1;min-width:10em}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--fg2);font-size:12px;padding:4px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+td{padding:4px 8px;border-bottom:1px solid var(--bd);font-variant-numeric:tabular-nums}
+td.txt{overflow-wrap:anywhere}
+.bad{color:var(--bad);font-weight:600}.mut{color:var(--fg2)}
+#log{max-height:340px;overflow:auto}
+#msg{font-size:13px;color:var(--fg2)}#msg.bad{color:var(--bad)}#msg.ok{color:var(--ok)}
+@media (max-width:520px){main{padding:12px}header{padding:8px 12px;gap:8px}}
+</style>
+<script>
+(function(){
+  var pref;
+  try{pref=localStorage.getItem("theme")||"auto";}catch(e){pref="auto";}
+  var dark=window.matchMedia("(prefers-color-scheme: dark)").matches;
+  var t=pref;
+  if(pref==="auto")t=dark?"dark":"light";
+  if(pref==="auto-sel")t=dark?"sel-dark":"sel-light";
+  document.documentElement.dataset.theme=t;
+})();
+</script>
+</head>
+<body>
+<header>
+  <a href="index.html">&larr; Switch</a>
+  <h1>Features</h1>
+  <span id="msg" role="status"></span>
+  <span class="sp"></span>
+  <span class="mut">Changes apply at once; Save on the switch page keeps them.</span>
+</header>
+
+<main>
+  <section class="card wide">
+    <h2>Ports</h2>
+    <p>Error-disable shuts a port off after a BPDU on a guarded port, too many MAC addresses, or a flapping link. DHCP snooping drops DHCP servers' replies on ports that aren't trusted.</p>
+    <div class="f">
+      <label>Port comes back after <input type="number" id="ed-rec" min="30" max="86400"> s (empty: never)</label>
+      <button data-run="recovery">Set</button>
+      <label><input type="checkbox" id="ed-bpduguard"> BPDU guard</label>
+      <label><input type="checkbox" id="ed-l2-limit"> MAC limit</label>
+      <label><input type="checkbox" id="ed-link-flap"> Link flaps</label>
+      <label><input type="checkbox" id="ds-on"> DHCP snooping</label>
+      <label><input type="checkbox" id="ds-ra"> Guard IPv6 router advertisements</label>
+    </div>
+    <div class="scroll"><table><thead><tr><th>Port</th><th>State</th><th>DHCP trusted</th><th>Trust DSCP</th><th>Priority</th><th>Multicast router</th><th>Guest VLAN</th><th>Auth-fail VLAN</th><th>In VLAN</th></tr></thead><tbody id="ports"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Multicast snooping</h2>
+    <p>IGMP and MLD, per VLAN. Turn the plain IGMP snooping off to use it.</p>
+    <div class="f">
+      <label><input type="checkbox" id="mc-on"> On</label>
+      <label><input type="checkbox" id="mc-q"> Querier</label>
+      <label>every <input type="number" id="mc-int" min="10" max="3600"> s</label>
+      <label>Unknown IPv4 groups <select id="mc-unk"><option value="flood">flood</option><option value="router">router ports only</option></select></label>
+    </div>
+    <div class="scroll"><table><thead><tr><th>VLAN</th><th>Group</th><th>Ports</th></tr></thead><tbody id="groups"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Configuration</h2>
+    <p>A backup has the saved configuration, passwords included. A restore checks every line first, then restarts the switch.</p>
+    <div class="f"><a href="backup" download>Download backup</a></div>
+    <div class="f"><input type="file" id="rs-file" class="grow"><label>confirm within <input type="number" id="rs-min" min="1" max="1440" placeholder="off"> min</label><button data-run="restore">Restore</button></div>
+    <div class="f"><span id="rb-state" class="grow mut"></span><button data-run="confirm" id="rb-ok">Keep this configuration</button></div>
+    <div class="f"><label>Go back to the saved configuration in <input type="number" id="rb-min" min="1" max="1440" value="10"> min</label><button data-run="rollback">Start</button></div>
+    <div class="f"><label>Restart in <input type="number" id="re-min" min="1" max="1440" value="10"> min</label><button data-run="reboot">Schedule</button><button data-run="noreboot" id="re-off">Cancel restart</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Mod chip firmware</h2>
+    <pre id="up-state"></pre>
+    <div class="f"><input type="file" id="up-file" class="grow" accept=".mcu"><button data-run="update">Update</button><button data-run="keep" id="up-keep">Keep it now</button></div>
+    <p id="up-note" style="margin-top:8px">A signed .mcu file. The new firmware runs on trial and is kept once the switch and the network have worked for a minute.</p>
+  </section>
+
+  <section class="card">
+    <h2>802.1X: RADIUS</h2>
+    <p>RadSec carries RADIUS over TLS, to the server whose certificate has this SHA-256 fingerprint.</p>
+    <div class="f"><label><input type="checkbox" id="dx-vlan"> VLANs from the RADIUS server</label></div>
+    <div class="f"><input id="dx-fp" class="grow" placeholder="Certificate fingerprint"><button data-run="radsec">Use RadSec</button><button data-run="noradsec" id="dx-off">Turn RadSec off</button></div>
+  </section>
+
+  <section class="card">
+    <h2>IPv6</h2>
+    <pre id="t-ip6"></pre>
+    <div class="f"><label><input type="checkbox" id="i6-on"> On</label></div>
+    <div class="f"><input id="i6-addr" class="grow" placeholder="Address (empty: none)"><button data-run="ip6addr">Set</button></div>
+    <div class="f"><input id="i6-gw" class="grow" placeholder="Gateway (empty: automatic)"><button data-run="ip6gw">Set</button></div>
+  </section>
+
+  <section class="card">
+    <h2>SNMP</h2>
+    <pre id="t-snmp"></pre>
+    <div class="f"><label><input type="checkbox" id="sn-on"> Agent</label><label><input type="checkbox" id="sn-v2c"> SNMPv2c</label></div>
+    <div class="f"><input id="sn-user" class="grow" placeholder="SNMPv3 user" autocomplete="off"><select id="sn-alg"><option value="sha256">SHA-256</option><option value="sha">SHA-1</option></select>
+      <input id="sn-auth" type="password" placeholder="Password" autocomplete="new-password"><input id="sn-priv" type="password" placeholder="AES password" autocomplete="new-password"><button data-run="snuser">Set</button><button data-run="snuseroff">Remove</button></div>
+    <div class="f"><input id="sn-trap" class="grow" placeholder="Traps to (IPv4)"><input id="sn-tuser" placeholder="SNMPv3 user, or v2c"><button data-run="trap">Add</button><button data-run="trapoff">Remove</button></div>
+  </section>
+
+  <section class="card">
+    <h2>MQTT</h2>
+    <pre id="t-mqtt"></pre>
+    <div class="f"><label><input type="checkbox" id="mq-on"> On</label>
+      <input id="mq-srv" class="grow" placeholder="Broker (IPv4)"><input id="mq-port" type="number" min="1" max="65535" placeholder="Port"><button data-run="mqsrv">Set</button></div>
+    <div class="f"><input id="mq-user" class="grow" placeholder="User (empty: none)" autocomplete="off"><input id="mq-pw" type="password" placeholder="Password" autocomplete="new-password"><button data-run="mqlogin">Set</button></div>
+    <div class="f"><input id="mq-tls" class="grow" placeholder="Broker certificate SHA-256 (empty: no TLS)"><button data-run="mqtls">Set</button></div>
+    <div class="f"><input id="mq-topic" class="grow" placeholder="Topic (empty: hostname)"><button data-run="mqtopic">Set</button><label>every <input id="mq-int" type="number" min="5" max="3600"> s</label><button data-run="mqint">Set</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Prometheus</h2>
+    <pre id="t-prom"></pre>
+    <div class="f"><label><input type="checkbox" id="pr-on"> On</label><input id="pr-tok" class="grow" type="password" placeholder="Token (empty: none)" autocomplete="new-password"><button data-run="prtok">Set</button></div>
+  </section>
+
+  <section class="card">
+    <h2>SSH</h2>
+    <pre id="t-ssh"></pre>
+    <p>Any user name, with the web password.</p>
+    <div class="f"><label><input type="checkbox" id="ssh-on"> On</label><button data-run="newkey">New host key</button></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Events</h2>
+    <div id="log" class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Port</th><th></th></tr></thead><tbody id="events"></tbody></table></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+function $(id){return document.getElementById(id)}
+function el(tag,props,text){
+  var e=document.createElement(tag);
+  for(var k in props||{})e[k]=props[k];
+  if(text!==undefined)e.textContent=text;
+  return e;
+}
+function msg(text,cls){$("msg").textContent=text;$("msg").className=cls||""}
+/* One request at a time: the mod chip serves few connections */
+var queue=Promise.resolve();
+function req(path,opts){
+  var r=queue.then(function(){
+    return fetch(path,Object.assign({credentials:"same-origin",cache:"no-store"},opts||{})).then(function(r){
+      if(r.status===401){location.href="login.html";throw new Error("not logged in")}
+      return r.text().then(function(b){return{ok:r.ok,body:b}});
+    });
+  });
+  queue=r.catch(function(){});
+  return r;
+}
+function getJSON(path){return req(path).then(function(r){if(!r.ok)throw new Error(path);return JSON.parse(r.body)})}
+/* Commands in order, up to the first that is refused */
+function run(cmds){
+  var p=Promise.resolve();
+  [].concat(cmds).forEach(function(c){
+    p=p.then(function(){return req("cmd",{method:"POST",body:c})}).then(function(r){
+      if(!r.ok||/^Error/m.test(r.body))throw new Error((r.body||"refused").trim().split("\n")[0]);
+    });
+  });
+  return p.then(function(){msg("Applied","ok")},function(e){msg(e.message,"bad")}).then(load);
+}
+/* What is typed goes into a command line: one line, and one word of it */
+function word(id){
+  var v=$(id).value.trim();
+  if(/\s/.test(v))throw new Error("No spaces, please: "+($(id).placeholder||id));
+  return v;
+}
+function need(id){var v=word(id);if(!v)throw new Error("Missing: "+($(id).placeholder||id));return v}
+function minutes(id){
+  var v=Number($(id).value);
+  if(!(v>=1&&v<=1440)||v!==Math.floor(v))throw new Error("1 to 1440 minutes");
+  return v;
+}
+function onOff(id){return $(id).checked?"on":"off"}
+
+/* Upload: a progress, then the switch's OK or NO */
+function send(path,body){
+  return new Promise(function(done,fail){
+    var x=new XMLHttpRequest();
+    x.open("POST",path);
+    x.upload.onprogress=function(e){if(e.lengthComputable)msg("Sending "+Math.round(100*e.loaded/e.total)+" %")};
+    x.onload=function(){
+      var t=x.responseText.trim().split("\n")[0];
+      if(x.status===200&&/^OK/.test(t))done(t);else fail(new Error(t||"Error "+x.status));
+    };
+    x.onerror=function(){fail(new Error("The connection broke off"))};
+    x.send(body);
+  });
+}
+function file(id){var f=$(id).files[0];if(!f)throw new Error("Choose a file first");return f}
+
+var checks={
+  "ed-bpduguard":function(v){return"errdisable cause bpduguard "+v},
+  "ed-l2-limit":function(v){return"errdisable cause l2-limit "+v},
+  "ed-link-flap":function(v){return"errdisable cause link-flap "+v},
+  "ds-on":function(v){return"dhcp-snoop "+v},
+  "ds-ra":function(v){return"dhcp-snoop ra "+v},
+  "mc-on":function(v){return"mcsnoop "+v},
+  "mc-q":function(v){return"mcsnoop querier "+v},
+  "dx-vlan":function(v){return"dot1x radius-vlan "+v},
+  "i6-on":function(v){return"ip6 "+v},
+  "sn-on":function(v){return"snmp "+v},
+  "sn-v2c":function(v){return"snmp v2c "+v},
+  "mq-on":function(v){return"mqtt "+v},
+  "pr-on":function(v){return"prometheus "+v},
+  "ssh-on":function(v){return"ssh "+v}
+};
+Object.keys(checks).forEach(function(id){$(id).addEventListener("change",function(){run(checks[id](onOff(id)))})});
+$("mc-int").addEventListener("change",function(){run("mcsnoop interval "+this.value)});
+$("mc-unk").addEventListener("change",function(){run("mcsnoop unknown "+this.value)});
+
+var actions={
+  recovery:function(){return run("errdisable recovery "+(word("ed-rec")||"off"))},
+  confirm:function(){return run("rollback confirm")},
+  rollback:function(){return run("rollback in "+minutes("rb-min"))},
+  reboot:function(){return run("reboot in "+minutes("re-min"))},
+  noreboot:function(){return run("reboot cancel")},
+  restore:function(){
+    var f=file("rs-file"),q=$("rs-min").value?"?confirm="+minutes("rs-min"):"";
+    if(!confirm("Replace the saved configuration with "+f.name+" and restart the switch?"))return;
+    var d=new FormData();d.append("configuration",f,"config.txt");
+    return send("restore"+q,d).then(function(t){msg(t,"ok")});
+  },
+  update:function(){
+    var f=file("up-file");
+    if(!confirm("Update the mod chip with "+f.name+"? Its web page is away for a moment; the switch keeps forwarding."))return;
+    return send("update",f).then(function(t){msg(t+". This page comes back in about a minute.","ok");setTimeout(function(){location.reload()},60000)});
+  },
+  keep:function(){return run("update keep")},
+  radsec:function(){return run("dot1x radsec "+need("dx-fp"))},
+  noradsec:function(){return run("dot1x radsec off")},
+  ip6addr:function(){return run("ip6 addr "+(word("i6-addr")||"none"))},
+  ip6gw:function(){return run("ip6 gw "+(word("i6-gw")||"auto"))},
+  snuser:function(){
+    var c="snmp user "+need("sn-user")+" auth "+$("sn-alg").value+" "+need("sn-auth"),p=word("sn-priv");
+    return run(c+(p?" aes "+p:""));
+  },
+  snuseroff:function(){return run("snmp user "+need("sn-user")+" off")},
+  trap:function(){var u=word("sn-tuser");return run("snmp trap "+need("sn-trap")+(u&&u!=="v2c"?" "+u:""))},
+  trapoff:function(){return run("snmp trap "+need("sn-trap")+" off")},
+  mqsrv:function(){var p=word("mq-port");return run("mqtt server "+need("mq-srv")+(p?" "+p:""))},
+  mqlogin:function(){return run(word("mq-user")?"mqtt login "+word("mq-user")+" "+need("mq-pw"):"mqtt login off")},
+  mqtls:function(){return run("mqtt tls "+(word("mq-tls")||"off"))},
+  mqtopic:function(){return run("mqtt topic "+(word("mq-topic")||"off"))},
+  mqint:function(){return run("mqtt interval "+need("mq-int"))},
+  prtok:function(){return run("prometheus token "+(word("pr-tok")||"off"))},
+  newkey:function(){if(confirm("Make a new host key? SSH clients will warn that it changed."))return run("ssh newkey")}
+};
+document.querySelectorAll("[data-run]").forEach(function(b){
+  b.addEventListener("click",function(){
+    var p;
+    try{p=actions[b.dataset.run]()}catch(e){msg(e.message,"bad");return}
+    if(!p)return;
+    b.disabled=true;
+    p.catch(function(e){msg(e.message,"bad")}).then(function(){b.disabled=false});
+  });
+});
+
+/* A field the user is in, or has changed, isn't overwritten */
+function put(id,v){
+  var e=$(id);
+  if(e===document.activeElement||(e.dataset.was!==undefined&&e.value!==e.dataset.was))return;
+  e.value=v;e.dataset.was=e.value;
+}
+function left(s){return s>=120?Math.round(s/60)+" min":s+" s"}
+function box(on,cmd){
+  var b=el("input",{type:"checkbox",checked:!!on});
+  b.addEventListener("change",function(){run(cmd(b.checked))});
+  return b;
+}
+/* The table is only built anew when something in it changed: a menu that is open stays */
+var shown={};
+function changed(key,v){v=JSON.stringify(v);if(shown[key]===v)return false;shown[key]=v;return true}
+
+function drawPorts(g,mc,dx){
+  if(!changed("ports",[g.ports.map(function(p){return Object.assign({},p,{left:p.left?1:0})}),mc.routers,dx.ports.map(function(p){return[p.guest,p.authfail,p.vlan]})]))return;
+  var tb=$("ports"),x={};
+  dx.ports.forEach(function(p){x[p.port]=p});
+  tb.textContent="";
+  g.ports.forEach(function(p){
+    var r=tb.insertRow(),n=p.port,d=x[n],c;
+    r.insertCell().textContent=n;
+    c=r.insertCell();
+    if(p.disabled){
+      c.appendChild(el("span",{className:"bad"},"disabled: "+p.disabled+" "));
+      var b=el("button",{},"Clear");
+      b.addEventListener("click",function(){run("errdisable port "+n+" clear")});
+      c.appendChild(b);
+    }else c.textContent="ok";
+    r.insertCell().appendChild(box(p.trust,function(v){return"dhcp-snoop trust "+n+(v?" on":" off")}));
+    r.insertCell().appendChild(box(p.dscp,function(v){return"qos port "+n+" trust "+(v?"dscp":"none")}));
+    var s=el("select");
+    ["off",0,1,2,3,4,5,6,7].forEach(function(v){s.appendChild(el("option",{value:v},v==="off"?"default":v))});
+    s.value=p.prio<0?"off":p.prio;
+    s.addEventListener("change",function(){run("qos port "+n+" priority "+s.value)});
+    r.insertCell().appendChild(s);
+    r.insertCell().appendChild(box(mc.routers.indexOf(n)>=0,function(v){return"mcsnoop router "+n+(v?" on":" off")}));
+    [["guest","guest-vlan"],["authfail","auth-fail-vlan"]].forEach(function(k){
+      c=r.insertCell();
+      if(!d)return;
+      var i=el("input",{type:"number",min:1,max:4094,value:d[k[0]]||"",placeholder:"none"});
+      i.addEventListener("change",function(){run("dot1x port "+n+" "+k[1]+" "+(i.value||"off"))});
+      c.appendChild(i);
+    });
+    r.insertCell().textContent=d&&d.vlan||"";
+  });
+}
+function drawGroups(mc){
+  if(!changed("groups",[mc.groups,mc.total]))return;
+  var tb=$("groups");tb.textContent="";
+  mc.groups.forEach(function(g){
+    var r=tb.insertRow();
+    r.insertCell().textContent=g.vlan;
+    r.insertCell().textContent=g.group;
+    r.insertCell().textContent=g.ports.join(", ");
+  });
+  if(mc.total>mc.groups.length)tb.insertRow().insertCell().textContent="and "+(mc.total-mc.groups.length)+" more";
+}
+function drawEvents(list,up){
+  if(!changed("events",list.length?list[list.length-1].seq:0))return;
+  var tb=$("events");tb.textContent="";
+  list.slice().reverse().forEach(function(e){
+    var r=tb.insertRow(),ago=up?Math.max(0,up-e.t):0;
+    r.insertCell().textContent=up?new Date(Date.now()-1000*ago).toLocaleString():e.t+" s";
+    r.insertCell().textContent=e.type;
+    r.insertCell().textContent=e.port||"";
+    var c=r.insertCell();c.className="txt";c.textContent=e.text;
+  });
+}
+function draw(f,dx){
+  var g=f.guard,mc=f.mcast,s=f.services,u=f.update;
+  put("ed-rec",g.recovery||"");
+  ["bpduguard","l2-limit","link-flap"].forEach(function(c){$("ed-"+c).checked=!!g.causes[c]});
+  $("ds-on").checked=!!g.snoop;$("ds-ra").checked=!!g.ra;
+  $("mc-on").checked=!!mc.on;$("mc-q").checked=!!mc.querier;
+  put("mc-int",mc.interval);put("mc-unk",mc.restrict?"router":"flood");
+  drawPorts(g,mc,dx);drawGroups(mc);
+  $("rb-state").textContent=f.rollback_left?"Goes back to the previous configuration in "+left(f.rollback_left):
+    f.reboot_left?"Restarts in "+left(f.reboot_left):"Nothing pending";
+  $("rb-ok").hidden=!f.rollback_left;$("re-off").hidden=!f.reboot_left;
+  $("up-state").textContent="Version "+u.version+", "+u.board+"\n"+(u.slot==="none"?"No A/B slots: the A/B image must be flashed over SWD once":
+    "Slot "+u.slot+(u.trial?", on trial":""))+(u.key?"":"\nBuilt without an update key");
+  $("up-keep").hidden=!u.trial;
+  document.querySelector("[data-run=update]").disabled=u.slot==="none"||!u.key||!!u.trial;
+  $("dx-vlan").checked=!!dx.radius_vlan;$("dx-off").hidden=!dx.radsec;
+  ["ip6","snmp","mqtt","prom","ssh"].forEach(function(k){$("t-"+k).textContent=s[k].text.trim()});
+  $("i6-on").checked=!!s.ip6.on;$("sn-on").checked=!!s.snmp.on;$("sn-v2c").checked=/^SNMPv2c on/m.test(s.snmp.text);
+  $("mq-on").checked=!!s.mqtt.on;$("pr-on").checked=!!s.prom.on;$("ssh-on").checked=!!s.ssh.on;
+  var m=s.mqtt.text.match(/every (\d+) s/);if(m)put("mq-int",m[1]);
+}
+function load(){
+  return getJSON("features.json").then(function(f){
+    return getJSON("dot1x.json").then(function(dx){
+      draw(f,dx);
+      return getJSON("events.json").then(function(e){drawEvents(e,f.uptime)});
+    });
+  }).catch(function(e){if(!(e instanceof TypeError))return;msg("The switch doesn't answer","bad")});
+}
+load();
+setInterval(function(){if(!document.hidden)load()},5000);
+</script>
+</body>
+</html>

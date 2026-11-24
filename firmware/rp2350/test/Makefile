@@ -35,8 +35,9 @@ all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_m
 	python3 run_sim.py $(BUILD)/sim
 	python3 run_sim.py $(BUILD)/sim-poe
 	python3 run_metrics.py $(BUILD)/test_metrics $(BUILD)
+	node check_extras.js ../web/extras.html
 	node check_dashboard.js ../web/dashboard.html $(BUILD)/history.bin $(BUILD)/metrics.json
-	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS + embed_web.DOT1X)" > $(BUILD)/system_https.html
+	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS + embed_web.DOT1X + embed_web.FEATURES)" > $(BUILD)/system_https.html
 	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls

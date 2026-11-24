@@ -6,9 +6,9 @@
 Writes the files of each HTML_DIR gzipped (RTLPlayground's html/, then the
 mod chip's own web/), with the same names and MIME types as RTLPlayground's
 html_data.c, plus "/" for index.html, and config.txt as rtl_default_config.
-index.html gets a "Graphs" entry in its navigation, for dashboard.html, and
-an HTTPS switch in System > Services, and an 802.1X card on the MAC table tab;
-the mod chip's commands (https, snmp, t3, dot1x) join the ones the web UI keeps
+index.html gets "Graphs" and "Features" entries in its navigation, for
+dashboard.html and extras.html, and an HTTPS switch in System > Services, and an 802.1X card on the MAC table tab;
+the mod chip's commands join the ones the web UI keeps
 when it saves the config.
 The gzip header carries no timestamp, so the output only changes when the
 inputs do.
@@ -20,13 +20,16 @@ import sys
 
 # Added to RTLPlayground's index.html, after app.js has filled the navigation
 NAV_GRAPHS = """<script>
-/* Added by the mod chip's build (tools/embed_web.py): its graphs page */
+/* Added by the mod chip's build (tools/embed_web.py): its own pages */
 (function(){
   var l=document.getElementById("navlist");if(!l)return;
-  var li=document.createElement("li");li.id="nv-graphs";
-  li.innerHTML='<span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 20h18M4 16l5-6 4 3 7-8"/></svg></span><span>Graphs</span>';
-  li.onclick=function(){location.href="dashboard.html"};
-  l.insertBefore(li,l.children[1]||null);
+  [["nv-extras","Features","extras.html","M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4"],
+   ["nv-graphs","Graphs","dashboard.html","M3 20h18M4 16l5-6 4 3 7-8"]].forEach(function(p){
+    var li=document.createElement("li");li.id=p[0];
+    li.innerHTML='<span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="'+p[3]+'"/></svg></span><span>'+p[1]+'</span>';
+    li.onclick=function(){location.href=p[2]};
+    l.insertBefore(li,l.children[1]||null);
+  });
 })();
 </script>
 """
@@ -118,7 +121,7 @@ DOT1X = """<script>
   CONF_CMDS.push(/^dot1x\\s+(on|off)$/,/^dot1x\\s+radius\\s+(\\d{1,3}\\.){3}\\d{1,3}(\\s+\\d{1,5})?$/,/^dot1x\\s+secret\\s+\\S.*$/,
     /^dot1x\\s+reauth\\s+(\\d+|off)$/,/^dot1x\\s+port\\s+\\d+\\s+(auto|force-auth|force-unauth)$/,/^dot1x\\s+port\\s+\\d+\\s+mab\\s+(on|off)$/);
   CONF_TOGGLE.push(/^(dot1x)\\s+(on|off)$/,/^(dot1x\\s+port\\s+\\d{1,2}\\s+mab)\\s+(on|off)$/);
-  CONF_OVERWRITE.push(/^dot1x\\s+radius\\b/,/^dot1x\\s+secret\\b/,/^dot1x\\s+reauth\\b/);
+  CONF_OVERWRITE.push(/^dot1x\\s+radius(?=\\s)/,/^dot1x\\s+secret\\b/,/^dot1x\\s+reauth\\b/);
   /* one mode line per port, the last: an overwrite rule on "dot1x port <n>" would take its mab line too */
   var merge=mergeConf;
   mergeConf=function(base,texts){
@@ -306,6 +309,35 @@ ACL = r"""<script>
 </script>
 """
 
+# Added to RTLPlayground's index.html, after the others: what Save keeps of
+# the commands behind extras.html
+FEATURES = r"""<script>
+/* Added by the mod chip's build (tools/embed_web.py): the Features page's commands */
+(function(){
+  if(typeof CONF_CMDS==="undefined")return;
+  CONF_CMDS.push(/^errdisable\s+recovery\s+(\d+|off)$/,/^errdisable\s+cause\s+(bpduguard|l2-limit|link-flap)\s+(on|off)$/,
+    /^dhcp-snoop\s+(on|off)$/,/^dhcp-snoop\s+(trust\s+\d{1,2}|ra)\s+(on|off)$/,
+    /^qos\s+port\s+\d{1,2}\s+(trust\s+(dscp|none)|priority\s+([0-7]|off))$/,
+    /^mcsnoop\s+(on|off)$/,/^mcsnoop\s+(querier|router\s+\d{1,2})\s+(on|off)$/,/^mcsnoop\s+interval\s+\d+$/,/^mcsnoop\s+unknown\s+(flood|router)$/,
+    /^dot1x\s+radius-vlan\s+(on|off)$/,/^dot1x\s+port\s+\d{1,2}\s+(guest|auth-fail)-vlan\s+(\d{1,4}|off)$/,/^dot1x\s+radsec\s+\S+$/,
+    /^snmp\s+v2c\s+(on|off)$/,/^snmp\s+user\s+\S+\s+(off|auth\s+sha(256)?\s+\S+(\s+aes\s+\S+)?)$/,/^snmp\s+trap\s+(\d{1,3}\.){3}\d{1,3}(\s+\S+)?$/,
+    /^ip6\s+(on|off)$/,/^ip6\s+(addr|gw)\s+\S+$/,/^prometheus\s+(on|off)$/,/^prometheus\s+token\s+\S+$/,/^ssh\s+(on|off)$/,
+    /^mqtt\s+(on|off)$/,/^mqtt\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+\d{1,5})?$/,/^mqtt\s+login\s+(off|\S+\s+\S+)$/,/^mqtt\s+(topic|tls)\s+\S+$/,/^mqtt\s+interval\s+\d+$/);
+  CONF_TOGGLE.push(/^(errdisable\s+cause\s+\S+)\s+(on|off)$/,/^(dhcp-snoop)\s+(on|off)$/,/^(dhcp-snoop\s+(trust\s+\d{1,2}|ra))\s+(on|off)$/,
+    /^(mcsnoop)\s+(on|off)$/,/^(mcsnoop\s+(querier|router\s+\d{1,2}))\s+(on|off)$/,/^(dot1x\s+radius-vlan)\s+(on|off)$/,
+    /^(snmp\s+v2c)\s+(on|off)$/,/^(ip6|prometheus|ssh|mqtt)\s+(on|off)$/);
+  CONF_OVERWRITE.push(/^errdisable\s+recovery\b/,/^qos\s+port\s+\d{1,2}\s+(trust|priority)\b/,/^mcsnoop\s+(interval|unknown)\b/,
+    /^dot1x\s+port\s+\d{1,2}\s+(guest|auth-fail)-vlan\b/,/^dot1x\s+radsec\b/,/^snmp\s+user\s+\S+/,/^snmp\s+trap\s+\S+/,
+    /^ip6\s+(addr|gw)\b/,/^prometheus\s+token\b/,/^mqtt\s+(server|login|topic|tls|interval)\b/);
+  /* what was taken away isn't there after a restart: no line for it */
+  var mergeFeatures=mergeConf;
+  mergeConf=function(base,texts){
+    return mergeFeatures(base,texts).filter(function(l){return!/^snmp (user|trap) \S+ off$/.test(l)});
+  };
+})();
+</script>
+"""
+
 MIME = {
     ".html": "text/html",
     ".ico": "image/svg+xml",  # RTLPlayground's favicon.ico is an SVG
@@ -334,7 +366,7 @@ def main():
     for k, p in enumerate(files):
         raw = p.read_bytes()
         if p.name == "index.html":
-            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS + DOT1X + ACL).encode() + b"</body>", 1)
+            raw = raw.replace(b"</body>", (NAV_GRAPHS + SYSTEM_HTTPS + DOT1X + ACL + FEATURES).encode() + b"</body>", 1)
         data = gzip.compress(raw, compresslevel=9, mtime=0)
         src.append("static const uint8_t f%d[%d] = {\n%s\n};" % (k, len(data), c_bytes(data)))
         table.append((("/" + p.name), k, len(data), MIME[p.suffix]))

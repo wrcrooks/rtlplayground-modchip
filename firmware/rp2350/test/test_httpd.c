@@ -52,6 +52,12 @@ bool plat_config_write(const uint8_t *src, uint32_t len) { memset(config, 0xff, 
 void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, config + off, len); }
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { (void)id; memset(dst, 0xff, len); }
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { (void)id; (void)src; (void)len; return true; }
+static size_t say(char *b, size_t max, const char *t) { return snprintf(b, max, "%s", t); }
+size_t plat_ip6_status(char *b, size_t max) { return say(b, max, "IPv6 on\nfe80::1/64 link-local\n"); }
+size_t plat_mqtt_status(char *b, size_t max) { return say(b, max, "MQTT off, topic a off \"x\", every 30 s\n"); }
+size_t plat_ssh_status(char *b, size_t max) { return say(b, max, "SSH off, host key none yet\n"); }
+size_t plat_snmp_status(char *b, size_t max) { return say(b, max, "SNMPv2c off\n"); }
+const char *plat_snmp_get(int what) { return "1"; }
 static bool slots_ab;
 const char *const update_board = "modchip TEST", *const update_version = "v-test";
 const uint8_t update_key[65];
@@ -381,6 +387,9 @@ int main(int argc, char **argv)
 	k = sprintf(rq, "GET /features.json HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
 	r = request((const uint8_t *)rq, k);
 	check(strstr(r, "200 OK") && strstr(r, "{"), "/features.json");
+	check(strstr(r, "\"snmp\":{\"on\":1,\"text\":\"SNMPv2c off\\u000a\"}") && strstr(r, "\"ip6\":{\"on\":1,")
+	      && strstr(r, "\"mqtt\":{\"on\":0,\"text\":\"MQTT off, topic a off \\\"x\\\"") && strstr(r, "\"prom\":{\"on\":1,")
+	      && strstr(r, "\"ssh\":{\"on\":0,") && strstr(r, "\"update\":{\"version\":\"v-test\""), "  with the services' states");
 	plat_config_write((const uint8_t *)"ip 10.0.0.2\nvlan 5 1 2", 23);
 	k = sprintf(rq, "GET /backup HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
 	r = request((const uint8_t *)rq, k);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The dashboard (web/dashboard.html) with simulated data, for working on it
-without a switch: six ports with changing traffic, an hour of history, an
+"""The mod chip's pages (web/dashboard.html, web/extras.html) with simulated
+data, for working on them without a switch: six ports with changing traffic, an hour of history, an
 SFP module, link changes and protocol events.
 
   python3 tools/dashboard_preview.py [port]     then open http://localhost:8080/dashboard.html
@@ -116,6 +116,28 @@ def history():
     return b"MCH1" + struct.pack("<BBHHHI", 1, 6, PERIOD, n, size, up) + bytes(out)
 
 
+FEATURES = {
+    "reboot_left": 0, "rollback_left": 290, "uptime": 5000,
+    "guard": {"recovery": 300, "causes": {"bpduguard": 1, "l2-limit": 1, "link-flap": 0}, "snoop": 1, "ra": 0, "ports": [
+        {"port": i + 1, "disabled": "bpduguard" if i == 2 else "", "left": 120, "trust": int(i == 0), "dscp": int(i < 2),
+         "prio": 5 if i == 1 else -1} for i in range(6)]},
+    "mcast": {"on": 1, "querier": 1, "interval": 125, "restrict": 0, "routers": [1], "vlans": [], "total": 2, "groups": [
+        {"vlan": 1, "group": "239.255.255.250", "ports": [2, 5]}, {"vlan": 20, "group": "ff05:0:0:0:0:0:0:1:3", "ports": [2]}]},
+    "update": {"version": "v1.2", "board": "modchip SWGT024_V2_0_UNMANAGED", "slot": "A", "trial": 0, "key": 1, "size": 1011712, "seq": 1795535493},
+    "services": {
+        "ip6": {"on": 1, "text": "IPv6 on\nfe80::2e0:4cff:fe00:1/64 link-local\n"},
+        "snmp": {"on": 1, "text": "SNMPv2c off\nSNMPv3 user ops: SHA-256, AES-128\nEngine ID 0x8000000004\nTraps to 10.0.0.9 as ops\n"},
+        "mqtt": {"on": 1, "text": "MQTT connected, server 10.0.0.5:8883 over TLS, topic switch-1, every 30 s\n"},
+        "prom": {"on": 1, "text": "Prometheus /metrics on, with a token\n"},
+        "ssh": {"on": 1, "text": "SSH on, host key SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8\n"}},
+}
+DOT1X = {"enabled": 1, "radsec": 1, "radius_vlan": 1, "ports": [
+    {"port": i + 1, "guest": 30 if i == 3 else 0, "authfail": 0, "vlan": 30 if i == 3 else 0} for i in range(6)]}
+EVENTS = [{"seq": 1, "t": 12, "type": "system", "port": 0, "text": "Started"},
+          {"seq": 2, "t": 4400, "type": "link", "port": 4, "text": "Port 4 up, 1000 Mbit/s"},
+          {"seq": 3, "t": 4880, "type": "errdisable", "port": 3, "text": "Port 3 disabled: bpduguard"}]
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
         super().__init__(*a, directory=str(WEB), **k)
@@ -134,7 +156,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_data(json.dumps(metrics()).encode(), "application/json")
         if path == "/history.bin":
             return self.send_data(history(), "application/octet-stream")
+        for name, data in (("/features.json", FEATURES), ("/dot1x.json", DOT1X), ("/events.json", EVENTS)):
+            if path == name:
+                return self.send_data(json.dumps(data).encode(), "application/json")
         return super().do_GET()
+
+    def do_POST(self):
+        print(self.rfile.read(int(self.headers.get("Content-Length", 0)))[:200])
+        self.send_data(b"", "text/plain")
 
     def log_message(self, *a):
         pass

@@ -79,6 +79,44 @@ c = merge(c, "dot1x port 2 mab off\ndot1x off");
 check(c.includes("dot1x port 2 mab off") && !c.includes("dot1x port 2 mab on") && c.includes("dot1x off") && !c.includes("dot1x on"),
   "mab off and dot1x off replace their on lines");
 
+// The Features page's commands
+const f0 = inject.indexOf("var mergeFeatures=mergeConf;"), f1 = inject.indexOf("\n  };", f0);
+check(f0 > 0 && f1 > f0, "the Features script wraps mergeConf");
+vm.runInContext(inject.slice(f0, f1 + 5), ctx);
+const keep = ["errdisable recovery 600", "errdisable recovery off", "errdisable cause link-flap on", "dhcp-snoop on", "dhcp-snoop trust 3 on",
+  "dhcp-snoop ra off", "qos port 2 trust dscp", "qos port 10 priority 5", "qos port 2 priority off", "mcsnoop on", "mcsnoop querier on",
+  "mcsnoop interval 60", "mcsnoop unknown router", "mcsnoop router 4 on", "dot1x radius-vlan on", "dot1x port 2 guest-vlan 30",
+  "dot1x port 2 auth-fail-vlan off", "dot1x radsec AA:BB:CC", "dot1x radsec off", "snmp v2c off", "snmp user bob auth sha256 password1 aes password2",
+  "snmp user bob auth sha password1", "snmp trap 10.0.0.9", "snmp trap 10.0.0.9 bob", "ip6 on", "ip6 addr 2001:db8::5", "ip6 gw auto",
+  "prometheus on", "prometheus token abc", "ssh on", "mqtt on", "mqtt server 10.0.0.5 8883", "mqtt login u p", "mqtt login off",
+  "mqtt topic rack/sw1", "mqtt tls off", "mqtt interval 30"];
+const lost = keep.filter((l) => !ctx.isConfCmd(l));
+check(!lost.length, "the Features page's settings count as config " + lost.join(", "));
+const odd = ["errdisable port 2 clear", "rollback confirm", "reboot now", "update keep", "ssh newkey", "ssh", "mqtt", "qos", "mcsnoop"].filter((l) => ctx.isConfCmd(l));
+check(!odd.length, "its actions don't " + odd.join(", "));
+c = merge(base, keep.join("\n"));
+check(merge(c, keep.join("\n")).sort().join("|") === c.slice().sort().join("|"), "the same settings again change nothing");
+const last = (base2, log, want, what) => {
+  const r = merge(base2, log).filter((l) => !base.includes(l));
+  check(r.sort().join("|") === want.sort().join("|"), what + (r.join("|") === want.join("|") ? "" : ": " + r.join("|")));
+};
+last(["dot1x radius 10.0.0.1 2083", "dot1x radsec AA"], "dot1x radius-vlan on\ndot1x radsec BB",
+  ["dot1x radius 10.0.0.1 2083", "dot1x radsec BB", "dot1x radius-vlan on"], "radius-vlan and radsec leave the RADIUS server's line alone");
+last(["dot1x radius-vlan on"], "dot1x radius 10.0.0.2\ndot1x radius-vlan off", ["dot1x radius 10.0.0.2", "dot1x radius-vlan off"], "and the other way round");
+last(["dot1x port 2 auto", "dot1x port 2 guest-vlan 30", "dot1x port 2 mab on"], "dot1x port 2 force-unauth\ndot1x port 2 guest-vlan 31\ndot1x port 2 auth-fail-vlan 32",
+  ["dot1x port 2 force-unauth", "dot1x port 2 guest-vlan 31", "dot1x port 2 auth-fail-vlan 32", "dot1x port 2 mab on"], "a port's mode, VLANs and MAB are lines of their own");
+last(["snmp user bob auth sha oldpassword", "snmp user alice auth sha password9", "snmp trap 10.0.0.9 bob", "snmp trap 10.0.0.8"],
+  "snmp user bob off\nsnmp trap 10.0.0.9 off\nsnmp user alice auth sha256 newpassword", ["snmp user alice auth sha256 newpassword", "snmp trap 10.0.0.8"],
+  "users and traps: replaced by name and address, gone when off");
+last(["qos port 1 priority 5", "qos port 1 trust dscp", "qos port 10 priority 1"], "qos port 1 priority 6\nqos port 1 trust none",
+  ["qos port 1 priority 6", "qos port 1 trust none", "qos port 10 priority 1"], "qos: port 1 isn't port 10");
+last(["mqtt on", "mqtt server 10.0.0.5", "mqtt login a b"], "mqtt server 10.0.0.6 8883\nmqtt login off\nmqtt off",
+  ["mqtt off", "mqtt server 10.0.0.6 8883", "mqtt login off"], "mqtt");
+last(["dhcp-snoop on", "dhcp-snoop trust 1 on", "dhcp-snoop ra on"], "dhcp-snoop off\ndhcp-snoop trust 1 off",
+  ["dhcp-snoop off", "dhcp-snoop trust 1 off", "dhcp-snoop ra on"], "dhcp-snoop");
+last(["mcsnoop on", "mcsnoop querier on", "mcsnoop interval 60"], "mcsnoop interval 30\nmcsnoop off",
+  ["mcsnoop off", "mcsnoop querier on", "mcsnoop interval 30"], "mcsnoop");
+
 // ACL (RTLPlayground's acl command; app.js's own patterns)
 check(ctx.isConfCmd("acl 2 tcp dport 80 drop 3") && ctx.isConfCmd("acl meter 1 1000 kbps 16000"), "acl rules and meters count as config");
 check(!ctx.isConfCmd("acl show") && !ctx.isConfCmd("acl counter reset"), "acl show and counter reset don't");
