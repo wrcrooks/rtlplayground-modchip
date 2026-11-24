@@ -299,6 +299,7 @@ ACL = r"""<script>
   var hk=tabHooks.l2,enter=hk&&hk.enter;
   if(hk)hk.enter=function(){if(enter)enter.apply(this,arguments);load().catch(function(){})};
   i18nApply();
+  if(curTab==="l2")load().catch(function(){});
 })();
 </script>
 """
