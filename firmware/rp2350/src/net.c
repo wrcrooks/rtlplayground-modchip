@@ -219,6 +219,12 @@ void net_up(void)
 }
 
 
+bool net_is_up(void)
+{
+	return netif_ready && netif_is_up(&netif) && !ip4_addr_isany_val(*netif_ip4_addr(&netif));
+}
+
+
 void net_down(void)
 {
 	if (dhcp_on)

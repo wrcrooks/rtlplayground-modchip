@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -45,6 +45,7 @@ ifneq ($(PICO_SDK_PATH),)
 	python3 run_snmp.py $(BUILD)/test_snmp
 	$(BUILD)/test_httpd
 	$(BUILD)/test_httpd_tls
+	python3 run_update.py $(BUILD)/test_update $(BUILD)/key.pem $(BUILD)/key2.pem
 	python3 run_https.py $(BUILD)/test_httpd_tls
 	python3 run_ssh.py $(BUILD)/test_ssh
 	python3 run_mqtt.py $(BUILD)/test_mqtt
@@ -82,6 +83,14 @@ $(BUILD)/test_net6: test_net6.c ../src/net.c ../src/events.c ../src/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd -I../src -I$(LWIP)/src/include -o $@ test_net6.c ../src/net.c ../src/events.c $(LWIP_CORE)
 
+$(BUILD)/key.pem $(BUILD)/key2.pem:
+	@mkdir -p $(BUILD)
+	python3 ../tools/sign_update.py keygen $@
+
+$(BUILD)/test_update: test_update.c ../src/update.c ../src/update.h ../src/store.c ../src/events.c $(BUILD)/libmbed.a $(BUILD)/key.pem $(BUILD)/key2.pem
+	python3 ../tools/sign_update.py header $(BUILD)/key.pem $(BUILD)/update_key.h
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -I$(BUILD) $(MBED_INC) -o $@ test_update.c ../src/update.c ../src/store.c ../src/events.c $(BUILD)/libmbed.a
+
 ALTCP_TLS = $(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c $(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c
 
 $(BUILD)/test_mqtt: test_mqtt.c relay.h ../src/telemetry.c ../src/tls_client.c ../src/rng.c ../src/events.c $(BUILD)/libmbed.a ../src/lwipopts.h
@@ -109,12 +118,12 @@ $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.
 
 LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(wildcard $(LWIP)/src/core/ipv6/*.c) $(LWIP)/src/netif/ethernet.c
 
-HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/safety.c ../src/extras.c
+HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/safety.c ../src/extras.c ../src/update.c
 
-$(BUILD)/test_httpd: test_httpd.c $(HTTPD_SRC) ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h
+$(BUILD)/test_httpd: test_httpd.c $(HTTPD_SRC) ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
-	$(CC) -std=gnu11 -O1 -g -w -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
-		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) $(LWIP_CORE)
+	$(CC) -std=gnu11 -O1 -g -w -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge $(MBED_INC) \
+		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) $(LWIP_CORE) $(BUILD)/libmbed.a
 
 # The same with TLS (the SDK's altcp_tls_mbedtls.c, as the firmware builds it): HTTPS
 # switched on and off, the listener closed under lwIP's asserts

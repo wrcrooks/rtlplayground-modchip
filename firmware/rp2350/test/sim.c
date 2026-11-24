@@ -395,6 +395,8 @@ size_t plat_mqtt_status(char *buf, size_t max) { return snprintf(buf, max, "MQTT
 bool plat_radsec(const char *f) { sprintf(mqtt_last, "radsec %s", f ? f : "-"); return !f || strlen(f) == 64; }
 void plat_radsec_restart(void) { }
 size_t plat_https_cert(char *buf, size_t max) { return snprintf(buf, max, "-----BEGIN\n"); }
+size_t update_status(char *buf, size_t max) { return snprintf(buf, max, "Firmware sim\n"); }
+bool update_keep(void) { return false; }
 bool plat_ssh_enable(bool on) { sprintf(mqtt_last, "ssh %d", on); return true; }
 bool plat_ssh_newkey(void) { strcpy(mqtt_last, "newkey"); return true; }
 size_t plat_ssh_status(char *buf, size_t max) { return snprintf(buf, max, "SSH off\n"); }

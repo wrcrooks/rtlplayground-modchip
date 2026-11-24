@@ -7,6 +7,7 @@
 void net_init(void);
 void net_up(void);
 void net_down(void);
+bool net_is_up(void);		/* with an address */
 void net_input(uint8_t *frame, uint16_t len);
 void net_poll(void);		/* each main loop pass */
 void net_udp_poll(void);	/* each tick */

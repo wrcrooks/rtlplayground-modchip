@@ -20,6 +20,7 @@ void plat_delay_ms(uint32_t ms);		/* keeps the bridge link serviced */
 uint32_t plat_random32(void);
 void plat_sys_led(uint8_t state);		/* SYS_LED_* */
 void plat_reboot(void);				/* the switch and the RP2350 */
+void plat_restart(void);			/* the RP2350 alone */
 void plat_watchdog_test(void);			/* "watchdog test": stop, so the watchdog restarts us */
 void plat_bridge_print(void);			/* link state and counters, for "bridge" */
 void plat_bridge_log(void);			/* "bridge log": the 8051's recent output */
@@ -50,6 +51,10 @@ size_t plat_mqtt_status(char *buf, size_t max);
 /* RADIUS over TLS (radsec.c); NULL: over UDP */
 bool plat_radsec(const char *fingerprint);
 void plat_radsec_restart(void);
+
+/* Firmware updates (update.c) */
+size_t update_status(char *buf, size_t max);
+bool update_keep(void);
 
 /* SSH on port 22 (ssh_lwip.c) */
 bool plat_ssh_enable(bool on);

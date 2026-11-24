@@ -126,6 +126,18 @@ target_compile_options(rtlp PRIVATE
     -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-sign-compare
     -Wno-pointer-sign -Wno-incompatible-pointer-types -Wno-discarded-qualifiers)
 
+# Updates over the network: the key they must be signed with, tools/sign_update.py
+set(MODCHIP_UPDATE_KEY "" CACHE FILEPATH "Signing key for firmware updates (PEM), empty: none are taken")
+execute_process(COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/tools/sign_update.py header "${MODCHIP_UPDATE_KEY}" ${GEN}/update_key.h
+    RESULT_VARIABLE KEY_RESULT)
+if (NOT KEY_RESULT EQUAL 0)
+    message(FATAL_ERROR "MODCHIP_UPDATE_KEY: no usable key")
+endif()
+set(MODCHIP_UPDATE_BOARD "${MODCHIP_BOARD} ${RTLP_MACHINE}")
+if (MODCHIP_RP2354)
+    set(MODCHIP_UPDATE_BOARD "${MODCHIP_UPDATE_BOARD} RP2354")
+endif()
+
 add_executable(modchip
     src/main.c
     src/bridge.c
@@ -154,6 +166,8 @@ add_executable(modchip
     src/md5.c
     src/events.c
     src/store.c
+    src/update.c
+    src/update_flash.c
     src/safety.c
     src/mcast.c
     src/extras.c
@@ -162,7 +176,10 @@ add_executable(modchip
     $<TARGET_OBJECTS:rtlp>)
 target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge ${GEN})
 add_dependencies(modchip modchip_version)
-target_compile_definitions(modchip PRIVATE MODCHIP_LINK_BAUD=976562)
+target_compile_definitions(modchip PRIVATE MODCHIP_LINK_BAUD=976562
+    # a version in the IMAGE_DEF, for sign_update.py to set
+    PICO_CRT0_VERSION_MAJOR=1
+    MODCHIP_UPDATE_BOARD="${MODCHIP_UPDATE_BOARD}")
 target_compile_options(modchip PRIVATE -Wall)
 target_link_options(modchip PRIVATE -Wl,--wrap=sfp_read_block -Wl,--wrap=handle_sfp)
 # lwIP's SNMP core and MIB-2 groups, without its transport (snmp.c has its own)

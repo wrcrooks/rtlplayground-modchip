@@ -28,6 +28,7 @@
 #include "safety.h"
 #include "store.h"
 #include "telemetry.h"
+#include "update.h"
 #include "net.h"
 #include "metrics.h"
 #include "modchip_version.h"
@@ -208,9 +209,21 @@ void plat_reboot(void)
 }
 
 
+void plat_restart(void)
+{
+	sleep_ms(50);
+	watchdog_reboot(0, 0, 0);
+	for (;;)
+		tight_loop_contents();
+}
+
+
+/* The flash by its own addresses: XIP_BASE shows the slot that runs (update.h) */
+#define RAW_FLASH(off)	((const uint8_t *)XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + (off))
+
 void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len)
 {
-	memcpy(dst, (const uint8_t *)(XIP_BASE + CONFIG_OFFSET + off), len);
+	memcpy(dst, RAW_FLASH(CONFIG_OFFSET + off), len);
 }
 
 
@@ -229,7 +242,7 @@ bool plat_config_write(const uint8_t *src, uint32_t len)
 		return false;
 	memset(sector, 0xff, sizeof(sector));
 	memcpy(sector, src, len);
-	if (!memcmp(sector, (const void *)(XIP_BASE + CONFIG_OFFSET), sizeof(sector)))
+	if (!memcmp(sector, RAW_FLASH(CONFIG_OFFSET), sizeof(sector)))
 		return true;
 	return flash_safe_execute(config_program, sector, 100) == PICO_OK;
 }
@@ -252,7 +265,7 @@ static void sector_program(void *off)
 
 void plat_sector_read(int id, uint8_t *dst, uint32_t len)
 {
-	memcpy(dst, (const uint8_t *)(XIP_BASE + sector_offset(id)), len);
+	memcpy(dst, RAW_FLASH(sector_offset(id)), len);
 }
 
 
@@ -264,7 +277,7 @@ bool plat_sector_write(int id, const uint8_t *src, uint32_t len)
 		return false;
 	memset(sector_buf, 0xff, sizeof(sector_buf));
 	memcpy(sector_buf, src, len);
-	if (!memcmp(sector_buf, (const void *)(XIP_BASE + off), sizeof(sector_buf)))
+	if (!memcmp(sector_buf, RAW_FLASH(off), sizeof(sector_buf)))
 		return true;
 	return flash_safe_execute(sector_program, (void *)off, 100) == PICO_OK;
 }
@@ -425,6 +438,7 @@ int main(void)
 	httpd_init();
 	rtl_boot();
 	store_load();
+	update_boot();
 	safety_boot();
 	event(EV_SYSTEM, 0, 0, "Mod chip started%s, firmware " MODCHIP_VERSION, watchdog_reset ? " by the watchdog" : "");
 
@@ -474,6 +488,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			second_last = plat_uptime_s();
 			bridge_second();
 			safety_second();
+			update_second(bridge_is_up() && net_is_up());
 			rtl_second();
 			net_second();
 			httpd_second();

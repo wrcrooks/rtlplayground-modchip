@@ -22,6 +22,7 @@
 #include "metrics.h"
 #include "net.h"
 #include "plat.h"
+#include "update.h"
 #include "upload.h"
 #include "safety.h"
 #include "web_assets.h"
@@ -51,6 +52,18 @@ bool plat_config_write(const uint8_t *src, uint32_t len) { memset(config, 0xff, 
 void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, config + off, len); }
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { (void)id; memset(dst, 0xff, len); }
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { (void)id; (void)src; (void)len; return true; }
+static bool slots_ab;
+const char *const update_board = "modchip TEST", *const update_version = "v-test";
+const uint8_t update_key[65];
+const bool update_has_key = true;
+void update_slots(struct update_slots *u) { memset(u, 0, sizeof(*u)); u->ab = slots_ab; u->other_size = 0x20000; }
+uint32_t update_own_seq(void) { return 1; }
+bool update_flash_write(uint32_t off, const uint8_t *p) { return true; }
+bool update_flash_erase(uint32_t off) { return true; }
+void update_flash_read(uint32_t off, uint8_t *p, uint32_t n) { }
+void update_flash_start(void) { }
+bool update_flash_keep(void) { return true; }
+void plat_restart(void) { }
 char hostname[24] = "sw/1";
 size_t metrics_prometheus(char *b, size_t m) { return snprintf(b, m, "switch_up 1\n"); }
 size_t dot1x_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
@@ -396,6 +409,24 @@ int main(int argc, char **argv)
 		httpd_second();
 	check(reboots, "  and a restart");
 	reboots = 0;
+
+	/* POST /update: update.c decides (test_update), here the way there and back */
+	static uint8_t upd[12000];
+	for (int i = 0; i < 4; i++) {
+		static uint8_t ur[13000];
+		int size = i == 2 ? 100 : 9000;
+
+		slots_ab = i != 0;
+		k = sprintf((char *)ur, "POST /update HTTP/1.1\r\n%s%s%sContent-Length: %d\r\n\r\n", i == 3 ? "" : "Cookie: ",
+			    i == 3 ? "" : cookie, i == 3 ? "" : "\r\n", size);
+		memcpy(ur + k, upd, size);
+		r = request(ur, k + size);
+		static const char *const what[] = { "NO: the flash has no A/B slots", "NO: not an update file", "NO: too short", "NO: not logged in" };
+		check(!cl.reset && strstr(r, what[i]), what[i]);
+	}
+	for (int i = 0; i < 3; i++)
+		httpd_second();
+	check(!reboots, "  no restart from those");
 
 	/* Not logged in: the refusal comes after the whole body */
 	make_image(img, IMAGE, 1);

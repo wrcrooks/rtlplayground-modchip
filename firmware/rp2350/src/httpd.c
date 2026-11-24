@@ -22,6 +22,7 @@
 #include "net.h"
 #include "plat.h"
 #include "safety.h"
+#include "update.h"
 #include "upload.h"
 #include "web_assets.h"
 
@@ -68,6 +69,7 @@ static struct altcp_pcb *listen_tls;
 #define UP_RING			8192
 #define UP_IDLE_S		60
 static struct conn *up_conn;
+static bool up_own;		/* POST /update: the mod chip's own firmware, update.c */
 static uint8_t up_ring[UP_RING];
 static uint16_t up_head, up_tail, up_count;
 static uint32_t up_pre;		/* bytes in the ring lwIP was already told about */
@@ -85,7 +87,10 @@ static const char hdr_common[] =
 static void conn_free(struct conn *c)
 {
 	if (c == up_conn) {
-		upload_abort();	/* no reboot follows: nothing installable may stay */
+		if (up_own)
+			update_abort();
+		else
+			upload_abort();	/* no reboot follows: nothing installable may stay */
 		up_conn = NULL;
 	}
 	if (c->reboot_after)
@@ -752,10 +757,38 @@ static void start_upload(struct conn *c)
 	printf("upload: staging a %lu byte image at 0x%lx\n", (unsigned long)bridge_hello.image_size,
 	       (unsigned long)bridge_hello.upload_start);
 	up_conn = c;
+	up_own = false;
 	c->state = ST_UPLOAD;
 	up_head = up_tail = up_count = 0;
 	up_put((const uint8_t *)c->req + c->hdr_len, c->req_len - c->hdr_len);
 	up_pre = c->req_len - c->hdr_len;	/* acknowledged with the headers */
+}
+
+
+/* POST /update: an update file as it is, for the mod chip itself */
+static void start_update(struct conn *c)
+{
+	char msg[140], *cl = header(c, "content-length:");
+
+	if (!authenticated(c)) {
+		upload_refuse(c, 401, "NO: not logged in");
+		return;
+	}
+	if (up_conn) {
+		upload_refuse(c, 503, "NO: another upload is in progress");
+		return;
+	}
+	if (!cl || !update_begin(strtoul(cl, NULL, 10))) {
+		snprintf(msg, sizeof(msg), "NO: %s", cl ? update_error() : "no length");
+		upload_refuse(c, 400, msg);
+		return;
+	}
+	up_conn = c;
+	up_own = true;
+	c->state = ST_UPLOAD;
+	up_head = up_tail = up_count = 0;
+	up_put((const uint8_t *)c->req + c->hdr_len, c->req_len - c->hdr_len);
+	up_pre = c->req_len - c->hdr_len;
 }
 
 
@@ -767,11 +800,11 @@ bool httpd_poll(void)
 
 	if (!c || c->state != ST_UPLOAD)
 		return false;
-	if (upload_body_left()) {
+	if (up_own ? update_body_left() : upload_body_left()) {
 		if (!up_count)
 			return false;
 		size_t n = up_count < UP_RING - up_tail ? up_count : UP_RING - up_tail;
-		uint32_t used = upload_feed(up_ring + up_tail, n), ack = used;
+		uint32_t used = up_own ? update_feed(up_ring + up_tail, n) : upload_feed(up_ring + up_tail, n), ack = used;
 		up_tail = (up_tail + used) % UP_RING;
 		up_count -= used;
 		if (up_pre) {
@@ -781,6 +814,20 @@ bool httpd_poll(void)
 		}
 		if (ack)
 			altcp_recved(c->pcb, ack);
+		return true;
+	}
+	if (up_own) {
+		if (update_state() != UP_DONE && update_state() != UP_FAILED && !update_finish()
+		    && update_state() != UP_FAILED)
+			return true;
+		up_conn = NULL;
+		if (update_state() == UP_DONE) {
+			c->reboot_after = true;
+			text_verdict(c, 200, "OK: signature verified, restarting");
+		} else {
+			snprintf(msg, sizeof(msg), "NO: %s", update_error());
+			text_verdict(c, 400, msg);
+		}
 		return true;
 	}
 	if (upload_state() != UP_DONE && upload_state() != UP_FAILED && !upload_finish()
@@ -860,6 +907,10 @@ static err_t on_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err
 		c->hdr_len = e + 4 - c->req;
 		if (!strncmp(c->req, "POST /upload", 12) && (c->req[12] == ' ' || c->req[12] == '?')) {
 			start_upload(c);
+			return ERR_OK;
+		}
+		if (!strncmp(c->req, "POST /update ", 13)) {
+			start_update(c);
 			return ERR_OK;
 		}
 		char *cl = header(c, "content-length:");
@@ -1024,6 +1075,9 @@ void httpd_second(void)
 	}
 	if (reboot_pending) {
 		reboot_pending = false;
-		plat_reboot();
+		if (update_ready())
+			update_commit();	/* the mod chip alone restarts, into it */
+		else
+			plat_reboot();
 	}
 }

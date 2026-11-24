@@ -47,7 +47,7 @@ static uint8_t sector[FLASH_SECTOR_SIZE];
 
 static const struct tls_store *stored(void)
 {
-	const struct tls_store *s = (const struct tls_store *)(XIP_BASE + TLS_OFFSET);
+	const struct tls_store *s = (const struct tls_store *)(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + TLS_OFFSET);
 
 	if (memcmp(s->magic, TLS_MAGIC, sizeof(TLS_MAGIC)) || !s->key_len || s->key_len > DER_MAX
 	    || !s->cert_len || s->cert_len > DER_MAX)

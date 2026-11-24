@@ -15,6 +15,8 @@ void store_load(void)
 		memset(&store, 0, sizeof(store));
 		memcpy(store.magic, STORE_MAGIC, sizeof(store.magic));
 	}
+	if (store.update_pending == 0xffffffff)		/* saved before there was one */
+		store.update_pending = 0;
 }
 
 

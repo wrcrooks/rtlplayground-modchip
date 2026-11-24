@@ -436,6 +436,26 @@ static bool parse_mqtt(void)
 
 
 /*
+ *   update                              the running firmware, its slot
+ *   update keep                         an update on trial: keep it now
+ */
+static bool parse_update(void)
+{
+	char st[300];
+
+	if (cmd_words_len == 1) {
+		update_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len != 2 || !cmd_compare(1, "keep")) {
+		ext_error("update [keep]\n");
+	} else if (!update_keep()) {
+		ext_error("no update is on trial\n");
+	}
+	return true;
+}
+
+
+/*
  *   ssh                                 status, the host key's fingerprint
  *   ssh on|off|newkey
  */
@@ -757,6 +777,8 @@ bool rtl_cmd_ext(void)
 		return parse_reboot();
 	if (cmd_compare(0, "mqtt"))
 		return parse_mqtt();
+	if (cmd_compare(0, "update"))
+		return parse_update();
 	if (cmd_compare(0, "ssh"))
 		return parse_ssh();
 	if (cmd_compare(0, "prometheus"))

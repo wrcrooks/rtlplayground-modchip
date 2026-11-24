@@ -16,7 +16,8 @@ struct store {
 	uint8_t pad;
 	uint16_t ssh_key_len;
 	uint8_t ssh_key[160];		/* the SSH host key, DER */
-	uint32_t update_seq;		/* firmware version last accepted, tools/sign_update.py */
+	uint32_t update_seq;		/* firmware last accepted, tools/sign_update.py's sequence number */
+	uint32_t update_pending;	/* the one being tried, 0: none */
 };
 
 extern struct store store;
