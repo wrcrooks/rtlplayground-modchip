@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_usm $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -41,6 +41,7 @@ all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_m
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls
 	$(BUILD)/test_usm
+	$(BUILD)/test_net6
 	python3 run_snmp.py $(BUILD)/test_snmp
 	$(BUILD)/test_httpd
 	$(BUILD)/test_httpd_tls
@@ -61,7 +62,7 @@ $(BUILD)/test_usm: test_usm.c ../src/usm.c ../src/usm.h $(BUILD)/libmbed.a
 
 SNMP_SRC = asn1 core mib2 mib2_icmp mib2_interfaces mib2_ip mib2_snmp mib2_system mib2_tcp mib2_udp \
 	msg pbuf_stream scalar table traps
-LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c \
+LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(wildcard $(LWIP)/src/core/ipv6/*.c) $(LWIP)/src/netif/ethernet.c \
 	$(patsubst %,$(LWIP)/src/apps/snmp/snmp_%.c,$(SNMP_SRC))
 
 $(BUILD)/test_snmp: test_snmp.c $(BUILD)/libmbed.a ../src/usm.c ../src/usm.h ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
@@ -73,6 +74,10 @@ $(BUILD)/test_snmp: test_snmp.c $(BUILD)/libmbed.a ../src/usm.c ../src/usm.h ../
 $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/plat.h ../src/bridge.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -I$(RTLP)/modchip/bridge -o $@ test_metrics.c ../src/metrics.c
+
+$(BUILD)/test_net6: test_net6.c ../src/net.c ../src/events.c ../src/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd -I../src -I$(LWIP)/src/include -o $@ test_net6.c ../src/net.c ../src/events.c $(LWIP_CORE)
 
 $(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
 	@mkdir -p $(BUILD)
@@ -86,7 +91,7 @@ $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_upload.c ../src/upload.c ../src/link.c
 
-LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c
+LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(wildcard $(LWIP)/src/core/ipv6/*.c) $(LWIP)/src/netif/ethernet.c
 
 HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/safety.c ../src/extras.c
 

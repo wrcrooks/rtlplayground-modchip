@@ -191,6 +191,7 @@ target_link_libraries(modchip
     hardware_watchdog
     pico_lwip_core
     pico_lwip_core4
+    pico_lwip_core6
     pico_lwip_netif
     pico_lwip_arch)
 

@@ -38,6 +38,12 @@ bool plat_config_write(const uint8_t *src, uint32_t len);	/* replaces the whole 
 void plat_dhcp_start(void);
 void plat_dhcp_stop(void);
 
+/* IPv6 management (net.c); NULL: none, or learned */
+bool plat_ip6_enable(bool on);
+bool plat_ip6_addr(const char *addr);
+bool plat_ip6_gw(const char *addr);
+size_t plat_ip6_status(char *buf, size_t max);
+
 /* HTTPS on port 443 (tls.c) */
 bool plat_https_enable(bool on);
 bool plat_https_enabled(void);
@@ -103,6 +109,9 @@ void rtl_on_sfp(uint8_t sfp_pins);
 uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan);
 /* An Ethernet frame out through the bridge, tagged for the management VLAN */
 void rtl_tx_frame(const uint8_t *frame, uint16_t len);
+
+/* IPv6 frames reach the IP stack */
+void rtl_ip6(bool on);
 
 /* DHCP state shown by the command line, from lwIP */
 void rtl_dhcp_update(uint8_t state, uint16_t timer_s, const uint8_t *dns);

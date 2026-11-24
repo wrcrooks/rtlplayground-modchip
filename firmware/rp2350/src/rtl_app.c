@@ -39,6 +39,7 @@
 
 void rtl_mcast_links(uint32_t sts);	/* rtl_mcast.c */
 void rtl_mcast_second(void);
+void rtl_mcast_ipv6_cpu(bool on);
 
 void rtl_iso_reset(void);	/* rtl_env.c */
 void rtl_iso_release(void);
@@ -67,6 +68,7 @@ extern __xdata char passwd[21];
 
 __xdata uint8_t stp_tick_last;
 static bool up;
+static bool up_once;
 static uint8_t links_last[12];
 static bool button_last;
 static uint32_t button_since;
@@ -120,6 +122,7 @@ static void hostname_default(void)
 void rtl_bridge_up(void)
 {
 	up = false;
+	up_once = true;
 	machine_detected.isRTL8373 = !!(bridge_hello.flags & HELLO_RTL8373);
 	machine_detected.isN = !!(bridge_hello.flags & HELLO_N_VARIANT);
 	if (machine.isRTL8373 != machine_detected.isRTL8373)
@@ -454,6 +457,16 @@ void tcpip_output(void)
 }
 
 
+static bool ip6_frames;
+
+void rtl_ip6(bool on)
+{
+	ip6_frames = on;
+	if (up_once)
+		rtl_mcast_ipv6_cpu(on);
+}
+
+
 #define ETH_TYPE_OFFSET	(12 + RTL_TAG_SIZE + VLAN_TAG_SIZE)
 
 /* As handle_rx() in rtlplayground.c, for one frame */
@@ -500,9 +513,9 @@ uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 		return 0;
 	}
 	uint16_t type = (frame[ETH_TYPE_OFFSET] << 8) | frame[ETH_TYPE_OFFSET + 1];
-	if (type != 0x0806 && type != 0x0800)
+	if (type != 0x0806 && type != 0x0800 && !(type == 0x86dd && ip6_frames))
 		return 0;
-	if (type == 0x0800 && management_vlan && management_vlan != *vlan)
+	if (type != 0x0806 && management_vlan && management_vlan != *vlan)
 		return 0;
 	/* Drop the CPU and VLAN tags: dst and src move up to the EtherType */
 	memmove(frame + ETH_TYPE_OFFSET - 12, frame, 12);

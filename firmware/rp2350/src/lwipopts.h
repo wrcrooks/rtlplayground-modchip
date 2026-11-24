@@ -20,7 +20,17 @@
 #define MEMP_NUM_ARP_QUEUE		8
 
 #define LWIP_IPV4			1
-#define LWIP_IPV6			0
+/* Management only, and only with "ip6 on": link-local, SLAAC and one static address */
+#define LWIP_IPV6			1
+#define LWIP_IPV6_NUM_ADDRESSES		4
+#define LWIP_IPV6_FORWARD		0
+#define LWIP_IPV6_DHCP6			0
+#define LWIP_IPV6_REASS			0
+#define LWIP_ND6_ALLOW_RA_UPDATES	1
+struct netif;
+struct ip6_addr;
+const struct ip6_addr *net_ip6_gw(struct netif *netif, const struct ip6_addr *dest);
+#define LWIP_HOOK_ND6_GET_GW(netif, dest)	net_ip6_gw(netif, dest)
 #define LWIP_ARP			1
 #define LWIP_ETHERNET			1
 #define LWIP_ICMP			1

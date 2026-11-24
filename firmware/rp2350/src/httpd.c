@@ -904,7 +904,7 @@ static struct altcp_pcb *listen_on(struct altcp_pcb *pcb, u16_t port, void *arg)
 
 	if (!pcb)
 		return NULL;
-	if (altcp_bind(pcb, IP4_ADDR_ANY, port) != ERR_OK || !(l = altcp_listen_with_backlog(pcb, CONNS))) {
+	if (altcp_bind(pcb, IP_ANY_TYPE, port) != ERR_OK || !(l = altcp_listen_with_backlog(pcb, CONNS))) {
 		altcp_close(pcb);
 		return NULL;
 	}
@@ -916,7 +916,7 @@ static struct altcp_pcb *listen_on(struct altcp_pcb *pcb, u16_t port, void *arg)
 
 void httpd_init(void)
 {
-	listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_V4), 80, NULL);
+	listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_ANY), 80, NULL);
 }
 
 
@@ -924,7 +924,7 @@ void httpd_init(void)
 bool httpd_tls_start(struct altcp_tls_config *conf)
 {
 	httpd_tls_stop();
-	listen_tls = listen_on(altcp_tls_new(conf, IPADDR_TYPE_V4), 443, (void *)1);
+	listen_tls = listen_on(altcp_tls_new(conf, IPADDR_TYPE_ANY), 443, (void *)1);
 	return listen_tls != NULL;
 }
 

@@ -379,6 +379,35 @@ bool ext_run(const char *fmt, ...)
 
 
 /*
+ *   ip6                        status
+ *   ip6 on|off                 IPv6 for management: link-local and SLAAC addresses
+ *   ip6 addr <address>|none    and one of our own (/64)
+ *   ip6 gw <address>|auto      the gateway, or as router advertisements say
+ */
+static bool parse_ip6(void)
+{
+	char st[400];
+	bool ok = true;
+
+	if (cmd_words_len == 1) {
+		plat_ip6_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		plat_ip6_enable(cmd_compare(1, "on"));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "addr")) {
+		ok = plat_ip6_addr(cmd_compare(2, "none") ? NULL : ext_rest(2));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "gw")) {
+		ok = plat_ip6_gw(cmd_compare(2, "auto") ? NULL : ext_rest(2));
+	} else {
+		ok = false;
+	}
+	if (!ok)
+		ext_error("ip6 [on|off|addr <address>|none|gw <address>|auto]\n");
+	return true;
+}
+
+
+/*
  *   reboot                     what is pending
  *   reboot now                 the switch and the mod chip
  *   reboot in <1-1440>         in that many minutes
@@ -609,6 +638,8 @@ bool rtl_cmd_ext(void)
 {
 	if (cmd_compare(0, "reboot") || cmd_compare(0, "rollback"))
 		return parse_reboot();
+	if (cmd_compare(0, "ip6"))
+		return parse_ip6();
 	if (rtl_guard_cmd() || rtl_mcast_cmd())
 		return true;
 	if (cmd_compare(0, "acltbl"))

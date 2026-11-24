@@ -9,6 +9,9 @@
 
 #include "lwip/dhcp.h"
 #include "lwip/etharp.h"
+#include "lwip/ethip6.h"
+#include "lwip/mld6.h"
+#include "lwip/nd6.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
@@ -17,6 +20,7 @@
 #include "lwip/udp.h"
 #include "netif/ethernet.h"
 
+#include "events.h"
 #include "net.h"
 #include "plat.h"
 
@@ -52,10 +56,122 @@ static err_t netif_setup(struct netif *nif)
 	nif->name[1] = 'w';
 	nif->mtu = 1500;
 	nif->hwaddr_len = ETH_HWADDR_LEN;
-	nif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET;
+	nif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_ETHERNET | NETIF_FLAG_MLD6;
 	nif->output = etharp_output;
+	nif->output_ip6 = ethip6_output;
 	nif->linkoutput = linkoutput;
 	return ERR_OK;
+}
+
+
+/* ---- IPv6 ---- */
+
+#define IP6_STATIC	1	/* address slots: 0 link-local, 1 ours, the rest SLAAC */
+
+static bool ip6_on, ip6_gw_set, ip6_addr_set_;
+static ip6_addr_t ip6_static, ip6_gw;
+
+const ip6_addr_t *net_ip6_gw(struct netif *nif, const ip6_addr_t *dest)
+{
+	(void)nif; (void)dest;
+	return ip6_gw_set ? &ip6_gw : NULL;
+}
+
+
+static void ip6_apply(void)
+{
+	rtl_ip6(ip6_on);
+	if (!netif_is_up(&netif))
+		return;
+	netif.ip6_autoconfig_enabled = ip6_on;
+	if (!ip6_on) {
+		for (s8_t i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++)
+			netif_ip6_addr_set_state(&netif, i, IP6_ADDR_INVALID);
+		return;
+	}
+	if (ip6_addr_isinvalid(netif_ip6_addr_state(&netif, 0)))
+		netif_create_ip6_linklocal_address(&netif, 1);
+	/* a static address has an infinite lifetime, which lwIP writes as 0 */
+	netif_ip6_addr_set_state(&netif, IP6_STATIC, IP6_ADDR_INVALID);
+	if (ip6_addr_set_) {
+		netif_ip6_addr_set(&netif, IP6_STATIC, &ip6_static);
+		netif_ip6_addr_set_valid_life(&netif, IP6_STATIC, IP6_ADDR_LIFE_STATIC);
+		netif_ip6_addr_set_state(&netif, IP6_STATIC, IP6_ADDR_TENTATIVE);
+	}
+}
+
+
+bool plat_ip6_enable(bool on)
+{
+	ip6_on = on;
+	ip6_apply();
+	return true;
+}
+
+
+static bool ip6_parse(const char *s, ip6_addr_t *a)
+{
+	char b[48];
+	size_t n = strcspn(s, "/ ");
+
+	/* lwIP takes the prefix of a static address for 64 bits long */
+	if (n >= sizeof(b) || (s[n] == '/' && (strncmp(s + n, "/64", 3) || (s[n + 3] && s[n + 3] != ' '))))
+		return false;
+	memcpy(b, s, n);
+	b[n] = 0;
+	if (!ip6addr_aton(b, a))
+		return false;
+	return !ip6_addr_ismulticast(a) && !ip6_addr_isany(a) && !ip6_addr_isloopback(a);
+}
+
+
+bool plat_ip6_addr(const char *s)
+{
+	ip6_addr_t a;
+
+	if (s && (!ip6_parse(s, &a) || ip6_addr_islinklocal(&a)))
+		return false;
+	ip6_addr_set_ = s != NULL;
+	if (s)
+		ip6_static = a;
+	ip6_addr_clear_zone(&ip6_static);
+	ip6_apply();
+	return true;
+}
+
+
+bool plat_ip6_gw(const char *s)
+{
+	ip6_addr_t a;
+
+	if (s && !ip6_parse(s, &a))
+		return false;
+	ip6_gw_set = s != NULL;
+	if (s) {
+		ip6_gw = a;
+		ip6_addr_assign_zone(&ip6_gw, IP6_UNICAST, &netif);
+	}
+	nd6_clear_destination_cache();
+	return true;
+}
+
+
+size_t plat_ip6_status(char *buf, size_t max)
+{
+	size_t n = app(buf, max, 0, "IPv6 %s\n", ip6_on ? "on" : "off");
+
+	for (s8_t i = 0; ip6_on && i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+		u8_t st = netif_ip6_addr_state(&netif, i);
+
+		if (ip6_addr_isinvalid(st))
+			continue;
+		n = app(buf, max, n, "%s/64 %s%s\n", ip6addr_ntoa(netif_ip6_addr(&netif, i)),
+			i == 0 ? "link-local" : i == IP6_STATIC && ip6_addr_set_ ? "static" : "autoconfigured",
+			ip6_addr_istentative(st) ? ", tentative" : ip6_addr_isduplicated(st) ? ", duplicate" : "");
+	}
+	if (ip6_gw_set)
+		n = app(buf, max, n, "Gateway %s\n", ip6addr_ntoa(&ip6_gw));
+	return n;
 }
 
 
@@ -92,6 +208,10 @@ void net_up(void)
 	memset(applied, 0, sizeof(applied));
 	netif_set_up(&netif);
 	netif_set_link_up(&netif);
+	/* the interface may have come back as another: start over */
+	for (s8_t i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++)
+		netif_ip6_addr_set_state(&netif, i, IP6_ADDR_INVALID);
+	ip6_apply();
 	/* The config replay may have asked for DHCP before the netif was up */
 	if (dhcp_on)
 		dhcp_start(&netif);
@@ -122,6 +242,9 @@ void net_poll(void)
 	if (memcmp(netif.hwaddr, rtl_mac(), ETH_HWADDR_LEN)) {
 		memcpy(netif.hwaddr, rtl_mac(), ETH_HWADDR_LEN);
 		etharp_cleanup_netif(&netif);
+		nd6_cleanup_netif(&netif);
+		netif_ip6_addr_set_state(&netif, 0, IP6_ADDR_INVALID);
+		ip6_apply();
 	}
 	if (dhcp_on) {
 		if (dhcp_supplied_address(&netif)) {

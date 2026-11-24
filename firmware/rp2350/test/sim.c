@@ -381,6 +381,11 @@ bool plat_config_write(const uint8_t *src, uint32_t len)
 static bool https_on, snmp_on;
 static char snmp_comm[33] = "public";
 static char snmp_last[200];
+static char ip6_last[100];
+bool plat_ip6_enable(bool on) { sprintf(ip6_last, "on %d", on); rtl_ip6(on); return true; }
+bool plat_ip6_addr(const char *a) { sprintf(ip6_last, "addr %s", a ? a : "-"); return true; }
+bool plat_ip6_gw(const char *a) { sprintf(ip6_last, "gw %s", a ? a : "-"); return true; }
+size_t plat_ip6_status(char *buf, size_t max) { return snprintf(buf, max, "IPv6\n"); }
 void plat_snmp_v2c(bool on) { sprintf(snmp_last, "v2c %d", on); }
 bool plat_snmp_user(const char *name, bool sha256, const char *auth, const char *priv)
 {
@@ -1108,6 +1113,27 @@ int main(void)
 		cmd("qos port 2 priority off");
 		rtl_second();
 		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		/* IPv6 */
+		uint8_t g6[64];
+		memcpy(g6, g0, sizeof(g6));
+		g6[24] = 0x86; g6[25] = 0xdd;
+		uint8_t g7[64];
+		memcpy(g7, g6, 64);
+		check(rtl_rx_frame(g7, 64, &vl) == 0, "IPv6 off: no IPv6 frames for the IP stack");
+		cmd("ip6 on");
+		check(!strcmp(ip6_last, "on 1") && (regs[0x536c] & 0x200), "ip6 on: multicast floods to the CPU too (%x)", regs[0x536c]);
+		memcpy(g7, g6, 64);
+		check(rtl_rx_frame(g7, 64, &vl) != 0, "and they reach the IP stack");
+		g6[23] = 9;
+		memcpy(g7, g6, 64);
+		check(rtl_rx_frame(g7, 64, &vl) == 0, "but not from another VLAN");
+		cmd("ip6 addr 2001:db8::5/64");
+		check(!strcmp(ip6_last, "addr 2001:db8::5/64"), "ip6 addr");
+		cmd("ip6 gw auto");
+		check(!strcmp(ip6_last, "gw -"), "ip6 gw auto");
+		cmd("ip6 off");
+		check(!(regs[0x536c] & 0x200), "ip6 off");
+
 		cmd("snmp user admin auth sha256 authpassword aes privpassword");
 		check(!strcmp(snmp_last, "user admin 1 authpassword privpassword"), "snmp user: %s", snmp_last);
 		cmd("snmp user ro auth sha authpassword");

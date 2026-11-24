@@ -68,6 +68,7 @@ bool rtl_password_ok(const char *v) { return !strncmp(v, "1234", 4) && (!v[4] ||
 #ifndef TEST_HTTPD_TLS
 struct altcp_pcb *altcp_tls_wrap(struct altcp_tls_config *config, struct altcp_pcb *inner) { (void)config; (void)inner; return NULL; }
 #endif
+const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
 size_t metrics_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 uint8_t *metrics_history(size_t *len) { *len = 0; return NULL; }
