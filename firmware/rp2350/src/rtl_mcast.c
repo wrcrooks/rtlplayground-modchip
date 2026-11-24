@@ -164,6 +164,55 @@ void mc_hw_entry(uint16_t vlan, const uint8_t *mac, uint16_t ports)
 }
 
 
+/*
+ * After a restart of ours alone, the entries of before: they would keep their
+ * groups to the ports of then. Snooping's trap bits say that there may be some.
+ */
+void rtl_mcast_stale(void)
+{
+	static struct { uint8_t mac[6]; uint16_t vlan; } found[32];
+	unsigned n, pass = 0;
+
+	reg_read_m(RTL837X_IGMP_PORT_CFG + (machine.min_port << 2));
+	if (!(sfr_data[2] & (MLD_TRAP >> 8)) || !(sfr_data[3] & (MLD_TRAP & 0xff)))
+		return;
+	do {
+		uint16_t entry = 0, first = 0xffff;
+
+		n = 0;
+		table_wait();
+		for (unsigned i = 0; i < 4096 && n < sizeof(found) / sizeof(found[0]); i++) {
+			reg_read_m(RTL837x_TBL_DATA_0);
+			REG_WRITE(RTL837x_TBL_DATA_0, sfr_data[0], (sfr_data[1] & 0xf8) | (TBL_LUTREAD_NEXT_L2MC >> 2),
+				  (sfr_data[2] & 0x3f) | (TBL_LUTREAD_NEXT_L2MC & 3) << 6, sfr_data[3]);
+			REG_WRITE(RTL837X_TBL_CTRL, (entry >> 8) & 0xf, entry, TBL_L2_UNICAST, TBL_EXECUTE);
+			table_wait();
+			reg_read_m(RTL837x_TBL_DATA_0);
+			entry = (uint16_t)(sfr_data[2] & 0x0f) << 8 | sfr_data[3];
+			if (entry == first)
+				break;
+			if (first == 0xffff)
+				first = entry;
+			entry++;
+			reg_read_m(RTL837x_L2_DATA_OUT_B);
+			uint8_t m0 = sfr_data[2], m1 = sfr_data[3];
+			found[n].vlan = (uint16_t)(sfr_data[0] & 0xf) << 8 | sfr_data[1];
+			if (!(sfr_data[0] & 0x20) || !((m0 == 0x01 && m1 == 0x00) || (m0 == 0x33 && m1 == 0x33)))
+				continue;
+			reg_read_m(RTL837x_L2_DATA_OUT_A);
+			if (m0 == 0x01 && sfr_data[0] != 0x5e)
+				continue;
+			found[n].mac[0] = m0;
+			found[n].mac[1] = m1;
+			memcpy(found[n].mac + 2, sfr_data, 4);
+			n++;
+		}
+		for (unsigned i = 0; i < n; i++)
+			mc_hw_entry(found[i].vlan, found[i].mac, 0);
+	} while (n == sizeof(found) / sizeof(found[0]) && ++pass < 130);	/* the table's 4096 at most */
+}
+
+
 static void flood6(void)
 {
 	uint16_t all = machine_detected.isRTL8373 ? PMASK_9 : PMASK_6;

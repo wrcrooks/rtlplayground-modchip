@@ -221,7 +221,7 @@ static void snoop_apply(void)
 	ok &= ext_run("acl %u udp sport 67 drop%s", RULE_SNOOP4, ports);
 	ok &= ext_run("acl %u udp sport 547 drop%s", RULE_SNOOP6, ports);
 	if (snoop_ra) {
-		ok &= ext_run("acl field %u l4 0", FIELD_SNOOP_RA);
+		ok &= ext_run("acl field %u ip 0", FIELD_SNOOP_RA);
 		ok &= ext_run("acl %u ipv6 icmp field %u 8600/ff00 drop%s", RULE_SNOOP_RA, FIELD_SNOOP_RA, ports);
 	}
 	if (!ok)

@@ -702,6 +702,31 @@ static bool acl_op(uint16_t entry, uint8_t type, bool write, uint32_t *w)
 }
 
 
+/*
+ * After a restart of ours alone the switch still has the rules of before,
+ * which rtl837x_acl.c knows nothing of. Between the two restarts of the
+ * switch itself the enable register tells.
+ */
+void rtl_acl_stale(void)
+{
+	reg_read_m(RTL837X_ACL_PORT_EN);
+	if (!(sfr_data[0] | sfr_data[1] | sfr_data[2] | sfr_data[3]))
+		return;
+	REG_SET(RTL837X_ACL_PORT_EN, 0);
+	REG_SET(RTL837X_ACL_UNMATCH_PERMIT, 0);
+	for (uint8_t i = 0; i < ACL_ENTRIES; i++) {
+		uint32_t w[2 * ACL_WORDS], any = 0;
+
+		if (!acl_op(i, TBL_ACL_RULE, false, w) || !acl_op(i | 0x80, TBL_ACL_RULE, false, w + ACL_WORDS))
+			any = 1;	/* unreadable: clear it */
+		for (uint8_t k = 0; k < 2 * ACL_WORDS; k++)
+			any |= w[k];
+		if (any)
+			acl_rule_clear(i);
+	}
+}
+
+
 static void acl_print(const char *what, const uint32_t *w)
 {
 	char b[80];

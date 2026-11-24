@@ -1124,6 +1124,14 @@ int main(void)
 		cmd("dhcp-snoop off");
 		rtl_second();
 		check(!RULE_VALID(60) && !RULE_VALID(61) && !RULE_VALID(62), "dhcp-snoop off");
+		/* The mod chip alone restarts: the rules of before are in the switch still */
+		cmd("dhcp-snoop on");
+		cmd("acl 5 tcp dport 81 drop 2");
+		rtl_second();
+		check(RULE_VALID(60) && RULE_VALID(5) && regs[0x4818], "rules in, and ACLs on");
+		rtl_bridge_up();
+		rtl_second();
+		check(!RULE_VALID(60) && !RULE_VALID(61) && !RULE_VALID(5) && !regs[0x4818], "a restart of ours clears the ones nobody set up again");
 		cmd("qos port 1 trust dscp");
 		cmd("qos port 2 priority 5");
 		rtl_second();
@@ -1248,8 +1256,12 @@ int main(void)
 		cmd("mcsnoop on");
 		check((regs[0x52a0 + 4 * l2] & 0x3ff) == 0x2aa && !(regs[0x5350] & 8), "mcsnoop on: IGMP and MLD trapped (%x)", regs[0x52a0 + 4 * l2]);
 		uint8_t ig2[sizeof(ig)];
+		/* as the switch traps them: no tag but the CPU's, if they came without (MokerLink, 2026-11-24) */
+		memcpy(ig2, ig, 20);
+		memcpy(ig2 + 20, ig + 24, sizeof(ig) - 24);
+		check(rtl_rx_frame(ig2, sizeof(ig) - 4, &vl) == 0 && mc_group_count() == 1, "an untagged report through the RX path makes a group");
 		memcpy(ig2, ig, sizeof(ig));
-		check(rtl_rx_frame(ig2, sizeof(ig2), &vl) == 0 && mc_group_count() == 1, "a report through the RX path makes a group");
+		check(rtl_rx_frame(ig2, sizeof(ig2), &vl) == 0 && mc_group_count() == 1, "a tagged one joins the same");
 		check(regs[0x5cb8] == 0x5e010203 && regs[0x5cbc] == (0x20000000u | (1u << l2 & 3) << 30 | 1 << 16 | 0x0100) && regs[0x5cc0] == (1u << l2) >> 2,
 		      "as an L2 multicast entry (%x %x %x)", regs[0x5cb8], regs[0x5cbc], regs[0x5cc0]);
 		cmd("mcsnoop router 1 on");

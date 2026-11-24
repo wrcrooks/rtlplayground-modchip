@@ -39,6 +39,8 @@
 
 void rtl_mcast_links(uint32_t sts);	/* rtl_mcast.c */
 void rtl_mcast_second(void);
+void rtl_mcast_stale(void);
+void rtl_acl_stale(void);	/* rtl_ext.c */
 void rtl_mcast_ipv6_cpu(bool on);
 
 void rtl_iso_reset(void);	/* rtl_env.c */
@@ -144,6 +146,7 @@ void rtl_bridge_up(void)
 	stp_defaults();
 	lacpEnabled = 0;
 	lacp_init();
+	rtl_mcast_stale();
 	igmp_setup();
 	bandwidth_setup();
 	lldp_init();
@@ -155,6 +158,7 @@ void rtl_bridge_up(void)
 	rtl_iso_reset();
 	dot1x_plat_bridge_up();
 	acl_reset();
+	rtl_acl_stale();
 	rtl_guard_reset();
 	mc_reset();
 
@@ -498,11 +502,21 @@ uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 	}
 	if (mc_cfg.on && (frame[0] & 1)) {
 		static uint8_t plain[UIP_CONF_BUFFER_SIZE];
+		/* Trapped frames come as they arrived, with a tag or without; the
+		 * others have the CPU port's */
+		uint8_t port = frame[19] & 0x0f;
+		bool tag = frame[20] == 0x81 && frame[21] == 0x00;
+		uint8_t off = tag ? ETH_TYPE_OFFSET : ETH_TYPE_OFFSET - 4;
+		uint16_t vid = tag ? *vlan : 0;
 
+		if (!vid)
+			vid = port_pvid_get(port);
 		memcpy(plain, frame, 12);
-		memcpy(plain + 12, frame + ETH_TYPE_OFFSET, len - ETH_TYPE_OFFSET);
-		if (mc_rx(frame[19] & 0x0f, *vlan, plain, len - ETH_TYPE_OFFSET + 12))
+		memcpy(plain + 12, frame + off, len - off);
+		if (mc_rx(port, vid, plain, len - off + 12))
 			return 0;
+		if (!tag)
+			return 0;	/* trapped, and nothing for lwIP */
 	}
 	if (igmpEnabled && uip_buf[0] == 0x01 && uip_buf[1] == 0x00 && uip_buf[2] == 0x5e)
 		rtl_metrics_igmp(frame, len);
