@@ -125,6 +125,13 @@ int main(void)
 	secs(3);
 	plat_ip6_status(st, sizeof(st));
 	check(strcasestr(st, "2001:DB8:2::5/64 static\n"), "is there: %s", st);
+	check(strcasestr(st, "2001:DB8:1:0:40F:FF:FEDD:3B3E/64 autoconfigured"), "and the SLAAC address, which had its slot, as well");
+	check(plat_ip6_addr(NULL), "no static address");
+	secs(1);
+	plat_ip6_status(st, sizeof(st));
+	check(!strstr(st, "static") && strcasestr(st, "2001:DB8:1:0:40F:FF:FEDD:3B3E/64 autoconfigured"), "leaves the SLAAC one");
+	plat_ip6_addr("2001:db8:2::5/64");
+	secs(4);
 	secs(4000);
 	n_tx = 0;
 	ns("2001:db8:2::5");

@@ -28,6 +28,7 @@ void plat_bridge_hold(bool on);			/* "bridge hold on|off" */
 void plat_bridge_raw(void);			/* "bridge raw": the first bytes after power-up */
 void plat_bridge_probe(void);			/* "bridge probe": activity on the UART pins */
 uint32_t plat_uptime_s(void);
+uint32_t plat_heap_free(void);
 uint32_t plat_ms(void);
 
 /* The saved configuration: one 4 KiB sector of the RP2350's flash */

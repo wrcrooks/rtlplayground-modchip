@@ -32,6 +32,7 @@ u32_t sys_now(void)
 	return t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 uint32_t plat_uptime_s(void) { return sys_now() / 1000; }
+uint32_t plat_heap_free(void) { return getenv("HEAP_FREE") ? atoi(getenv("HEAP_FREE")) : 200000; }
 uint32_t plat_random32(void) { return rand(); }
 void plat_reboot(void) { rebooted = true; }
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { memcpy(dst, store_sector, len); }

@@ -31,6 +31,9 @@
 #define RX_TIMEOUT_S		5
 #define CMD_LINE_MAX		127			/* CMD_BUF_SIZE - 1 */
 #define TLS_CONNS		2			/* each holds about 25 KB of mbedTLS buffers */
+#define TLS_HEAP_MIN		(40 * 1024)		/* with the handshake's, and room for an answer */
+#define TLS_WAITING		6			/* connections waiting for one of the two */
+#define TLS_WAIT_S		20
 #define METRICS_JSON_MAX	6144
 #define FEATURES_JSON_MAX	8192
 #define PROMETHEUS_MAX		16384
@@ -58,6 +61,17 @@ struct conn {
 
 static struct conn conns[CONNS];
 static struct altcp_pcb *listen_tls;
+static struct altcp_tls_config *tls_conf;
+
+/*
+ * Browsers open six connections at once. The ones past TLS_CONNS wait as plain
+ * TCP, with what they have sent, until there is room for their TLS state.
+ */
+static struct waiting {
+	struct altcp_pcb *pcb;
+	struct pbuf *rx;
+	uint8_t s;
+} waiting[TLS_WAITING];
 
 /*
  * A firmware upload (POST /upload), one at a time. Its body goes through
@@ -793,13 +807,15 @@ static void start_update(struct conn *c)
 
 
 /* Each main loop pass: a step of the upload, at most one flash operation */
+static bool waiting_poll(void);
+
 bool httpd_poll(void)
 {
 	struct conn *c = up_conn;
 	char msg[140];
 
 	if (!c || c->state != ST_UPLOAD)
-		return false;
+		return waiting_poll();
 	if (up_own ? update_body_left() : upload_body_left()) {
 		if (!up_count)
 			return false;
@@ -955,16 +971,10 @@ static void on_err(void *arg, err_t err)
 }
 
 
-static err_t on_accept(void *arg, struct altcp_pcb *pcb, err_t err)
+/* A connection of ours, from a pcb just accepted; false: there is no room */
+static bool conn_new(struct altcp_pcb *pcb, bool tls)
 {
-	bool tls = arg != NULL;
-	int n_tls = 0;
-
-	if (err != ERR_OK || !pcb)
-		return ERR_VAL;
-	for (int i = 0; i < CONNS; i++)
-		n_tls += conns[i].state != ST_FREE && conns[i].tls;
-	for (int i = 0; i < CONNS && !(tls && n_tls >= TLS_CONNS); i++) {
+	for (int i = 0; i < CONNS; i++) {
 		struct conn *c = &conns[i];
 		if (c->state != ST_FREE)
 			continue;
@@ -984,6 +994,155 @@ static err_t on_accept(void *arg, struct altcp_pcb *pcb, err_t err)
 		altcp_sent(pcb, on_sent);
 		altcp_err(pcb, on_err);
 		altcp_setprio(pcb, TCP_PRIO_MIN);
+		return true;
+	}
+	return false;
+}
+
+
+static err_t on_accept(void *arg, struct altcp_pcb *pcb, err_t err)
+{
+	(void)arg;
+	if (err != ERR_OK || !pcb)
+		return ERR_VAL;
+	if (conn_new(pcb, false))
+		return ERR_OK;
+	altcp_abort(pcb);
+	return ERR_ABRT;
+}
+
+
+/* ---- HTTPS ---- */
+
+static bool tls_room(void)
+{
+	int n_tls = 0, n_free = 0;
+
+	for (int i = 0; i < CONNS; i++) {
+		n_free += conns[i].state == ST_FREE;
+		n_tls += conns[i].state != ST_FREE && conns[i].tls;
+	}
+	return n_free && n_tls < TLS_CONNS && plat_heap_free() >= TLS_HEAP_MIN;
+}
+
+
+static void waiting_free(struct waiting *w)
+{
+	if (w->rx)
+		pbuf_free(w->rx);
+	w->rx = NULL;
+	w->pcb = NULL;
+}
+
+
+static err_t on_waiting_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err)
+{
+	struct waiting *w = arg;
+	(void)err;
+
+	if (!p) {		/* it gave up */
+		waiting_free(w);
+		altcp_arg(pcb, NULL);
+		altcp_recv(pcb, NULL);
+		altcp_err(pcb, NULL);
+		if (altcp_close(pcb) == ERR_OK)
+			return ERR_OK;
+		altcp_abort(pcb);
+		return ERR_ABRT;
+	}
+	/* a ClientHello takes one or two segments; lwIP offers the rest again later */
+	if (w->rx && w->rx->tot_len > TCP_MSS)
+		return ERR_MEM;
+	if (w->rx)
+		pbuf_cat(w->rx, p);
+	else
+		w->rx = p;
+	return ERR_OK;
+}
+
+
+static void on_waiting_err(void *arg, err_t err)
+{
+	(void)err;
+	waiting_free(arg);	/* lwIP has freed the pcb */
+}
+
+
+/* Gives a waiting connection its TLS state and what it has sent so far */
+static void waiting_start(struct waiting *w)
+{
+	struct altcp_pcb *inner = w->pcb, *pcb;
+	struct pbuf *rx = w->rx;
+
+	w->pcb = NULL;
+	w->rx = NULL;
+	altcp_arg(inner, NULL);
+	altcp_recv(inner, NULL);
+	altcp_err(inner, NULL);
+	pcb = altcp_tls_wrap(tls_conf, inner);
+	if (!pcb || !conn_new(pcb, true)) {
+		if (rx)
+			pbuf_free(rx);
+		altcp_abort(pcb ? pcb : inner);
+		return;
+	}
+	if (rx)
+		inner->recv(inner->arg, inner, rx, ERR_OK);
+}
+
+
+static bool waiting_poll(void)
+{
+	struct waiting *oldest = NULL;
+
+	for (int i = 0; i < TLS_WAITING; i++)
+		if (waiting[i].pcb && (!oldest || waiting[i].s > oldest->s))
+			oldest = &waiting[i];
+	if (!oldest || !tls_room())
+		return false;
+	waiting_start(oldest);
+	return true;
+}
+
+
+int httpd_tls_waiting(void)
+{
+	int n = 0;
+
+	for (int i = 0; i < TLS_WAITING; i++)
+		n += waiting[i].pcb != NULL;
+	return n;
+}
+
+
+static void waiting_abort(struct waiting *w)
+{
+	struct altcp_pcb *pcb = w->pcb;
+
+	if (!pcb)
+		return;
+	altcp_arg(pcb, NULL);
+	altcp_err(pcb, NULL);
+	altcp_abort(pcb);
+	waiting_free(w);
+}
+
+
+static err_t on_accept_tls(void *arg, struct altcp_pcb *pcb, err_t err)
+{
+	(void)arg;
+	if (err != ERR_OK || !pcb)
+		return ERR_VAL;
+	for (int i = 0; i < TLS_WAITING; i++) {
+		struct waiting *w = &waiting[i];
+		if (w->pcb)
+			continue;
+		w->pcb = pcb;
+		w->s = 0;
+		altcp_arg(pcb, w);
+		altcp_recv(pcb, on_waiting_recv);
+		altcp_err(pcb, on_waiting_err);
+		altcp_setprio(pcb, TCP_PRIO_MIN);
 		return ERR_OK;
 	}
 	altcp_abort(pcb);
@@ -991,25 +1150,24 @@ static err_t on_accept(void *arg, struct altcp_pcb *pcb, err_t err)
 }
 
 
-static struct altcp_pcb *listen_on(struct altcp_pcb *pcb, u16_t port, void *arg)
+static struct altcp_pcb *listen_on(struct altcp_pcb *pcb, u16_t port, altcp_accept_fn accept, uint8_t backlog)
 {
 	struct altcp_pcb *l;
 
 	if (!pcb)
 		return NULL;
-	if (altcp_bind(pcb, IP_ANY_TYPE, port) != ERR_OK || !(l = altcp_listen_with_backlog(pcb, CONNS))) {
+	if (altcp_bind(pcb, IP_ANY_TYPE, port) != ERR_OK || !(l = altcp_listen_with_backlog(pcb, backlog))) {
 		altcp_close(pcb);
 		return NULL;
 	}
-	altcp_arg(l, arg);
-	altcp_accept(l, on_accept);
+	altcp_accept(l, accept);
 	return l;
 }
 
 
 void httpd_init(void)
 {
-	listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_ANY), 80, NULL);
+	listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_ANY), 80, on_accept, CONNS);
 }
 
 
@@ -1017,7 +1175,8 @@ void httpd_init(void)
 bool httpd_tls_start(struct altcp_tls_config *conf)
 {
 	httpd_tls_stop();
-	listen_tls = listen_on(altcp_tls_new(conf, IPADDR_TYPE_ANY), 443, (void *)1);
+	tls_conf = conf;
+	listen_tls = listen_on(altcp_tcp_new_ip_type(IPADDR_TYPE_ANY), 443, on_accept_tls, TLS_WAITING);
 	return listen_tls != NULL;
 }
 
@@ -1026,26 +1185,20 @@ bool httpd_tls_start(struct altcp_tls_config *conf)
 void httpd_tls_stop(void)
 {
 	if (listen_tls) {
-		/* altcp_tls's close clears the inner pcb's callbacks, and tcp_poll()
-		 * asserts on a listening pcb; altcp_tcp's close reads a poll field
-		 * that a listening pcb doesn't have. Close the TCP listener
-		 * underneath with tcp_close() instead, then the empty wrappers. */
-		struct altcp_pcb *inner = listen_tls->inner_conn;
+		/* altcp_tcp's close reads a poll field that a listening pcb doesn't
+		 * have: close the TCP listener underneath, then the empty wrapper */
+		struct tcp_pcb *tl = listen_tls->state;
 
-		listen_tls->inner_conn = NULL;
-		if (inner) {
-			struct tcp_pcb *tl = inner->state;
-
-			inner->state = NULL;
-			if (tl) {
-				tcp_arg(tl, NULL);
-				tcp_close(tl);
-			}
-			altcp_close(inner);
+		listen_tls->state = NULL;
+		if (tl) {
+			tcp_arg(tl, NULL);
+			tcp_close(tl);
 		}
 		altcp_close(listen_tls);
 		listen_tls = NULL;
 	}
+	for (int i = 0; i < TLS_WAITING; i++)
+		waiting_abort(&waiting[i]);
 	for (int i = 0; i < CONNS; i++) {
 		struct conn *c = &conns[i];
 		if (c->state == ST_FREE || !c->tls)
@@ -1061,6 +1214,9 @@ void httpd_tls_stop(void)
 
 void httpd_second(void)
 {
+	for (int i = 0; i < TLS_WAITING; i++)
+		if (waiting[i].pcb && ++waiting[i].s > TLS_WAIT_S)
+			waiting_abort(&waiting[i]);
 	for (int i = 0; i < CONNS; i++) {
 		struct conn *c = &conns[i];
 		if (c->state == ST_FREE)

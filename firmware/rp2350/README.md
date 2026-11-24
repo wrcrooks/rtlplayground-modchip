@@ -259,11 +259,14 @@ browser shows, the first time.
 **Protocol.** TLS 1.3 and 1.2 with ECDHE over X25519 or P-256, and AES-128-GCM, ChaCha20-Poly1305 or
 AES-256-GCM.
 
-**Memory.** Two TLS connections at a time, about 25 KB each (16 KiB in, 4 KiB out, plus state).
+**Memory.** Two TLS connections at a time, about 25 KB each (16 KiB in, 4 KiB out, plus state), or one
+when other features leave less. Six more wait for their turn, 20 s at most: browsers open several at
+once. MQTT and RADIUS over TLS take as much each. An SSH connection is refused when less than 32 KB is
+free. Out of memory ends the connection that asked for it, never the firmware.
 
 **Session resumption.** The server keeps 8 TLS 1.2 sessions for an hour, and gives out tickets for
 TLS 1.3. A browser polling the
-dashboard resumes them instead of repeating the key exchange. A third waits for one to close.
+dashboard resumes them instead of repeating the key exchange.
 
 ## Graphs
 

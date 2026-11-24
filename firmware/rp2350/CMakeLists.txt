@@ -177,6 +177,8 @@ add_executable(modchip
 target_include_directories(modchip PRIVATE src ${RTLP}/modchip/bridge ${GEN})
 add_dependencies(modchip modchip_version)
 target_compile_definitions(modchip PRIVATE MODCHIP_LINK_BAUD=976562
+    # out of memory is an error for whoever asked, not a panic and a restart
+    PICO_MALLOC_PANIC=0
     # a version in the IMAGE_DEF, for sign_update.py to set
     PICO_CRT0_VERSION_MAJOR=1
     MODCHIP_UPDATE_BOARD="${MODCHIP_UPDATE_BOARD}")

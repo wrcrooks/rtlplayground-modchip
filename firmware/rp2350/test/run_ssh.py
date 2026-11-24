@@ -51,6 +51,12 @@ def main():
             run(ssh, base, env, fp, proc, d)
         finally:
             proc.kill()
+        proc = subprocess.Popen([sys.argv[1], str(PORT)], stdout=subprocess.DEVNULL, env=dict(os.environ, HEAP_FREE="20000"))
+        time.sleep(1.5)
+        try:
+            check(ssh(["echo", "x"]).returncode == 255 and proc.poll() is None, "short of memory: no new connections")
+        finally:
+            proc.kill()
     print("FAILED" if failures else "all passed")
     return 1 if failures else 0
 

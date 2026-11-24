@@ -45,6 +45,8 @@ static uint8_t flash[FLASH_SIZE];
 
 bool bridge_is_up(void) { return true; }
 uint32_t plat_uptime_s(void) { return time(NULL); }
+static uint32_t heap_free = 200000;
+uint32_t plat_heap_free(void) { return heap_free; }
 uint32_t plat_random32(void) { return rand(); }
 void plat_reboot(void) { reboots++; }
 static uint8_t config[PLAT_CONFIG_LEN];
@@ -233,6 +235,8 @@ mbedtls_ms_time_t mbedtls_ms_time(void)
 
 bool tls_identity(struct tls_identity *id) { return false; }
 static bool tls_c_gone;
+static int tls_gone;
+static void tls_more_err(void *arg, err_t err) { tls_gone++; }
 static void tls_c_err(void *arg, err_t err)
 {
 	(void)arg;
@@ -517,16 +521,33 @@ int main(int argc, char **argv)
 		struct tcp_pcb *c = NULL;
 		if (round) {
 			ip_addr_t lo;
+			struct tcp_pcb *more[5];
 			IP_ADDR4(&lo, 127, 0, 0, 1);
 			c = tcp_new();
 			tcp_err(c, tls_c_err);
 			tcp_connect(c, &lo, 443, NULL);
+			heap_free = 20000;
 			for (int i = 0; i < 100; i++) {
 				netif_poll_all();
 				sys_check_timeouts();
 				httpd_poll();
 			}
-			check(c->state == ESTABLISHED, "  a client connects on 443");
+			check(c->state == ESTABLISHED && httpd_tls_waiting() == 1, "  a client connects on 443, and waits while memory is short");
+			heap_free = 200000;
+			httpd_poll();
+			check(httpd_tls_waiting() == 0, "  and no longer");
+			tls_gone = 0;
+			for (int i = 0; i < 5; i++) {
+				more[i] = tcp_new();
+				tcp_err(more[i], tls_more_err);
+				tcp_connect(more[i], &lo, 443, NULL);
+				for (int k = 0; k < 30; k++) {
+					netif_poll_all();
+					sys_check_timeouts();
+					httpd_poll();
+				}
+			}
+			check(httpd_tls_waiting() == 4 && tls_gone == 0, "  of five more one gets the other place, four wait");
 		}
 		httpd_tls_stop();
 		altcp_tls_free_config(conf);
@@ -539,7 +560,7 @@ int main(int argc, char **argv)
 		if (c && !tls_c_gone)
 			tcp_abort(c);
 		if (round)
-			check(tls_c_gone, "  and the client's connection is reset");
+			check(tls_c_gone && tls_gone == 5, "  and the client's connection is reset, like the waiting ones");
 	}
 	r = request((const uint8_t *)"GET /status.json HTTP/1.1\r\n\r\n", 29);
 	check(!strncmp(r, "HTTP/1.1 401", 12), "TLS: HTTP on port 80 still answers");

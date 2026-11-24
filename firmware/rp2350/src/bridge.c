@@ -16,7 +16,7 @@
 #define UART			UART_INSTANCE(MODCHIP_BRIDGE_UART)
 
 #define RX_RING_SIZE		16384	/* power of 2; 168 ms of line time */
-#define EVENT_SLOTS		24
+#define EVENT_RING		(20 * 1024)	/* 13 full-size frames, or several hundred short ones */
 
 #define TIMEOUT_MS		150	/* 100 ms, the protocol's figure, plus a full frame's transfer */
 #define TIMEOUT_SLOW_MS		500	/* 64 table entries, about 1.3 KB back; SerDes setup */
@@ -45,11 +45,9 @@ static bool hold;		/* "bridge hold": send nothing, only listen */
 static uint8_t tx_buf[LINK_ENC_MAX];
 static uint8_t seq;
 
-static struct {
-	uint16_t len;
-	uint8_t msg[LINK_MSG_MAX];
-} events[EVENT_SLOTS];
-static uint8_t ev_head, ev_tail, ev_count;
+/* Messages to dispatch: length (2 bytes), message, over and over */
+static uint8_t events[EVENT_RING];
+static uint32_t ev_head, ev_tail, ev_used;
 static uint8_t ev_cur[LINK_MSG_MAX];
 
 /* The reply being waited for */
@@ -176,7 +174,7 @@ void bridge_init(void)
 	rx_head = rx_tail = 0;
 	raw_n = 0;
 	link_rx_reset(&rx);
-	ev_head = ev_tail = ev_count = 0;
+	ev_head = ev_tail = ev_used = 0;
 	irq_set_exclusive_handler(UART_IRQ_NUM(UART), uart_isr);
 	irq_set_enabled(UART_IRQ_NUM(UART), true);
 	uart_set_irqs_enabled(UART, true, false);	/* RX and RX timeout */
@@ -220,16 +218,36 @@ bool bridge_is_up(void)
 }
 
 
+static void ev_put(const uint8_t *p, uint32_t n)
+{
+	for (uint32_t k; n; n -= k, p += k) {
+		k = EVENT_RING - ev_head < n ? EVENT_RING - ev_head : n;
+		memcpy(events + ev_head, p, k);
+		ev_head = (ev_head + k) % EVENT_RING;
+		ev_used += k;
+	}
+}
+
+
+static void ev_get(uint8_t *p, uint32_t n)
+{
+	for (uint32_t k; n; n -= k, p += k) {
+		k = EVENT_RING - ev_tail < n ? EVENT_RING - ev_tail : n;
+		memcpy(p, events + ev_tail, k);
+		ev_tail = (ev_tail + k) % EVENT_RING;
+		ev_used -= k;
+	}
+}
+
+
 static void queue_event(const uint8_t *msg, uint16_t len)
 {
-	if (ev_count == EVENT_SLOTS) {
+	if (EVENT_RING - ev_used < sizeof(len) + len) {
 		bridge_stats.events_dropped++;
 		return;
 	}
-	events[ev_head].len = len;
-	memcpy(events[ev_head].msg, msg, len);
-	ev_head = (ev_head + 1) % EVENT_SLOTS;
-	ev_count++;
+	ev_put((const uint8_t *)&len, sizeof(len));
+	ev_put(msg, len);
 }
 
 
@@ -473,16 +491,15 @@ void bridge_second(void)
 
 bool bridge_dispatch(void)
 {
-	bool any = ev_count != 0;
+	bool any = ev_used != 0;
 
 	bridge_service();
-	any |= ev_count != 0;
-	while (ev_count) {
-		uint16_t len = events[ev_tail].len;
+	any |= ev_used != 0;
+	while (ev_used) {
+		uint16_t len;
 
-		memcpy(ev_cur, events[ev_tail].msg, len);
-		ev_tail = (ev_tail + 1) % EVENT_SLOTS;
-		ev_count--;
+		ev_get((uint8_t *)&len, sizeof(len));
+		ev_get(ev_cur, len);
 
 		const uint8_t *p = ev_cur + 2;
 		uint16_t n = len - 2;

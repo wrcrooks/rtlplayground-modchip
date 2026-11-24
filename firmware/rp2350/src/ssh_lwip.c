@@ -14,6 +14,7 @@
 #include "store.h"
 
 #define CONNS		2
+#define HEAP_MIN	(32 * 1024)	/* the key exchange, and a command's output */
 #define OUT_MAX		6144
 
 struct sconn {
@@ -196,7 +197,7 @@ static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err)
 		return ERR_VAL;
 	for (i = 0; i < CONNS && conns[i]; i++)
 		;
-	c = i < CONNS ? calloc(1, sizeof(*c)) : NULL;
+	c = i < CONNS && plat_heap_free() >= HEAP_MIN ? calloc(1, sizeof(*c)) : NULL;
 	if (c)
 		c->s = ssh_new(c, ipaddr_ntoa(&pcb->remote_ip));
 	if (!c || !c->s) {

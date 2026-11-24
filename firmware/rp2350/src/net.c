@@ -78,6 +78,38 @@ const ip6_addr_t *net_ip6_gw(struct netif *nif, const ip6_addr_t *dest)
 }
 
 
+/*
+ * Make room for the static address. SLAAC takes the first free slot, so without
+ * a static address that slot may hold one of its: keep it, in another one.
+ */
+static void ip6_slot_free(void)
+{
+	u8_t st = netif_ip6_addr_state(&netif, IP6_STATIC);
+
+	if (!ip6_addr_isinvalid(st) && !netif_ip6_addr_isstatic(&netif, IP6_STATIC)) {
+		u32_t valid = netif_ip6_addr_valid_life(&netif, IP6_STATIC);
+		u32_t pref = netif_ip6_addr_pref_life(&netif, IP6_STATIC);
+
+		if (!ip6_addr_set_)
+			return;		/* nothing needs the slot */
+		for (s8_t i = IP6_STATIC + 1; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+			ip6_addr_t a;
+
+			if (!ip6_addr_isinvalid(netif_ip6_addr_state(&netif, i)))
+				continue;
+			a = *netif_ip6_addr(&netif, IP6_STATIC);
+			netif_ip6_addr_set_state(&netif, IP6_STATIC, IP6_ADDR_INVALID);
+			netif_ip6_addr_set(&netif, i, &a);
+			netif_ip6_addr_set_valid_life(&netif, i, valid);
+			netif_ip6_addr_set_pref_life(&netif, i, pref);
+			netif_ip6_addr_set_state(&netif, i, st);
+			return;
+		}
+	}
+	netif_ip6_addr_set_state(&netif, IP6_STATIC, IP6_ADDR_INVALID);
+}
+
+
 static void ip6_apply(void)
 {
 	rtl_ip6(ip6_on);
@@ -91,8 +123,8 @@ static void ip6_apply(void)
 	}
 	if (ip6_addr_isinvalid(netif_ip6_addr_state(&netif, 0)))
 		netif_create_ip6_linklocal_address(&netif, 1);
+	ip6_slot_free();
 	/* a static address has an infinite lifetime, which lwIP writes as 0 */
-	netif_ip6_addr_set_state(&netif, IP6_STATIC, IP6_ADDR_INVALID);
 	if (ip6_addr_set_) {
 		netif_ip6_addr_set(&netif, IP6_STATIC, &ip6_static);
 		netif_ip6_addr_set_valid_life(&netif, IP6_STATIC, IP6_ADDR_LIFE_STATIC);

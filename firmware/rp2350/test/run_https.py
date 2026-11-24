@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The web server over TLS, with OpenSSL's client: run_https.py <test_httpd_tls>"""
 
+import concurrent.futures
 import socket
 import ssl
 import subprocess
@@ -49,6 +50,9 @@ def main():
             check(got.startswith(b"HTTP/1.1 401") and reused, "  and again, resumed")
         ok = all(get(ctx)[0].startswith(b"HTTP/1.1 401") for _ in range(20))
         check(ok, "twenty connections")
+        with concurrent.futures.ThreadPoolExecutor(6) as ex:
+            ok = all(ex.map(lambda _: get(ctx)[0].startswith(b"HTTP/1.1 401"), range(30)))
+        check(ok, "thirty, six at a time")
         ctx.minimum_version = ssl.TLSVersion.TLSv1
         ctx.maximum_version = ssl.TLSVersion.TLSv1_1
         ctx.set_ciphers("ALL:@SECLEVEL=0")

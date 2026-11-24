@@ -106,16 +106,21 @@ uint32_t plat_ms(void)
 static uint16_t load_pm;
 static int16_t rp_temp;
 
+uint32_t plat_heap_free(void)
+{
+	extern char __HeapLimit;
+
+	return &__HeapLimit - (char *)sbrk(0) + mallinfo().fordblks;
+}
+
+
 void plat_sys_read(struct plat_sys *s)
 {
 	extern char end, __HeapLimit;
-	struct mallinfo mi = mallinfo();
-	uint32_t total = &__HeapLimit - &end;
-	uint32_t used = (char *)sbrk(0) - &end;
 
 	s->load_pm = load_pm;
-	s->heap_total = total;
-	s->heap_free = total - used + mi.fordblks;
+	s->heap_total = &__HeapLimit - &end;
+	s->heap_free = plat_heap_free();
 	s->temp = rp_temp;
 	s->watchdog_reset = watchdog_reset;
 }
