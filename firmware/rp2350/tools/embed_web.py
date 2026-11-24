@@ -217,11 +217,13 @@ DOT1X = """<script>
     postCmds(c).then(function(){$("x-secret").value="";built=false;load()}).catch(function(){});
   });
   var hk=tabHooks.l2,enter=hk&&hk.enter,leave=hk&&hk.leave;
+  function start(){built=false;load();clearInterval(timer);timer=setInterval(load,3000)}
   if(hk){
-    hk.enter=function(){if(enter)enter.apply(this,arguments);built=false;load();clearInterval(timer);timer=setInterval(load,3000)};
+    hk.enter=function(){if(enter)enter.apply(this,arguments);start()};
     hk.leave=function(){if(leave)leave.apply(this,arguments);clearInterval(timer)};
   }
   i18nApply();
+  if(curTab==="l2")start();
 })();
 </script>
 """
