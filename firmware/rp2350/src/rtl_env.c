@@ -15,6 +15,7 @@
 #include "rtl837x_regs.h"
 #include "rtl837x_flash.h"
 #include "rtl837x_leds.h"
+#include "rtl837x_l2sec.h"
 #include "machine.h"
 #include "dhcp.h"
 #include "syslog.h"
@@ -379,7 +380,48 @@ static bool tbl_read(uint32_t ctrl)
  */
 #define ISO_PORTS	CPU_PORT
 static uint32_t iso_cfg[ISO_PORTS];
-static uint16_t iso_known, iso_gated;
+static uint16_t iso_set, iso_gated;
+static bool iso_held;
+
+/*
+ * The learning limits, 0x5384 + 4 * port, likewise: a gated port learns nothing,
+ * or a device on it could take over an address known on another port. One in
+ * iso_learn may learn a single address, for MAC authentication to see a frame.
+ */
+static uint32_t lrn_cfg[ISO_PORTS];
+static uint16_t lrn_set, iso_learn;
+
+static int lrn_port(uint16_t reg)
+{
+	uint16_t off = reg - RTL837X_L2_LRN_PORT_CONSTRAINT;
+
+	return reg >= RTL837X_L2_LRN_PORT_CONSTRAINT && off < 4 * ISO_PORTS && !(off & 3) ? off >> 2 : -1;
+}
+
+
+/* What port_l2_setup() starts from, until the configuration says otherwise. Never
+ * read back: after a restart of ours alone, the registers hold an old gate. */
+static uint32_t iso_configured(uint8_t port)
+{
+	if ((iso_set >> port) & 1)
+		return iso_cfg[port];
+	return PMASK_CPU | (machine_detected.isRTL8373 ? PMASK_9 : PMASK_6);
+}
+
+
+static uint32_t lrn_configured(uint8_t port)
+{
+	return (lrn_set >> port) & 1 ? lrn_cfg[port] : L2_LEARN_UNLIMITED;
+}
+
+
+static uint32_t lrn_effective(uint8_t port)
+{
+	if ((iso_gated >> port) & 1)
+		return (iso_learn >> port) & 1;
+	return lrn_configured(port);
+}
+
 
 static int iso_port(uint16_t reg)
 {
@@ -393,29 +435,46 @@ static uint32_t iso_effective(uint8_t port)
 {
 	if ((iso_gated >> port) & 1)
 		return PMASK_CPU;
-	return iso_cfg[port] & ~(uint32_t)iso_gated;
+	return iso_configured(port) & ~(uint32_t)iso_gated;
 }
 
 
 static void reg_put(uint16_t reg, uint32_t v);
-static bool reg_get(uint16_t reg, uint32_t *v);
 
-/* From dot1x_plat.c: the ports to gate; from rtl_bridge_up(): none known yet */
-void rtl_iso_gate(uint16_t gated)
+static void iso_write(uint8_t port)
 {
-	iso_gated = gated;
-	for (uint8_t port = machine.min_port; port <= machine.max_port && port < ISO_PORTS; port++) {
-		if (!((iso_known >> port) & 1) && reg_get(RTL837X_PORT_ISOLATION_BASE + 4 * port, &iso_cfg[port]))
-			iso_known |= 1 << port;
-		if ((iso_known >> port) & 1)
-			reg_put(RTL837X_PORT_ISOLATION_BASE + 4 * port, iso_effective(port));
-	}
+	if (iso_held)
+		return;
+	reg_put(RTL837X_PORT_ISOLATION_BASE + 4 * port, iso_effective(port));
+	reg_put(RTL837X_L2_LRN_PORT_CONSTRAINT + 4 * port, lrn_effective(port));
 }
 
 
+/* From dot1x_plat.c: the ports to gate */
+void rtl_iso_gate(uint16_t gated, uint16_t learn)
+{
+	iso_gated = gated;
+	iso_learn = learn;
+	for (uint8_t port = machine.min_port; port <= machine.max_port && port < ISO_PORTS; port++)
+		iso_write(port);
+}
+
+
+/* From rtl_bridge_up(), around the config: nothing is configured, and nothing
+ * written until all of it has been read. A port closed before our restart would
+ * otherwise open between two of its lines. */
 void rtl_iso_reset(void)
 {
-	iso_known = 0;
+	iso_set = 0;
+	lrn_set = 0;
+	iso_held = true;
+}
+
+
+void rtl_iso_release(void)
+{
+	iso_held = false;
+	rtl_iso_gate(iso_gated, iso_learn);
 }
 
 
@@ -425,10 +484,14 @@ void reg_read(uint16_t reg_addr)
 	uint8_t r[4];
 	size_t n;
 	uint32_t v = 0;
-	int iso = iso_port(reg_addr);
+	int iso = iso_port(reg_addr), lrn = lrn_port(reg_addr);
 
-	if (iso >= 0 && ((iso_known >> iso) & 1)) {
-		sfr_put32(iso_cfg[iso]);
+	if (iso >= machine.min_port && iso <= machine.max_port) {
+		sfr_put32(iso_configured(iso));
+		return;
+	}
+	if (lrn >= machine.min_port && lrn <= machine.max_port) {
+		sfr_put32(lrn_configured(lrn));
 		return;
 	}
 
@@ -495,16 +558,10 @@ static void reg_put(uint16_t reg, uint32_t v)
 }
 
 
-static bool reg_get(uint16_t reg, uint32_t *v)
-{
-	return plat_t3_read(reg, v) || rtl_bridge_reg_read(reg, v);
-}
-
-
 void reg_write(uint16_t reg_addr)
 {
 	uint8_t p[6] = { reg_addr, reg_addr >> 8, SFR_DATA_0, SFR_DATA_8, SFR_DATA_16, SFR_DATA_24 };
-	int iso = iso_port(reg_addr);
+	int iso = iso_port(reg_addr), lrn = lrn_port(reg_addr);
 
 	if (reg_addr == RTL837X_REG_SEC_COUNTER)
 		return;
@@ -513,8 +570,16 @@ void reg_write(uint16_t reg_addr)
 		return;
 	if (iso >= 0) {
 		iso_cfg[iso] = get32(p + 2);
-		iso_known |= 1 << iso;
-		reg_put(reg_addr, iso_effective(iso));
+		iso_set |= 1 << iso;
+		if (!iso_held)
+			reg_put(reg_addr, iso_effective(iso));
+		return;
+	}
+	if (lrn >= 0) {
+		lrn_cfg[lrn] = get32(p + 2);
+		lrn_set |= 1 << lrn;
+		if (!iso_held)
+			reg_put(reg_addr, lrn_effective(lrn));
 		return;
 	}
 	reg_put(reg_addr, get32(p + 2));

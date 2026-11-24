@@ -14,6 +14,7 @@
 #include "machine.h"
 #include "rtl8238.h"
 #include "bridge.h"
+#include "dot1x.h"
 #include "plat.h"
 #include "rtl837x_acl.h"
 
@@ -119,8 +120,14 @@ static void put32(uint8_t *p, uint32_t v)
 }
 
 /* A register write as the chip takes it, whichever path it came by */
+static uint16_t watch_iso, watch_lrn, watch_peer;	/* a closed port's registers, and another port's mask */
+static uint32_t watch_bit;
+static int watch_opened;
+
 static void sim_reg_write(uint16_t a, uint32_t v)
 {
+	if (watch_iso && ((a == watch_iso && v != 0x200) || (a == watch_lrn && v) || (a == watch_peer && (v & watch_bit))))
+		watch_opened++;
 	regs[a] = v;
 	if (a == 0x5cac)
 		tbl_ctrl(regs[a]);
@@ -322,6 +329,7 @@ bool bridge_is_up(void) { return true; }
 
 extern uint8_t sfr_data[4];
 void port_isolate(uint8_t port, uint16_t pmask);
+void rtl_iso_gate(uint16_t gated, uint16_t learn);
 
 /* dot1x_udp.c's RADIUS socket: the requests, kept */
 static int radius_requests;
@@ -785,6 +793,8 @@ int main(void)
 		port_isolate(l1, 0x3f8);
 		port_isolate(l2, 0x3f8);
 		uint32_t iso1 = regs[0x50c0 + 4 * l1], iso2 = regs[0x50c0 + 4 * l2];
+		uint16_t lrn1 = 0x5384 + 4 * l1, lrn2 = 0x5384 + 4 * l2;
+		cmd("l2 limit 2 7");
 		cmd("dot1x radius 10.1.2.50");
 		cmd("dot1x secret testing123");
 		cmd("dot1x port 2 auto");
@@ -799,6 +809,32 @@ int main(void)
 		reg_read_m(0x50c0 + 4 * l2);
 		check(((uint32_t)sfr_data[0] << 24 | sfr_data[1] << 16 | sfr_data[2] << 8 | sfr_data[3]) == iso2,
 		      "and reads give the configured mask, not the gate");
+		check(regs[lrn2] == 0 && regs[lrn1] == 0x1040, "port 2 learns no addresses, port 1 as before (%x, %x)",
+		      regs[lrn2], regs[lrn1]);
+		reg_read_m(lrn2);
+		check(sfr_data[2] == 0 && sfr_data[3] == 7, "  and reads give the configured limit");
+		cmd("l2 limit 2 9");
+		check(regs[lrn2] == 0, "  which a new l2 limit doesn't lift");
+		cmd("dot1x port 2 mab on");
+		check(regs[lrn2] == 1, "with MAB it may learn one, for its MAC to be seen (%x)", regs[lrn2]);
+
+		/* an address learned on it, on a sticky port: not made static while it is closed */
+		for (int open = 0; open < 2; open++) {
+			if (open)
+				cmd("dot1x port 2 force-auth");
+			cmd("l2 sticky 2 on");
+			regs[0x5ccc] = 0x00000077;
+			regs[0x5cd0] = 0x20010200 | (uint32_t)(l2 & 3) << 30;
+			regs[0x5cd4] = l2 >> 2;
+			ticks_run(200);
+			cmd("l2 sticky 2 off");
+			regs[0x5ccc] = regs[0x5cd0] = regs[0x5cd4] = 0;
+			rtl_http_get("/cmd_log");
+			outbuf[slen] = 0;
+			bool pinned = strstr((char *)outbuf, "l2 static 02:00:00:00:00:77 1 2") != NULL;
+			check(pinned == open, open ? "  and is once it opens" : "l2 sticky leaves a closed port's address alone");
+		}
+		cmd("dot1x port 2 auto");
 
 		/* the port's link comes up: a Request/Identity goes out to it, CPU-tagged */
 		uint8_t lk[12] = { 0 };
@@ -824,6 +860,7 @@ int main(void)
 		check(rtl_rx_frame(f, sizeof(f), &vl) == 0 && radius_requests == r0 + 1 && radius_last[0] == 1,
 		      "EAP Response/Identity: an Access-Request to the server");
 		check(memmem(radius_last, radius_last_len, "alice", 5) != NULL, "  with the user name");
+		check(regs[lrn2] == 0, "  and its MAC known, it learns no more (%x)", regs[lrn2]);
 		/* anything else from the gated port is dropped, its MAC noted */
 		uint8_t g[64];
 		memcpy(g, "\xff\xff\xff\xff\xff\xff\x02\x00\x00\x00\x00\x22\x88\x99\x04\x00\x00\x00\x00", 19);
@@ -834,7 +871,11 @@ int main(void)
 		check(strstr((char *)outbuf, "\"state\":\"authenticating\"") && strstr((char *)outbuf, "\"user\":\"alice\""),
 		      "/dot1x.json: port 2 authenticating, user alice");
 
+		cmd("dot1x port 2 mab off");
 		cmd("dot1x off");
+		check(regs[lrn2] == 9 && regs[lrn1] == 0x1040, "dot1x off: the learning limits back as configured (%x, %x)",
+		      regs[lrn2], regs[lrn1]);
+		cmd("l2 limit 2 off");
 		check(regs[0x50c0 + 4 * l2] == iso2 && regs[0x50c0 + 4 * l1] == iso1 && (regs[0x4ed8] & 0x30) == 0,
 		      "dot1x off: isolation back as configured, EAPOL forwarded");
 		rtl_http_get("/cmd_log");
@@ -891,6 +932,50 @@ int main(void)
 	/* Config writes through the flash API land in our sector */
 	cmd("passwd secret");
 	check(rtl_password_ok("secret"), "passwd changes the password");
+
+	/* The RP2350 alone restarts while 802.1X has port 2 closed: the registers hold the
+	 * gate. It comes up with nothing but the saved config */
+	{
+		uint8_t l1 = machine.phys_to_log_port[0], l2 = machine.phys_to_log_port[1], l3 = machine.phys_to_log_port[2];
+		uint32_t all = 0x3f8, others = all & ~(1u << l2);
+		static const char saved[] = "ip 192.168.10.247\nisolate 3 1 0\nl2 limit 2 9\ndot1x radius 10.1.2.50\n"
+			"dot1x secret testing123\ndot1x port 2 auto\ndot1x on\n";
+
+		for (int boot = 0; boot < 2; boot++) {
+			memset(&dot1x_cfg, 0, sizeof(dot1x_cfg));
+			dot1x_cfg.radius_port = 1812;
+			rtl_iso_gate(0, 0);
+			memset(config, 0xff, sizeof(config));
+			memcpy(config, saved, boot ? strstr(saved, "dot1x on") - saved : (long)sizeof(saved));
+			if (boot)
+				config[strstr(saved, "dot1x on") - saved] = 0;
+			for (uint8_t i = machine.min_port; i <= machine.max_port; i++) {
+				regs[0x50c0 + 4 * i] = others;
+				regs[0x5384 + 4 * i] = 0x1040;
+			}
+			regs[0x50c0 + 4 * l2] = 0x200;
+			regs[0x5384 + 4 * l2] = 0;
+			regs[0x50c0 + 4 * l3] = 0x200 | 1u << l1;
+			watch_iso = 0x50c0 + 4 * l2;
+			watch_lrn = 0x5384 + 4 * l2;
+			watch_peer = 0x50c0 + 4 * l1;
+			watch_bit = 1u << l2;
+			watch_opened = 0;
+			rtl_bridge_up();
+			watch_iso = 0;
+			if (!boot) {
+				check(regs[0x50c0 + 4 * l2] == 0x200 && regs[0x50c0 + 4 * l1] == others && regs[0x5384 + 4 * l2] == 0,
+				      "RP2350 restart: the closed port is closed still (%x, %x, %x)", regs[0x50c0 + 4 * l2],
+				      regs[0x50c0 + 4 * l1], regs[0x5384 + 4 * l2]);
+				check(!watch_opened, "  and never opened while the config was replayed (%d writes)", watch_opened);
+				cmd("dot1x port 2 force-auth");
+			}
+			check(regs[0x50c0 + 4 * l2] == all && regs[0x50c0 + 4 * l1] == all && regs[0x5384 + 4 * l2] == 9
+			      && regs[0x50c0 + 4 * l3] == (0x200 | 1u << l1),
+			      "%s: masks and limit as configured (%x, %x, %x, %x)", boot ? "restart into a config without dot1x on" : "  opened",
+			      regs[0x50c0 + 4 * l2], regs[0x50c0 + 4 * l1], regs[0x5384 + 4 * l2], regs[0x50c0 + 4 * l3]);
+		}
+	}
 
 	printf("REQUESTS %u\n", requests);
 	printf("CONSOLE %zu\n", console_len);

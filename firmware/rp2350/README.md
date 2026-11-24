@@ -334,7 +334,13 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
   closed port forwards to the CPU port only, and no other port forwards to it. `rtl_env.c` keeps the
   isolation masks the configuration (`isolate`, STP) wrote, and lays the gate over them, so reads
   still return the configured masks. The firmware also drops every other frame from a closed port,
-  and flushes the port's learned addresses when it closes.
+  and flushes the port's learned addresses when it closes. After a restart the masks start from the
+  boot defaults and the saved config, and reach the switch only once all of it has been read: a port
+  closed before the RP2350 restarted stays closed, and opens to its configured mask.
+- **A closed port learns no addresses**, so a device on it can't take over another's entry in the MAC
+  table. `rtl_env.c` holds its learning limit (`l2 limit`, which applies once the port opens) at 0.
+  With `mab on` the limit is 1 until a frame has shown the device's MAC, as the switch drops what it
+  may not learn; `l2 sticky` leaves closed ports alone.
 - **EAPOL reaches the RP2350** through the reserved-multicast trap for 01:80:C2:00:00:03 (RMA03,
   register 0x4ed8, by analogy with RTL8367C's register order). The trap is set while 802.1X is on.
   Replies go out CPU-tagged to the one port.

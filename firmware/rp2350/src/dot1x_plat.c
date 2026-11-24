@@ -39,8 +39,8 @@ extern __code const struct machine machine;
 
 static uint8_t frame[1600];
 
-/* rtl_env.c: lay the gate over the configured isolation masks */
-void rtl_iso_gate(uint16_t gated);
+/* rtl_env.c: lay the gate over the configured isolation masks and learning limits */
+void rtl_iso_gate(uint16_t gated, uint16_t learn);
 const uint8_t *rtl_mac(void);
 
 
@@ -88,18 +88,19 @@ void dot1x_hw_eapol_tx(uint8_t port, const uint8_t *pdu, uint16_t len)
 }
 
 
-void dot1x_hw_gate(uint16_t blocked, bool on)
+void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on)
 {
-	static uint16_t was;
-	uint16_t newly = blocked & ~was;
+	static uint16_t was, was_learn;
+	uint16_t flush = blocked & (~was | (was_learn & ~learn));
 
 	trap_rma_set(RMA03_CONF, on ? RTL837X_RMA_ACT_TRAP : RTL837X_RMA_ACT_FORWARD);
-	rtl_iso_gate(blocked);
+	rtl_iso_gate(blocked, learn);
 	/* a closed port's learned addresses would still draw unicast to it */
 	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
-		if ((newly >> port) & 1)
+		if ((flush >> port) & 1)
 			port_l2_forget_port(port);
 	was = blocked;
+	was_learn = learn;
 }
 
 

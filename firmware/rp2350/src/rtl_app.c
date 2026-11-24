@@ -35,6 +35,7 @@
 #include "rtl837x_acl.h"
 
 void rtl_iso_reset(void);	/* rtl_env.c */
+void rtl_iso_release(void);
 
 #include "bridge.h"
 #include "plat.h"
@@ -140,8 +141,8 @@ void rtl_bridge_up(void)
 	management_vlan = 1;
 	hostname[0] = NUL;
 
-	/* The 8051 started over: port isolation is at its defaults, every port
-	 * re-authenticates, and the config's dot1x lines set it up again */
+	/* The 8051 started over, or we did: port isolation is as the config says,
+	 * every port re-authenticates, and the config's dot1x lines set it up again */
 	rtl_iso_reset();
 	dot1x_plat_bridge_up();
 	acl_reset();
@@ -159,6 +160,7 @@ void rtl_bridge_up(void)
 		pse_read_ports();
 	execute_config();
 	dot1x_apply();
+	rtl_iso_release();
 	port_l2_static_mgmt(uip_ethaddr.addr, management_vlan, false);
 	hostname_default();
 
@@ -191,8 +193,13 @@ void rtl_tick(void)
 	lldp_tick();
 	/* Each entry the sticky walk looks at is several register accesses over
 	 * the bridge or T3: ten walks a second, not one per tick */
-	if (!(ticks % (SYS_TICK_HZ / 10)))
+	if (!(ticks % (SYS_TICK_HZ / 10))) {
+		/* not what a closed port learned for MAC authentication */
+		uint16_t sticky = l2_sticky_pmask;
+		l2_sticky_pmask &= ~dot1x_blocked();
 		l2_sticky_tick();
+		l2_sticky_pmask = sticky;
+	}
 	cabletest_tick();
 }
 

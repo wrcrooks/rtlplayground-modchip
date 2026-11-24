@@ -17,7 +17,7 @@ static int failures, checks;
 
 /* ---- the platform ---- */
 static const uint8_t sw_mac[6] = { 0x06, 0x0f, 0x00, 0xdd, 0x3b, 0x3e };
-static uint16_t gate_mask = 0xffff;
+static uint16_t gate_mask = 0xffff, gate_learn;
 static bool gate_on;
 static int gate_calls;
 static unsigned rnd = 1;
@@ -30,7 +30,7 @@ void dot1x_hw_random(uint8_t *p, uint8_t n) { while (n--) *p++ = (rnd = rnd * 11
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 192; ip[1] = 168; ip[2] = 10; ip[3] = 247; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }
 void dot1x_hw_log(const char *msg, uint8_t port) { printf("      log: %s %u\n", msg, port); }
-void dot1x_hw_gate(uint16_t blocked, bool on) { gate_mask = blocked; gate_on = on; gate_calls++; }
+void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on) { gate_mask = blocked; gate_learn = learn; gate_on = on; gate_calls++; }
 
 /* Messages in flight: to the supplicant on a port, and to the server */
 #define QN 64
@@ -356,11 +356,14 @@ int main(void)
 	uint8_t logoff[4] = { 2, 2, 0, 0 };
 	dot1x_eapol_rx(5, supp[5].mac, logoff, 4);
 	check(!open_(5) && st(5) == DOT1X_S_CONNECTING, "EAPOL-Logoff closes the port");
+	check(!(gate_learn >> 5 & 1), "and a port without MAB learns nothing: %03x", gate_learn);
 
 	/* MAB on port 6: a device without a supplicant */
 	dot1x_link(6, true);
 	uint8_t dev[6] = { 0x02, 0, 0, 0, 0, 0x03 };
+	check(gate_learn == 1 << 6, "a closed MAB port may learn one address, the others none: %03x", gate_learn);
 	dot1x_seen(6, dev);
+	check(!gate_learn, "with the device's address known it learns no more: %03x", gate_learn);
 	seconds(DOT1X_TX_PERIOD * DOT1X_MAB_AFTER);
 	check(srv_mab_ok == 0 && st(6) == DOT1X_S_CONNECTING, "no MAB before %d unanswered requests", DOT1X_MAB_AFTER);
 	seconds(2);

@@ -92,8 +92,9 @@ bool dot1x_hw_link(uint8_t port);
 /* An EAPOL PDU to the supplicant on port */
 void dot1x_hw_eapol_tx(uint8_t port, const uint8_t *pdu, uint16_t len);
 void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len);
-/* Fence off the ports in blocked; on: trap EAPOL to the CPU */
-void dot1x_hw_gate(uint16_t blocked, bool on);
+/* Fence off the ports in blocked, which learn no addresses but for one on those
+ * in learn; on: trap EAPOL to the CPU */
+void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on);
 void dot1x_hw_random(uint8_t *p, uint8_t n);
 void dot1x_hw_nas_ip(uint8_t ip[4]);
 const uint8_t *dot1x_hw_mac(void);

@@ -81,7 +81,7 @@ struct port {
 
 static struct port ports[DOT1X_PORTS];
 static uint8_t next_rad_id;
-static uint16_t gated;
+static uint16_t gated, gate_learn;
 static bool gate_on, gate_known;
 static uint8_t eap_buf[EAP_MAX + 4];
 
@@ -149,13 +149,27 @@ static bool controlled(uint8_t port)
 static void gate(void)
 {
 	uint16_t b = dot1x_blocked();
+	uint16_t learn = 0;
 
-	if (gate_known && b == gated && gate_on == dot1x_cfg.enabled)
+	/* The switch drops what it may not learn, and MAB needs one frame */
+	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
+		if (((b >> port) & 1) && controlled(port) && dot1x_cfg.mab[port] && !ports[port].s.mac_valid)
+			learn |= 1 << port;
+	if (gate_known && b == gated && learn == gate_learn && gate_on == dot1x_cfg.enabled)
 		return;
 	gated = b;
+	gate_learn = learn;
 	gate_on = dot1x_cfg.enabled;
 	gate_known = true;
-	dot1x_hw_gate(b, gate_on);
+	dot1x_hw_gate(b, learn, gate_on);
+}
+
+
+static void note_mac(uint8_t port, const uint8_t *src)
+{
+	memcpy(ports[port].s.mac, src, 6);
+	ports[port].s.mac_valid = true;
+	gate();
 }
 
 
@@ -519,8 +533,7 @@ void dot1x_eapol_rx(uint8_t port, const uint8_t *src, const uint8_t *pdu, uint16
 
 	switch (pdu[1]) {
 	case EAPOL_START:
-		memcpy(p->s.mac, src, 6);
-		p->s.mac_valid = true;
+		note_mac(port, src);
 		connecting(port, true);
 		return;
 	case EAPOL_LOGOFF:
@@ -546,8 +559,7 @@ void dot1x_eapol_rx(uint8_t port, const uint8_t *src, const uint8_t *pdu, uint16
 		uint16_t n = elen - 5 < DOT1X_IDENTITY_MAX - 1 ? elen - 5 : DOT1X_IDENTITY_MAX - 1;
 		memcpy(p->s.identity, e + 5, n);
 		p->s.identity[n] = 0;
-		memcpy(p->s.mac, src, 6);
-		p->s.mac_valid = true;
+		note_mac(port, src);
 		p->method = DOT1X_M_EAP;
 		p->s.state = DOT1X_S_AUTHENTICATING;
 		p->state_len = 0;
@@ -568,10 +580,8 @@ void dot1x_seen(uint8_t port, const uint8_t *src)
 	if (!port_ok(port) || !controlled(port) || (src[0] & 1))
 		return;
 	p = &ports[port];
-	if (p->s.state == DOT1X_S_CONNECTING && !p->s.mac_valid) {
-		memcpy(p->s.mac, src, 6);
-		p->s.mac_valid = true;
-	}
+	if (p->s.state == DOT1X_S_CONNECTING && !p->s.mac_valid)
+		note_mac(port, src);
 }
 
 
