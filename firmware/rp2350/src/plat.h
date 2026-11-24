@@ -46,6 +46,14 @@ void plat_https_status(char *fingerprint, size_t len);
 
 /* The SNMP agent's settings (snmp.c); set() with NULL clears, false: too long */
 enum { PLAT_SNMP_ENABLED, PLAT_SNMP_COMMUNITY, PLAT_SNMP_LOCATION, PLAT_SNMP_CONTACT };
+/* SNMPv1 and v2c, by community */
+void plat_snmp_v2c(bool on);
+/* An SNMPv3 user; priv NULL: authentication only, auth NULL: remove it */
+bool plat_snmp_user(const char *name, bool sha256, const char *auth, const char *priv);
+/* Notifications to ip, under an SNMPv3 user or (NULL) the community; on false: no longer */
+bool plat_snmp_trap(const uint8_t ip[4], const char *user, bool on);
+/* Versions, users and notifications in words, a line each */
+size_t plat_snmp_status(char *buf, size_t max);
 bool plat_snmp_set(int what, const char *value);
 const char *plat_snmp_get(int what);	/* ENABLED: non-NULL when on */
 

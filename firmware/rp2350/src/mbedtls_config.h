@@ -24,11 +24,13 @@
 
 /* Hashes and ciphers */
 #define MBEDTLS_MD_C
+#define MBEDTLS_SHA1_C		/* SNMPv3 only */
 #define MBEDTLS_SHA224_C
 #define MBEDTLS_SHA256_C
 #define MBEDTLS_SHA384_C
 #define MBEDTLS_SHA512_C
 #define MBEDTLS_AES_C
+#define MBEDTLS_CIPHER_MODE_CFB	/* SNMPv3 */
 #define MBEDTLS_GCM_C
 #define MBEDTLS_CHACHA20_C
 #define MBEDTLS_POLY1305_C

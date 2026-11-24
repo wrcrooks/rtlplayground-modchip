@@ -8,6 +8,7 @@
 #include "lwip/udp.h"
 
 #include "snmp_modchip.h"
+#include "usm.h"
 
 /* lwIP's SNMP core, from snmp_msg.h and snmp_traps.c */
 void snmp_receive(void *handle, struct pbuf *p, const ip_addr_t *source_ip, u16_t port);
@@ -17,14 +18,30 @@ static struct udp_pcb *pcb;
 
 static void snmp_recv(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
+	static uint8_t in[USM_MSG_MAX], out[USM_MSG_MAX];
+	u16_t len = pbuf_copy_partial(p, in, sizeof(in), 0);
+	size_t n = p->tot_len > sizeof(in) ? 0 : snmp_message(in, len, out, sizeof(out));
+
 	(void)arg;
-	snmp_receive(upcb, p, addr, port);
+	if (n == SNMP_PASS) {
+		snmp_receive(upcb, p, addr, port);
+	} else if (n) {
+		struct pbuf *r = pbuf_alloc(PBUF_TRANSPORT, n, PBUF_RAM);
+
+		if (r) {
+			pbuf_take(r, out, n);
+			udp_sendto(upcb, r, addr, port);
+			pbuf_free(r);
+		}
+	}
 	pbuf_free(p);
 }
 
 
 err_t snmp_sendto(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port)
 {
+	if (snmp_captured(handle, p))
+		return ERR_OK;
 	return udp_sendto((struct udp_pcb *)handle, p, dst, port);
 }
 
@@ -76,4 +93,23 @@ void snmp_transport_close(void)
 bool snmp_transport_is_open(void)
 {
 	return pcb != NULL;
+}
+
+
+bool snmp_transport_trap(const uint8_t ip[4], const uint8_t *d, size_t n)
+{
+	ip_addr_t dst;
+	struct pbuf *p;
+	err_t e;
+
+	IP_ADDR4(&dst, ip[0], ip[1], ip[2], ip[3]);
+	if (!pcb || !netif_default || ip4_addr_isany(netif_ip4_addr(netif_default)))
+		return false;
+	p = pbuf_alloc(PBUF_TRANSPORT, n, PBUF_RAM);
+	if (!p)
+		return false;
+	pbuf_take(p, d, n);
+	e = udp_sendto(pcb, p, &dst, 162);
+	pbuf_free(p);
+	return e == ERR_OK;
 }

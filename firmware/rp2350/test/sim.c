@@ -380,6 +380,19 @@ bool plat_config_write(const uint8_t *src, uint32_t len)
 
 static bool https_on, snmp_on;
 static char snmp_comm[33] = "public";
+static char snmp_last[200];
+void plat_snmp_v2c(bool on) { sprintf(snmp_last, "v2c %d", on); }
+bool plat_snmp_user(const char *name, bool sha256, const char *auth, const char *priv)
+{
+	sprintf(snmp_last, "user %s %d %s %s", name, sha256, auth ? auth : "-", priv ? priv : "-");
+	return true;
+}
+bool plat_snmp_trap(const uint8_t ip[4], const char *user, bool on)
+{
+	sprintf(snmp_last, "trap %u.%u.%u.%u %s %d", ip[0], ip[1], ip[2], ip[3], user ? user : "-", on);
+	return true;
+}
+size_t plat_snmp_status(char *buf, size_t max) { return snprintf(buf, max, "status\n"); }
 static int newcerts;
 bool plat_https_enable(bool on) { https_on = on; return true; }
 bool plat_https_enabled(void) { return https_on; }
@@ -1095,6 +1108,21 @@ int main(void)
 		cmd("qos port 2 priority off");
 		rtl_second();
 		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		cmd("snmp user admin auth sha256 authpassword aes privpassword");
+		check(!strcmp(snmp_last, "user admin 1 authpassword privpassword"), "snmp user: %s", snmp_last);
+		cmd("snmp user ro auth sha authpassword");
+		check(!strcmp(snmp_last, "user ro 0 authpassword -"), "snmp user without aes");
+		cmd("snmp user ro off");
+		check(!strcmp(snmp_last, "user ro 0 - -"), "snmp user off");
+		cmd("snmp user ro auth md5 authpassword");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "no MD5");
+		cmd("snmp trap 10.0.0.9 admin");
+		check(!strcmp(snmp_last, "trap 10.0.0.9 admin 1"), "snmp trap");
+		cmd("snmp trap 10.0.0.9 off");
+		check(!strcmp(snmp_last, "trap 10.0.0.9 off 0"), "snmp trap off");
+		cmd("snmp v2c off");
+		check(!strcmp(snmp_last, "v2c 0"), "snmp v2c off");
+
 		/* 802.1X VLANs on the switch's tables */
 		cmd("vlan 20 3 4");
 		cmd("vlan 1 1 2 3");

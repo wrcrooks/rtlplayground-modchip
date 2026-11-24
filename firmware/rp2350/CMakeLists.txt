@@ -141,6 +141,7 @@ add_executable(modchip
     src/snmp.c
     src/snmp_mib.c
     src/snmp_udp.c
+    src/usm.c
     src/metrics.c
     src/dot1x.c
     src/dot1x_udp.c

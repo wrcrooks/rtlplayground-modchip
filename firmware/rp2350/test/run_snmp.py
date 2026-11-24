@@ -4,7 +4,10 @@ with net-snmp's snmpget, snmpwalk and snmpset.
 
   python3 run_snmp.py build/test_snmp
 """
+import hashlib
+import hmac
 import shutil
+import socket
 import subprocess
 import sys
 
@@ -21,7 +24,10 @@ def main():
     if not shutil.which("snmpget"):
         print("SKIP  test_snmp: net-snmp's snmpget isn't installed")
         return 0
-    agent = subprocess.Popen([sys.argv[1]], stdout=subprocess.PIPE, text=True)
+    traps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    traps.bind(("127.0.0.1", 0))
+    traps.settimeout(2)
+    agent = subprocess.Popen([sys.argv[1], str(traps.getsockname()[1])], stdout=subprocess.PIPE, text=True)
     try:
         line = agent.stdout.readline()
         port = int(line.split()[1])
@@ -78,6 +84,89 @@ def main():
         rc, out = snmp("snmpset", "1.3.6.1.2.1.1.5.0", "s", "renamed")
         rc2, out2 = snmp("snmpget", "1.3.6.1.2.1.1.5.0")
         check(rc != 0 and "sim-switch" in out2, "writes are refused")
+
+        # SNMPv3
+        status = agent.stdout.readline()
+        check("SNMPv3 user v3sha256: SHA-256, AES-128|" in status and "Engine ID 0x8000670d03060f00dd3b3e" in status,
+              "status: %s" % status.strip())
+        engine = bytes.fromhex("8000670d03060f00dd3b3e")
+
+        def v3(user, level, auth="SHA-256", ap="authpassword", xp="privpassword", tool="snmpget", args=("1.3.6.1.2.1.1.5.0",)):
+            cmd = [tool, "-v3", "-u", user, "-l", level, "-On", "-Oe", "-t", "1", "-r", "0"]
+            if level != "noAuthNoPriv":
+                cmd += ["-a", auth, "-A", ap]
+            if level == "authPriv":
+                cmd += ["-x", "AES", "-X", xp]
+            r = subprocess.run(cmd + [target] + list(args), capture_output=True, text=True, timeout=30)
+            return r.returncode, r.stdout + r.stderr
+
+        rc, out = v3("v3sha256", "authPriv")
+        check(rc == 0 and "sim-switch" in out, "SNMPv3 SHA-256, AES-128: %s" % out.strip()[:60])
+        rc, out = v3("v3sha", "authPriv", auth="SHA")
+        check(rc == 0 and "sim-switch" in out, "SNMPv3 SHA-1, AES-128")
+        rc, out = v3("v3auth", "authNoPriv")
+        check(rc == 0 and "sim-switch" in out, "SNMPv3 SHA-256, not encrypted")
+        rc, out = v3("v3sha256", "authPriv", tool="snmpbulkwalk", args=("1.3.6.1.2.1.2.2",))
+        check(rc == 0 and len(values(out)) == 6 * 21 + 0 or len(values(out)) >= 120, "SNMPv3 bulk walk: %d objects" % len(values(out)))
+        rc, out = v3("v3sha256", "authPriv", ap="wrongpassword")
+        check(rc != 0 and "uthentication failure" in out, "a wrong password: %s" % out.strip()[:50])
+        rc, out = v3("v3sha256", "authPriv", xp="wrongpassword")
+        check(rc != 0 and "sim-switch" not in out, "a wrong privacy password")
+        rc, out = v3("v3sha256", "authNoPriv")
+        check(rc != 0 and "sim-switch" not in out, "unencrypted, by a user who encrypts")
+        rc, out = v3("v3sha256", "noAuthNoPriv")
+        check(rc != 0 and "sim-switch" not in out, "unauthenticated")
+        rc, out = v3("nobody", "authPriv")
+        check(rc != 0 and "nknown user" in out, "an unknown user")
+        rc, out = v3("v3sha256", "authPriv", tool="snmpset", args=("1.3.6.1.2.1.1.5.0", "s", "renamed"))
+        rc2, out2 = v3("v3sha256", "authPriv")
+        check(rc != 0 and "sim-switch" in out2, "SNMPv3 writes are refused")
+
+        # notifications
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.sendto(b"EVENT", ("127.0.0.1", port))
+        got = []
+        try:
+            for _ in range(8):
+                got.append(traps.recv(2000))
+        except socket.timeout:
+            pass
+        v2 = [g for g in got if b"\x04\x03sim" in g]
+        v3t = [g for g in got if b"v3sha256" in g]
+        std = b"\x06\x09\x2b\x06\x01\x06\x03\x01\x01\x05"
+        check(len(v2) == 4 and len(v3t) == 4, "four notifications to each of two addresses (%d, %d)" % (len(v2), len(v3t)))
+        check(len(v2) == 4 and std + b"\x01" in v2[0] and std + b"\x03" in v2[1] and std + b"\x05" in v2[2]
+              and b"Port 4 error-disabled: link-flap" in v2[3], "coldStart, linkDown, authenticationFailure, error-disable")
+        check(len(v2) == 4 and b"\x06\x0a\x2b\x06\x01\x02\x01\x02\x02\x01\x08\x03\x02\x01\x02" in v2[1], "linkDown says ifOperStatus.3 = down")
+
+        def localized(pw):
+            d = hashlib.sha256((pw * (1048576 // len(pw) + 1)).encode()[:1048576]).digest()
+            return hashlib.sha256(d + engine + d).digest()
+        if v3t:
+            m = bytearray(v3t[1])
+            at = m.index(b"v3sha256") + 8
+            mac = bytes(m[at + 2:at + 26])
+            m[at + 2:at + 26] = bytes(24)
+            check(m[at:at + 2] == b"\x04\x18" and hmac.new(localized("authpassword"), bytes(m), hashlib.sha256).digest()[:24] == mac,
+                  "the v3 one is signed as RFC 7860 says")
+            try:
+                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                salt = bytes(m[at + 28:at + 36])
+                i = m.index(engine) + len(engine)
+                boots = int.from_bytes(m[i + 2:i + 2 + m[i + 1]], "big")
+                i += 2 + m[i + 1]
+                t = int.from_bytes(m[i + 2:i + 2 + m[i + 1]], "big")
+                i = at + 36 + (2 if m[at + 37] < 128 else 4)
+                iv = boots.to_bytes(4, "big") + t.to_bytes(4, "big") + salt
+                d = Cipher(algorithms.AES(localized("privpassword")[:16]), modes.CFB(iv)).decryptor()
+                clear = d.update(bytes(m[i:])) + d.finalize()
+                check(std + b"\x03" in clear and boots == 7, "and decrypts to a linkDown, engineBoots counted up")
+            except ImportError:
+                print("SKIP  decrypting it: no cryptography module")
+        s.sendto(b"V2COFF", ("127.0.0.1", port))
+        rc, out = snmp("snmpget", "1.3.6.1.2.1.1.5.0")
+        rc2, out2 = v3("v3sha256", "authPriv")
+        check(rc != 0 and rc2 == 0, "snmp v2c off: only v3 is answered")
     finally:
         agent.kill()
     print("FAILED" if failures else "all passed")

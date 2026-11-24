@@ -95,6 +95,9 @@ static bool parse_snmp(void)
 		print_string(", contact ");
 		print_string_x((char *)plat_snmp_get(PLAT_SNMP_CONTACT));
 		write_char('\n');
+		char st[600];
+		plat_snmp_status(st, sizeof(st));
+		print_string_x(st);
 	} else if (cmd_words_len == 2 && cmd_compare(1, "on")) {
 		plat_snmp_set(PLAT_SNMP_ENABLED, "1");
 	} else if (cmd_words_len == 2 && cmd_compare(1, "off")) {
@@ -108,8 +111,38 @@ static bool parse_snmp(void)
 	} else if (cmd_words_len >= 3 && cmd_compare(1, "contact")) {
 		if (!plat_snmp_set(PLAT_SNMP_CONTACT, ext_rest(2)))
 			ext_error("contact too long\n");
+	} else if (cmd_words_len == 3 && cmd_compare(1, "v2c") && (cmd_compare(2, "on") || cmd_compare(2, "off"))) {
+		plat_snmp_v2c(cmd_compare(2, "on"));
+	} else if (cmd_words_len == 4 && cmd_compare(1, "user") && cmd_compare(3, "off")) {
+		char name[33];
+
+		if (!ext_word(2, name, sizeof(name)) || !plat_snmp_user(name, false, NULL, NULL))
+			ext_error("no such user\n");
+	} else if ((cmd_words_len == 6 || (cmd_words_len == 8 && cmd_compare(6, "aes"))) && cmd_compare(1, "user")
+		   && cmd_compare(3, "auth") && (cmd_compare(4, "sha") || cmd_compare(4, "sha256"))) {
+		char name[33], auth[65], priv[65];
+
+		if (!ext_word(2, name, sizeof(name)) || !ext_word(5, auth, sizeof(auth))
+		    || (cmd_words_len == 8 && !ext_word(7, priv, sizeof(priv)))
+		    || !plat_snmp_user(name, cmd_compare(4, "sha256"), auth, cmd_words_len == 8 ? priv : NULL))
+			ext_error("passwords have 8 to 64 characters, and there can be 4 users\n");
+	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "trap")) {
+		uint8_t ip[4];
+		unsigned a[4];
+		char user[33];
+
+		if (!ext_ip(ext_rest(2), a) || (cmd_words_len == 4 && !ext_word(3, user, sizeof(user)))) {
+			ext_error("snmp trap <a.b.c.d> [<SNMPv3 user>|off]\n");
+			return true;
+		}
+		for (int k = 0; k < 4; k++)
+			ip[k] = a[k];
+		if (!plat_snmp_trap(ip, cmd_words_len == 4 ? user : NULL, cmd_words_len == 3 || !cmd_compare(3, "off")))
+			ext_error("traps go to at most two addresses\n");
 	} else {
-		ext_error("snmp [on|off|community <name>|location <text>|contact <text>]\n");
+		ext_error("snmp [on|off|community <name>|location <text>|contact <text>|v2c on|off|\n"
+			  "  user <name> auth sha|sha256 <password> [aes <password>]|user <name> off|\n"
+			  "  trap <a.b.c.d> [<user>|off]]\n");
 	}
 	return true;
 }

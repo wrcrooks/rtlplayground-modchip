@@ -19,6 +19,9 @@
 #include "bridge.h"
 #include "plat.h"
 #include "snmp_modchip.h"
+#include "events.h"
+#include "store.h"
+#include <stdlib.h>
 
 void snmp_receive(void *handle, struct pbuf *p, const ip_addr_t *source_ip, u16_t port);
 extern void *snmp_traps_handle;
@@ -92,7 +95,8 @@ bool snmp_transport_open(void)
 }
 
 void snmp_transport_close(void) { }
-bool snmp_transport_is_open(void) { return sock >= 0; }
+static bool sock_off;
+bool snmp_transport_is_open(void) { return sock >= 0 && !sock_off; }
 
 err_t snmp_sendto(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port)
 {
@@ -102,8 +106,23 @@ err_t snmp_sendto(void *handle, struct pbuf *p, const ip_addr_t *dst, u16_t port
 	(void)handle;
 	(void)dst;
 	(void)port;
+	if (snmp_captured(handle, p))
+		return ERR_OK;
 	sendto(sock, buf, n, 0, (struct sockaddr *)&peer, sizeof(peer));
 	return ERR_OK;
+}
+
+uint32_t plat_uptime_s(void) { return sys_now() / 1000; }
+uint32_t plat_random32(void) { return random(); }
+void plat_sector_read(int id, uint8_t *dst, uint32_t len) { memset(dst, 0xff, len); }
+bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { return true; }
+
+static int trap_port;
+bool snmp_transport_trap(const uint8_t ip[4], const uint8_t *d, size_t n)
+{
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK), .sin_port = htons(trap_port) };
+
+	return trap_port && sendto(sock, d, n, 0, (struct sockaddr *)&a, sizeof(a)) == (ssize_t)n;
 }
 
 u8_t snmp_get_local_ip_for_dst(void *handle, const ip_addr_t *dst, ip_addr_t *result)
@@ -114,7 +133,16 @@ u8_t snmp_get_local_ip_for_dst(void *handle, const ip_addr_t *dst, ip_addr_t *re
 	return 0;
 }
 
-int main(void)
+static void cold(void)
+{
+	plat_snmp_set(PLAT_SNMP_ENABLED, NULL);
+	sock_off = true;
+	plat_snmp_set(PLAT_SNMP_ENABLED, "1");
+	sock_off = false;
+	snmp_second();
+}
+
+int main(int argc, char **argv)
 {
 	static uint8_t buf[2048];
 	struct timeval tv = { .tv_sec = 30 };
@@ -126,6 +154,20 @@ int main(void)
 	if (!plat_snmp_set(PLAT_SNMP_ENABLED, "1"))
 		return 1;
 	snmp_second();
+	store_load();
+	store.snmp_boots = 6;
+	plat_snmp_user("v3sha", false, "authpassword", "privpassword");
+	plat_snmp_user("v3sha256", true, "authpassword", "privpassword");
+	plat_snmp_user("v3auth", true, "authpassword", NULL);
+	if (plat_snmp_user("short", true, "short", NULL))
+		return 1;
+	if (argc > 1) {
+		trap_port = atoi(argv[1]);
+		plat_snmp_trap((uint8_t *)"\x7f\0\0\x01", NULL, true);
+		plat_snmp_trap((uint8_t *)"\x7f\0\0\x02", "v3sha256", true);
+		plat_snmp_set(PLAT_SNMP_ENABLED, "1");
+	}
+	{ static char st[600]; plat_snmp_status(st, sizeof(st)); for (char *p = st; *p; p++) if (*p == '\n') *p = '|'; printf("STATUS %s\n", st); fflush(stdout); }
 	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	for (;;) {
 		socklen_t len = sizeof(peer);
@@ -136,7 +178,21 @@ int main(void)
 		ip_addr_t src;
 		pbuf_take(p, buf, n);
 		IP_ADDR4(&src, 127, 0, 0, 1);
-		snmp_receive(&sock, p, &src, ntohs(peer.sin_port));
+		static uint8_t out[2048];
+		size_t k = snmp_message(buf, n, out, sizeof(out));
+		if (k != SNMP_PASS && k)
+			sendto(sock, out, k, 0, (struct sockaddr *)&peer, sizeof(peer));
+		/* a datagram saying "EVENT" makes some */
+		if (n == 5 && !memcmp(buf, "EVENT", 5)) {
+			cold();
+			event(EV_LINK, 3, 0, "Port 3 link down");
+			event(EV_LOGIN_FAILED, 0, 0, "Web login failed from 10.0.0.9");
+			event(EV_ERRDISABLE, 4, 1, "Port 4 error-disabled: link-flap");
+		}
+		if (n == 6 && !memcmp(buf, "V2COFF", 6))
+			plat_snmp_v2c(false);
+		if (k == SNMP_PASS)
+			snmp_receive(&sock, p, &src, ntohs(peer.sin_port));
 		pbuf_free(p);
 	}
 }

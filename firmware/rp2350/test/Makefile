@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_usm $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -40,6 +40,7 @@ all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_m
 	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
 	$(BUILD)/test_tls
+	$(BUILD)/test_usm
 	python3 run_snmp.py $(BUILD)/test_snmp
 	$(BUILD)/test_httpd
 	$(BUILD)/test_httpd_tls
@@ -47,15 +48,27 @@ else
 	@echo "SKIP  test_tls, test_snmp, test_httpd: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
 endif
 
+# mbedTLS as the firmware configures it, plus what the tests need
+MBED_INC = -I. -I$(MBEDTLS)/include -I$(MBEDTLS)/library '-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"'
+$(BUILD)/libmbed.a: mbedtls_test_config.h ../src/mbedtls_config.h
+	@mkdir -p $(BUILD)/mbed
+	cd $(BUILD)/mbed && $(CC) -std=gnu11 -O2 -w -c -I../.. $(patsubst -I.,,$(MBED_INC)) $(wildcard $(MBEDTLS)/library/*.c)
+	rm -f $@ && ar rcs $@ $(BUILD)/mbed/*.o
+
+$(BUILD)/test_usm: test_usm.c ../src/usm.c ../src/usm.h $(BUILD)/libmbed.a
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -O2 -fsanitize=address,undefined $(MBED_INC) -o $@ test_usm.c $(BUILD)/libmbed.a
+
 SNMP_SRC = asn1 core mib2 mib2_icmp mib2_interfaces mib2_ip mib2_snmp mib2_system mib2_tcp mib2_udp \
 	msg pbuf_stream scalar table traps
 LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c \
 	$(patsubst %,$(LWIP)/src/apps/snmp/snmp_%.c,$(SNMP_SRC))
 
-$(BUILD)/test_snmp: test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
+$(BUILD)/test_snmp: test_snmp.c $(BUILD)/libmbed.a ../src/usm.c ../src/usm.h ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -Ilwip_host -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
-		'-DMODCHIP_VERSION="sim"' -o $@ test_snmp.c ../src/snmp.c ../src/snmp_mib.c $(LWIP_SRC)
+		$(MBED_INC) '-DMODCHIP_VERSION="sim"' -o $@ test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/usm.c ../src/events.c ../src/store.c \
+		$(LWIP_SRC) $(BUILD)/libmbed.a
 
 $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/plat.h ../src/bridge.h
 	@mkdir -p $(BUILD)
