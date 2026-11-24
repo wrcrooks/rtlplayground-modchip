@@ -27,6 +27,7 @@ void dot1x_hw_random(uint8_t *p, uint8_t n) { FILE *f = fopen("/dev/urandom", "r
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 127; ip[1] = 0; ip[2] = 0; ip[3] = 1; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }
 void dot1x_hw_log(const char *msg, uint8_t port) { printf("      log: %s %u\n", msg, port); }
+bool dot1x_hw_vlan(uint8_t port, uint16_t vlan) { (void)port; printf("VLAN %u\n", vlan); return true; }
 void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on) { (void)blocked; (void)learn; (void)on; }
 
 void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len)

@@ -30,6 +30,15 @@ void dot1x_hw_random(uint8_t *p, uint8_t n) { while (n--) *p++ = (rnd = rnd * 11
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 192; ip[1] = 168; ip[2] = 10; ip[3] = 247; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }
 void dot1x_hw_log(const char *msg, uint8_t port) { printf("      log: %s %u\n", msg, port); }
+static uint16_t vlan_of[10];
+static int vlan_while_open;	/* moved to or from a special VLAN with the port open */
+bool dot1x_hw_vlan(uint8_t port, uint16_t vlan)
+{
+	if (!(gate_mask >> port & 1) && vlan == 0 && vlan_of[port] >= 600)
+		vlan_while_open++;
+	vlan_of[port] = vlan == 999 ? 0 : vlan;
+	return vlan != 999;
+}
 void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on) { gate_mask = blocked; gate_learn = learn; gate_on = on; gate_calls++; }
 
 /* Messages in flight: to the supplicant on a port, and to the server */
@@ -121,6 +130,8 @@ static int srv_requests, srv_bad_ma, srv_mab_ok, srv_big;
 static uint8_t challenge[16];
 static uint32_t session_timeout;
 static bool srv_big_mode;
+static const char *srv_vlan;
+static int srv_vlan_tag = -1, srv_vlan_type = 13;
 static char last_calling[32];
 static uint32_t last_nas_port, last_service;
 
@@ -153,6 +164,15 @@ static void srv_reply(const uint8_t *req, uint8_t code, const uint8_t *eap, uint
 		r[n + 2] = session_timeout >> 24; r[n + 3] = session_timeout >> 16; r[n + 4] = session_timeout >> 8; r[n + 5] = session_timeout;
 		n += 6;
 		r[n] = 29; r[n + 1] = 6; r[n + 2] = 0; r[n + 3] = 0; r[n + 4] = 0; r[n + 5] = 1; n += 6;
+	}
+	if (srv_vlan && code == 2) {
+		uint8_t t = srv_vlan_tag >= 0 ? srv_vlan_tag : 0;
+		memcpy(r + n, (uint8_t[]){ 64, 6, t, 0, 0, srv_vlan_type, 65, 6, t, 0, 0, 6 }, 12); n += 12;
+		uint8_t k = 0;
+		r[n] = 81;
+		if (srv_vlan_tag >= 0) r[n + 2 + k++] = t;
+		memcpy(r + n + 2 + k, srv_vlan, strlen(srv_vlan));
+		r[n + 1] = 2 + k + strlen(srv_vlan); n += r[n + 1];
 	}
 	ma_at = n + 2;
 	r[n] = 80; r[n + 1] = 18; memset(r + n + 2, 0, 16); n += 18;
@@ -428,10 +448,99 @@ int main(void)
 	check(supp[7].id_requests == 1 && st(7) == DOT1X_S_AUTHENTICATED && open_(7),
 	      "auto on a port already up: asked at once, authorized");
 
+	/* Guest, auth-fail and RADIUS VLANs */
+	dot1x_link(4, false); dot1x_link(5, false); dot1x_link(6, false);
+	server_down = false; srv_secret = nas_secret; session_timeout = 0; dot1x_cfg.reauth_s = 0; srv_big_mode = false;
+	memset(supp, 0, sizeof(supp));
+	dot1x_cfg.mab[4] = dot1x_cfg.mab[5] = dot1x_cfg.mab[6] = false;
+	dot1x_cfg.guest_vlan[4] = 666;
+	dot1x_link(4, true);
+	seconds(90);
+	check(st(4) == DOT1X_S_CONNECTING && !open_(4), "no supplicant: closed while asking");
+	seconds(3);
+	check(st(4) == DOT1X_S_GUEST && open_(4) && vlan_of[4] == 666, "then open in the guest VLAN");
+	supp[4] = (struct supp){ .present = true, .user = "alice", .password = "secret", .mac = { 2, 0, 0, 0, 0, 1 } };
+	seconds(31);
+	check(st(4) == DOT1X_S_AUTHENTICATED && open_(4) && vlan_of[4] == 0, "a supplicant that starts later is authenticated, in the port's own VLAN");
+	dot1x_link(4, false);
+	supp[4].password = "wrong";
+	dot1x_link(4, true);
+	seconds(200);
+	check(!open_(4) && vlan_of[4] == 0, "wrong credentials never get the guest VLAN");
+	dot1x_cfg.fail_vlan[4] = 667;
+	dot1x_restart(4);
+	seconds(10);
+	check(st(4) == DOT1X_S_HELD && vlan_of[4] == 0, "one rejection: held");
+	seconds(200);
+	check(st(4) == DOT1X_S_AUTH_FAIL && open_(4) && vlan_of[4] == 667, "three: the auth-fail VLAN");
+	uint8_t start[4] = { 2, 1, 0, 0 };
+	dot1x_eapol_rx(4, supp[4].mac, start, 4); pump();
+	check(st(4) == DOT1X_S_AUTH_FAIL && open_(4), "where EAPOL-Start changes nothing at first");
+	uint8_t id[6] = { 2, 0, 0, 5, 2, 0 };
+	seconds(61);
+	dot1x_eapol_rx(4, supp[4].mac, id, 6); pump();
+	check(st(4) == DOT1X_S_AUTH_FAIL && open_(4), "nor a stray EAP packet later");
+	supp[4].password = "secret";
+	dot1x_eapol_rx(4, supp[4].mac, start, 4); pump();
+	check(st(4) == DOT1X_S_AUTHENTICATED && vlan_of[4] == 0, "later it is a new try");
+	dot1x_link(4, false);
+	supp[4].password = "wrong";
+	dot1x_link(4, true);
+	seconds(200);
+	check(st(4) == DOT1X_S_AUTH_FAIL, "in the auth-fail VLAN again");
+	server_down = true;
+	seconds(3600);
+	check(st(4) != DOT1X_S_AUTH_FAIL && !open_(4), "an hour later it is tried again, closed meanwhile");
+	server_down = false;
+	dot1x_link(4, false);
+	dot1x_cfg.guest_vlan[5] = 666;
+	dot1x_cfg.mab[5] = true;
+	dot1x_link(5, true);
+	dot1x_seen(5, (const uint8_t *)"\x02\x00\x00\x00\x00\x55");
+	seconds(95);
+	check(st(5) == DOT1X_S_GUEST && vlan_of[5] == 666, "a MAC the server rejects: the guest VLAN");
+	dot1x_link(5, false);
+	check(!open_(5) && vlan_of[5] == 0, "link down closes it and puts it back");
+	dot1x_cfg.guest_vlan[5] = 999;
+	dot1x_link(5, true);
+	seconds(95);
+	check(!open_(5), "a guest VLAN that doesn't exist: closed");
+	dot1x_link(5, false);
+
+	supp[4].password = "secret";
+	srv_vlan = "620"; 
+	dot1x_link(4, true); seconds(3);
+	check(open_(4) && vlan_of[4] == 0, "a RADIUS VLAN is ignored unless radius-vlan is on");
+	dot1x_link(4, false);
+	dot1x_cfg.radius_vlan = true;
+	dot1x_link(4, true); seconds(3);
+	check(open_(4) && vlan_of[4] == 620 && dot1x_port_status(4)->vlan == 620, "on: the port is in it");
+	srv_vlan = "621"; srv_vlan_tag = 1;
+	dot1x_eapol_rx(4, supp[4].mac, start, 4); pump();
+	check(vlan_of[4] == 621, "re-authentication moves it, with a tag in the attributes");
+	srv_vlan = NULL;
+	dot1x_eapol_rx(4, supp[4].mac, start, 4); pump();
+	check(open_(4) && vlan_of[4] == 0, "and back when the server names none");
+	dot1x_link(4, false);
+	static const char *const badv[] = { "999", "0", "4095", "abc", "12x", "99999999999", "" };
+	for (unsigned k = 0; k < sizeof(badv) / sizeof(badv[0]); k++) {
+		srv_vlan = badv[k];
+		dot1x_link(4, true); seconds(3);
+		check(!open_(4) && vlan_of[4] == 0, "VLAN \"%s\": not let in", badv[k]);
+		dot1x_link(4, false);
+	}
+	srv_vlan = "620"; srv_vlan_type = 9;
+	dot1x_link(4, true); seconds(3);
+	check(open_(4) && vlan_of[4] == 0, "a tunnel type other than VLAN is ignored");
+	dot1x_link(4, false);
+	check(vlan_while_open == 1, "a port leaves a VLAN with the gate closed (%d: only the move back above)", vlan_while_open);
+	srv_vlan_type = 13;
+	dot1x_link(4, true); seconds(3);
+
 	/* Off: everything open, EAPOL no longer trapped */
 	dot1x_cfg.enabled = false;
 	dot1x_apply();
-	check(!gate_on && gate_mask == 0 && st(4) == DOT1X_S_OFF, "802.1X off: no port gated");
+	check(!gate_on && gate_mask == 0 && st(4) == DOT1X_S_OFF && vlan_of[4] == 0, "802.1X off: no port gated, and in its own VLAN");
 
 	printf("\n%d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;

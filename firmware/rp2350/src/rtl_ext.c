@@ -423,6 +423,8 @@ static bool parse_dot1x(void)
 			return true;
 		}
 		dot1x_cfg.reauth_s = s;
+	} else if (cmd_words_len == 3 && cmd_compare(1, "radius-vlan") && (cmd_compare(2, "on") || cmd_compare(2, "off"))) {
+		dot1x_cfg.radius_vlan = cmd_compare(2, "on");
 	} else if (cmd_words_len >= 4 && cmd_compare(1, "port") && cmd_parse_port_separator(cmd_words_b[2])
 		   && atoi_results_u8 < DOT1X_PORTS) {
 		uint8_t p = atoi_results_u8;
@@ -434,15 +436,27 @@ static bool parse_dot1x(void)
 			dot1x_cfg.mode[p] = DOT1X_FORCE_UNAUTH;
 		else if (cmd_words_len == 5 && cmd_compare(3, "mab") && (cmd_compare(4, "on") || cmd_compare(4, "off")))
 			dot1x_cfg.mab[p] = cmd_compare(4, "on");
-		else if (cmd_words_len == 4 && cmd_compare(3, "restart")) {
+		else if (cmd_words_len == 5 && (cmd_compare(3, "guest-vlan") || cmd_compare(3, "auth-fail-vlan"))) {
+			unsigned v = 0;
+
+			if (!cmd_compare(4, "off") && !ext_word_num(4, 1, 4094, &v)) {
+				ext_error("dot1x port <n> guest-vlan|auth-fail-vlan <1-4094>|off\n");
+				return true;
+			}
+			if (cmd_compare(3, "guest-vlan"))
+				dot1x_cfg.guest_vlan[p] = v;
+			else
+				dot1x_cfg.fail_vlan[p] = v;
+		} else if (cmd_words_len == 4 && cmd_compare(3, "restart")) {
 			dot1x_restart(p);
 			return true;
 		} else {
-			ext_error("dot1x port <n> auto|force-auth|force-unauth|restart, dot1x port <n> mab on|off\n");
+			ext_error("dot1x port <n> auto|force-auth|force-unauth|restart, dot1x port <n> mab on|off,\n"
+				  "  dot1x port <n> guest-vlan|auth-fail-vlan <1-4094>|off\n");
 			return true;
 		}
 	} else {
-		ext_error("dot1x [on|off|radius <a.b.c.d> [<port>]|secret <text>|reauth <s>|off|port <n> ...]\n");
+		ext_error("dot1x [on|off|radius <a.b.c.d> [<port>]|secret <text>|reauth <s>|off|radius-vlan on|off|port <n> ...]\n");
 		return true;
 	}
 	dot1x_apply();

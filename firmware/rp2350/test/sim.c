@@ -17,6 +17,8 @@
 #include "dot1x.h"
 #include "rtl_guard.h"
 #include "mcast.h"
+#include "dot1x_plat.h"
+uint16_t port_pvid_get(uint8_t port);
 extern uint8_t stp_pflags[];
 extern uint8_t cmd_buffer[];
 #define cmd_buffer_test cmd_buffer
@@ -1093,6 +1095,30 @@ int main(void)
 		cmd("qos port 2 priority off");
 		rtl_second();
 		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		/* 802.1X VLANs on the switch's tables */
+		cmd("vlan 20 3 4");
+		cmd("vlan 1 1 2 3");
+		cmd("pvid 2 1");
+		uint32_t v20 = vlan_tbl[20][0], v1 = vlan_tbl[1][0];
+		check(dot1x_hw_vlan(l2, 20) && (vlan_tbl[20][0] >> l2 & 1) && (vlan_tbl[20][0] >> (10 + l2) & 1)
+		      && !(vlan_tbl[1][0] >> l2 & 1) && (vlan_tbl[1][0] >> l1 & 1) && port_pvid_get(l2) == 20,
+		      "a port put in VLAN 20: untagged there, out of its own, PVID 20 (%x, %x)", vlan_tbl[20][0], vlan_tbl[1][0]);
+		check(dot1x_hw_vlan(l2, 0) && vlan_tbl[20][0] == v20 && vlan_tbl[1][0] == v1 && port_pvid_get(l2) == 1,
+		      "and back, the tables as they were (%x/%x, %x/%x)", vlan_tbl[20][0], v20, vlan_tbl[1][0], v1);
+		check(!dot1x_hw_vlan(l2, 999) && port_pvid_get(l2) == 1 && vlan_tbl[1][0] == v1, "a VLAN without members is refused");
+		dot1x_hw_vlan(l2, 20);
+		dot1x_plat_bridge_up();
+		check(vlan_tbl[20][0] == v20 && vlan_tbl[1][0] == v1 && port_pvid_get(l2) == 1, "a restart of ours puts it back too");
+		cmd("dot1x port 2 guest-vlan 20");
+		cmd("dot1x radius-vlan on");
+		cmd("dot1x port 2 guest-vlan 4095");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "guest-vlan 4095 is refused");
+		rtl_http_get("/dot1x.json");
+		outbuf[slen] = 0;
+		check(strstr((char *)outbuf, "\"guest\":20") && strstr((char *)outbuf, "\"radius_vlan\":1"), "in /dot1x.json");
+		cmd("dot1x port 2 guest-vlan off");
+		cmd("dot1x radius-vlan off");
+
 		/* Multicast snooping (rtl_mcast.c) */
 		uint8_t ig[12 + 8 + 4 + 2 + 24 + 8] = { 0x01, 0, 0x5e, 1, 2, 3, 2, 0, 0, 0, 0, 0x22, 0x88, 0x99, 4 };
 		static const uint8_t body[] = { 0x81, 0, 0, 1, 0x08, 0, 0x46, 0xc0, 0, 32, 0, 0, 0, 0, 1, 2, 0, 0, 10, 0, 0, 9,

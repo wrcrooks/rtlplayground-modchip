@@ -52,6 +52,9 @@ struct dot1x_config dot1x_cfg;
 #define A_CALLED_STATION	30
 #define A_CALLING_STATION	31
 #define A_NAS_PORT_TYPE		61
+#define A_TUNNEL_TYPE		64
+#define A_TUNNEL_MEDIUM		65
+#define A_TUNNEL_GROUP		81
 #define A_EAP_MESSAGE		79
 #define A_MESSAGE_AUTH		80
 
@@ -68,6 +71,8 @@ struct port {
 	uint8_t last_id;		/* id of the last EAP request sent on */
 	uint8_t method;			/* of the run in progress */
 	bool waiting_server;
+	bool eapol_seen;		/* since the link came up: it has a supplicant */
+	uint8_t rejects;		/* in a row */
 	uint8_t state_attr[STATE_MAX];
 	uint8_t state_len;
 	/* the outstanding RADIUS request, kept for retransmission */
@@ -86,7 +91,7 @@ static bool gate_on, gate_known;
 static uint8_t eap_buf[EAP_MAX + 4];
 
 static const char *const state_names[] = {
-	"off", "down", "connecting", "authenticating", "authenticated", "held", "blocked",
+	"off", "down", "connecting", "authenticating", "authenticated", "held", "blocked", "guest", "auth-fail",
 };
 
 const char *dot1x_state_name(uint8_t state)
@@ -145,6 +150,21 @@ static bool controlled(uint8_t port)
 }
 
 
+static bool port_vlan(uint8_t port, uint16_t vlan)
+{
+	struct dot1x_status *s = &ports[port].s;
+
+	if (s->vlan == vlan)
+		return true;
+	if (!dot1x_hw_vlan(port, vlan)) {
+		s->vlan = 0;
+		return false;
+	}
+	s->vlan = vlan;
+	return true;
+}
+
+
 /* Recompute the fenced-off ports and tell the platform when they change */
 static void gate(void)
 {
@@ -155,13 +175,20 @@ static void gate(void)
 	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
 		if (((b >> port) & 1) && controlled(port) && dot1x_cfg.mab[port] && !ports[port].s.mac_valid)
 			learn |= 1 << port;
-	if (gate_known && b == gated && learn == gate_learn && gate_on == dot1x_cfg.enabled)
-		return;
-	gated = b;
-	gate_learn = learn;
-	gate_on = dot1x_cfg.enabled;
-	gate_known = true;
-	dot1x_hw_gate(b, learn, gate_on);
+	/* A port leaves the VLAN it was put in: before it opens, after it closes */
+	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
+		if (ports[port].s.vlan && !ports[port].s.authorized && !((b >> port) & 1))
+			port_vlan(port, 0);
+	if (!gate_known || b != gated || learn != gate_learn || gate_on != dot1x_cfg.enabled) {
+		gated = b;
+		gate_learn = learn;
+		gate_on = dot1x_cfg.enabled;
+		gate_known = true;
+		dot1x_hw_gate(b, learn, gate_on);
+	}
+	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
+		if (ports[port].s.vlan && !ports[port].s.authorized)
+			port_vlan(port, 0);
 }
 
 
@@ -262,6 +289,49 @@ static void fail(uint8_t port, uint8_t id, bool send_failure)
 	p->state_len = 0;
 	set_authorized(port, false);
 	dot1x_hw_log("802.1X: authentication failed on port", port);
+}
+
+
+/* Open a port that did not authenticate, in the VLAN meant for that */
+static bool open_in(uint8_t port, uint16_t vlan, uint8_t state)
+{
+	struct port *p = &ports[port];
+
+	if (!vlan)
+		return false;
+	if (!port_vlan(port, vlan)) {
+		dot1x_hw_log("802.1X: the guest or auth-fail VLAN does not exist, port", port);
+		return false;
+	}
+	cancel_server(p);
+	p->s.state = state;
+	p->s.method = DOT1X_M_NONE;
+	p->state_len = 0;
+	p->tx_count = DOT1X_MAB_AFTER;
+	p->timer = state == DOT1X_S_GUEST ? DOT1X_TX_PERIOD : DOT1X_QUIET_PERIOD;
+	p->s.reauth_left = state != DOT1X_S_AUTH_FAIL ? 0 : dot1x_cfg.reauth_s ? dot1x_cfg.reauth_s : DOT1X_AUTH_FAIL_RETRY;
+	set_authorized(port, true);
+	dot1x_hw_log(state == DOT1X_S_GUEST ? "802.1X: guest VLAN on port" : "802.1X: auth-fail VLAN on port", port);
+	return true;
+}
+
+
+/* The server said no */
+static void rejected(uint8_t port)
+{
+	struct port *p = &ports[port];
+	uint8_t method = p->method;
+
+	if (p->rejects < 255)
+		p->rejects++;
+	set_authorized(port, false);
+	if (method == DOT1X_M_MAB && !p->eapol_seen && open_in(port, dot1x_cfg.guest_vlan[port], DOT1X_S_GUEST))
+		p->s.failures++;
+	else if (method == DOT1X_M_EAP && p->rejects >= DOT1X_FAIL_AFTER
+		 && open_in(port, dot1x_cfg.fail_vlan[port], DOT1X_S_AUTH_FAIL))
+		p->s.failures++;
+	else
+		fail(port, 0, false);
 }
 
 
@@ -423,6 +493,8 @@ void dot1x_radius_rx(const uint8_t *in, uint16_t len)
 	bool reauth_by_radius = false;
 	static uint8_t state[STATE_MAX];
 	uint8_t state_len = 0;
+	uint16_t vlan = 0;
+	bool vlan_type = false, vlan_medium = false;
 
 	if (len < 20 || len > RAD_MAX || (in[2] << 8 | in[3]) > len)
 		return;
@@ -451,6 +523,18 @@ void dot1x_radius_rx(const uint8_t *in, uint16_t len)
 			session = get32(r + i + 2);
 		} else if (t == A_TERMINATION_ACTION && l == 6) {
 			reauth_by_radius = get32(r + i + 2) == 1;
+		} else if (t == A_TUNNEL_TYPE && l == 6) {
+			vlan_type = (get32(r + i + 2) & 0xffffff) == 13;	/* below the tag: VLAN */
+		} else if (t == A_TUNNEL_MEDIUM && l == 6) {
+			vlan_medium = (get32(r + i + 2) & 0xffffff) == 6;	/* 802 */
+		} else if (t == A_TUNNEL_GROUP && l > 2) {
+			const uint8_t *v = r + i + 2;
+			uint32_t id = 0;
+			uint8_t k = v[0] <= 0x1f ? 1 : 0;
+
+			for (; k < l - 2 && v[k] >= '0' && v[k] <= '9' && id < 10000; k++)
+				id = 10 * id + v[k] - '0';
+			vlan = k == l - 2 && id && id < 4095 ? id : 0xffff;
 		}
 	}
 	if (!rad_verify(p, r, len, eap_len > 0 || p->method == DOT1X_M_EAP)) {
@@ -472,6 +556,15 @@ void dot1x_radius_rx(const uint8_t *in, uint16_t len)
 		p->timer = DOT1X_SUPP_TIMEOUT;
 		return;
 	case RAD_ACCESS_ACCEPT:
+		if (!dot1x_cfg.radius_vlan || !vlan_type || !vlan_medium)
+			vlan = 0;
+		/* Not let in is better than let into the wrong VLAN */
+		if (vlan == 0xffff || !port_vlan(port, vlan)) {
+			dot1x_hw_log("802.1X: the server names a VLAN that does not exist, port", port);
+			fail(port, p->last_id, true);
+			return;
+		}
+		p->rejects = 0;
 		if (p->method == DOT1X_M_EAP) {
 			if (eap_len >= 4)
 				eapol_send(port, EAPOL_EAP, eap, eap_len);
@@ -489,10 +582,10 @@ void dot1x_radius_rx(const uint8_t *in, uint16_t len)
 	case RAD_ACCESS_REJECT:
 		if (p->method == DOT1X_M_EAP && eap_len >= 4) {
 			eapol_send(port, EAPOL_EAP, eap, eap_len);
-			fail(port, 0, false);
-		} else {
-			fail(port, p->last_id, true);
+		} else if (p->method == DOT1X_M_EAP) {
+			eap_send_simple(port, EAP_FAILURE, p->last_id);
 		}
+		rejected(port);
 		return;
 	}
 }
@@ -530,6 +623,13 @@ void dot1x_eapol_rx(uint8_t port, const uint8_t *src, const uint8_t *pdu, uint16
 	blen = pdu[2] << 8 | pdu[3];
 	if (blen > len - 4)
 		return;
+	/* It stays in the auth-fail VLAN a while, however often it asks */
+	if (p->s.state == DOT1X_S_AUTH_FAIL && p->timer)
+		return;
+	p->eapol_seen = true;
+	if ((p->s.state == DOT1X_S_AUTH_FAIL || p->s.state == DOT1X_S_GUEST)
+	    && (pdu[1] == EAPOL_START || pdu[1] == EAPOL_LOGOFF))
+		set_authorized(port, false);
 
 	switch (pdu[1]) {
 	case EAPOL_START:
@@ -555,7 +655,10 @@ void dot1x_eapol_rx(uint8_t port, const uint8_t *src, const uint8_t *pdu, uint16
 	if (elen < 5 || elen > blen)
 		return;
 
-	if (e[4] == EAP_IDENTITY && e[1] == p->eap_id && p->s.state == DOT1X_S_CONNECTING) {
+	if (e[4] == EAP_IDENTITY && e[1] == p->eap_id
+	    && (p->s.state == DOT1X_S_CONNECTING || p->s.state == DOT1X_S_GUEST)) {
+		if (p->s.state == DOT1X_S_GUEST)
+			set_authorized(port, false);
 		uint16_t n = elen - 5 < DOT1X_IDENTITY_MAX - 1 ? elen - 5 : DOT1X_IDENTITY_MAX - 1;
 		memcpy(p->s.identity, e + 5, n);
 		p->s.identity[n] = 0;
@@ -600,6 +703,8 @@ static void reset_port(uint8_t port, uint8_t state)
 	p->state_len = 0;
 	p->tx_count = 0;
 	p->timer = 0;
+	p->eapol_seen = false;
+	p->rejects = 0;
 }
 
 
@@ -623,6 +728,11 @@ void dot1x_second(void)
 			}
 			continue;
 		}
+		if (p->s.state == DOT1X_S_AUTH_FAIL && p->s.reauth_left && !--p->s.reauth_left) {
+			set_authorized(port, false);
+			connecting(port, true);
+			continue;
+		}
 		if (p->timer && --p->timer)
 			continue;
 		switch (p->s.state) {
@@ -632,6 +742,10 @@ void dot1x_second(void)
 				fail(port, p->last_id, false);
 			} else if (p->tx_count >= DOT1X_MAB_AFTER && dot1x_cfg.mab[port] && p->s.mac_valid) {
 				start_mab(port);
+			} else if (p->tx_count >= DOT1X_MAB_AFTER && !p->eapol_seen
+				   && (!dot1x_cfg.mab[port] || !p->s.mac_valid)
+				   && open_in(port, dot1x_cfg.guest_vlan[port], DOT1X_S_GUEST)) {
+				/* keeps asking from there */
 			} else {
 				request_identity(port);
 				if (p->tx_count < 255)
@@ -654,6 +768,10 @@ void dot1x_second(void)
 			break;
 		case DOT1X_S_HELD:
 			connecting(port, true);
+			break;
+		case DOT1X_S_GUEST:
+			request_identity(port);	/* a supplicant may have started since */
+			p->timer = DOT1X_TX_PERIOD;
 			break;
 		}
 	}

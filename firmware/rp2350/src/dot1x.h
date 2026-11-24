@@ -29,6 +29,8 @@
 #define DOT1X_S_AUTHENTICATED	4
 #define DOT1X_S_HELD		5	/* after a failure, the quiet period */
 #define DOT1X_S_BLOCKED		6	/* force-unauth */
+#define DOT1X_S_GUEST		7	/* open in the guest VLAN */
+#define DOT1X_S_AUTH_FAIL	8	/* open in the auth-fail VLAN */
 
 #define DOT1X_M_NONE		0
 #define DOT1X_M_EAP		1
@@ -41,6 +43,8 @@
 #define DOT1X_QUIET_PERIOD	60
 #define DOT1X_SERVER_TIMEOUT	5	/* per RADIUS try */
 #define DOT1X_SERVER_TRIES	3
+#define DOT1X_FAIL_AFTER	3	/* rejections before the auth-fail VLAN */
+#define DOT1X_AUTH_FAIL_RETRY	3600	/* until another try from there, without reauth */
 
 struct dot1x_config {
 	bool enabled;
@@ -50,6 +54,9 @@ struct dot1x_config {
 	uint8_t mode[DOT1X_PORTS];
 	bool mab[DOT1X_PORTS];
 	uint32_t reauth_s;		/* 0: no periodic re-authentication */
+	bool radius_vlan;		/* take the VLAN an Access-Accept names */
+	uint16_t guest_vlan[DOT1X_PORTS];	/* for devices that don't speak 802.1X, 0: none */
+	uint16_t fail_vlan[DOT1X_PORTS];	/* for devices the server rejects, 0: none */
 };
 
 struct dot1x_status {
@@ -61,6 +68,7 @@ struct dot1x_status {
 	char identity[DOT1X_IDENTITY_MAX];
 	uint32_t successes, failures;
 	uint32_t reauth_left;
+	uint16_t vlan;			/* the port was put in, 0: its own */
 };
 
 extern struct dot1x_config dot1x_cfg;
@@ -95,6 +103,9 @@ void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len);
 /* Fence off the ports in blocked, which learn no addresses but for one on those
  * in learn; on: trap EAPOL to the CPU */
 void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on);
+/* Put port in vlan, untagged and alone; 0: back to its own. False if the
+ * VLAN doesn't exist, with the port in its own. */
+bool dot1x_hw_vlan(uint8_t port, uint16_t vlan);
 void dot1x_hw_random(uint8_t *p, uint8_t n);
 void dot1x_hw_nas_ip(uint8_t ip[4]);
 const uint8_t *dot1x_hw_mac(void);

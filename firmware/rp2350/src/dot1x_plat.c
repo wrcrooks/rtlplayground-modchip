@@ -28,6 +28,7 @@
 #include "dot1x.h"
 #include "dot1x_plat.h"
 #include "events.h"
+#include "mcast.h"
 #include "plat.h"
 
 extern __code const struct machine machine;
@@ -105,6 +106,87 @@ void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on)
 }
 
 
+/*
+ * A port put in a VLAN: an untagged member, with it as its PVID, and out of
+ * the VLAN its untagged frames went to. What it was is kept where a restart
+ * of ours does not clear it, as the switch's tables outlive that.
+ */
+#define MOVED_MAGIC	0x31784456
+
+static struct {
+	uint32_t magic;
+	struct moved {
+		uint16_t vlan, pvid;
+		bool member, tagged;		/* of vlan, before */
+		bool pmember, ptagged;		/* of pvid */
+	} port[DOT1X_PORTS];
+} moved __attribute__((section(".uninitialized_data.dot1x")));
+
+/* Membership of one port; false if the VLAN has no members */
+static bool vlan_member(uint16_t vlan, uint8_t port, bool *member, bool *tagged)
+{
+	uint16_t m, t;
+
+	if (!mc_hw_vlan(vlan, &m, &t))
+		return false;
+	*member = (m >> port) & 1;
+	*tagged = (t >> port) & 1;
+	return true;
+}
+
+
+static void vlan_member_set(uint16_t vlan, uint8_t port, bool member, bool tagged)
+{
+	uint16_t m, t;
+
+	if (!mc_hw_vlan(vlan, &m, &t))
+		return;
+	m = member ? m | 1 << port : m & ~(1 << port);
+	t = member && tagged ? t | 1 << port : t & ~(1 << port);
+	vlan_settings.vlan = vlan;
+	vlan_settings.members = m;
+	vlan_settings.tagged = t;
+	vlan_create();
+}
+
+
+bool dot1x_hw_vlan(uint8_t port, uint16_t vlan)
+{
+	struct moved *v = &moved.port[port];
+	bool member, tagged;
+
+	if (moved.magic != MOVED_MAGIC) {
+		memset(&moved, 0, sizeof(moved));
+		moved.magic = MOVED_MAGIC;
+	}
+	if (v->vlan) {
+		vlan_member_set(v->pvid, port, v->pmember, v->ptagged);
+		port_pvid_set(port, v->pvid);
+		vlan_member_set(v->vlan, port, v->member, v->tagged);
+		v->vlan = 0;
+		port_l2_forget_port(port);
+	}
+	if (!vlan)
+		return true;
+	if (!vlan_member(vlan, port, &member, &tagged))
+		return false;
+	v->pvid = port_pvid_get(port);
+	if (v->pvid == vlan)
+		return true;		/* its own already */
+	v->member = member;
+	v->tagged = tagged;
+	v->pmember = v->ptagged = false;
+	vlan_member(v->pvid, port, &v->pmember, &v->ptagged);
+	v->vlan = vlan;
+	vlan_member_set(vlan, port, true, false);
+	port_pvid_set(port, vlan);
+	if (v->pmember && !v->ptagged)
+		vlan_member_set(v->pvid, port, false, false);
+	port_l2_forget_port(port);
+	return true;
+}
+
+
 void dot1x_hw_random(uint8_t *p, uint8_t n)
 {
 	while (n) {
@@ -179,6 +261,9 @@ void dot1x_plat_links(uint32_t sts, uint32_t links, uint32_t links_89)
 /* The 8051 came up again with the registers at their defaults */
 void dot1x_plat_bridge_up(void)
 {
+	for (uint8_t port = 0; port < DOT1X_PORTS; port++)
+		if (moved.magic == MOVED_MAGIC && moved.port[port].vlan < 4095)
+			dot1x_hw_vlan(port, 0);
 	dot1x_init();
 }
 
@@ -188,30 +273,17 @@ void dot1x_plat_bridge_up(void)
 extern __xdata uint8_t outbuf[TCP_OUTBUF_SIZE];
 extern __xdata uint16_t slen;
 
-static void out(const char *fmt, ...)
-{
-	va_list ap;
-	int n;
-
-	va_start(ap, fmt);
-	n = vsnprintf((char *)outbuf + slen, TCP_OUTBUF_SIZE - slen, fmt, ap);
-	va_end(ap);
-	if (n > 0)
-		slen = slen + n < TCP_OUTBUF_SIZE ? slen + n : TCP_OUTBUF_SIZE - 1;
-}
-
-
-void send_dot1x(void)
+size_t dot1x_json(char *buf, size_t max)
 {
 	static const char *const modes[] = { "force-auth", "auto", "force-unauth" };
 	static const char *const methods[] = { "", "eap", "mab" };
 	bool first = true;
+	size_t n = 0;
 
-	slen = 0;
-	out("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n");
-	out("{\"enabled\":%d,\"radius\":\"%u.%u.%u.%u\",\"radius_port\":%u,\"secret\":%d,\"reauth\":%lu,\"ports\":[",
+	n = app(buf, max, n, "{\"enabled\":%d,\"radius\":\"%u.%u.%u.%u\",\"radius_port\":%u,\"secret\":%d,\"reauth\":%lu,\"radius_vlan\":%d,\"ports\":[",
 	    dot1x_cfg.enabled, dot1x_cfg.radius_ip[0], dot1x_cfg.radius_ip[1], dot1x_cfg.radius_ip[2],
-	    dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port, dot1x_cfg.secret[0] != 0, (unsigned long)dot1x_cfg.reauth_s);
+	    dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port, dot1x_cfg.secret[0] != 0, (unsigned long)dot1x_cfg.reauth_s,
+	    dot1x_cfg.radius_vlan);
 	for (uint8_t i = machine.min_port; i <= machine.max_port && i < DOT1X_PORTS; i++) {
 		const struct dot1x_status *s = dot1x_port_status(i);
 		char user[DOT1X_IDENTITY_MAX];
@@ -222,16 +294,25 @@ void send_dot1x(void)
 			user[k] = c < 0x20 || c > 0x7e || c == '"' || c == '\\' ? '.' : c;
 		}
 		user[k] = 0;
-		out("%s{\"port\":%u,\"mode\":\"%s\",\"mab\":%d,\"state\":\"%s\",\"authorized\":%d,\"method\":\"%s\",",
+		n = app(buf, max, n, "%s{\"port\":%u,\"mode\":\"%s\",\"mab\":%d,\"state\":\"%s\",\"authorized\":%d,\"method\":\"%s\",",
 		    first ? "" : ",", machine.log_to_phys_port[i], modes[dot1x_cfg.mode[i] % 3], dot1x_cfg.mab[i],
 		    dot1x_state_name(s->state), s->authorized, methods[s->method % 3]);
 		char mac[18] = "";
 		if (s->mac_valid)
 			snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
 				 s->mac[0], s->mac[1], s->mac[2], s->mac[3], s->mac[4], s->mac[5]);
-		out("\"mac\":\"%s\",\"user\":\"%s\",\"ok\":%lu,\"fail\":%lu,\"reauth_left\":%lu}",
-		    mac, user, (unsigned long)s->successes, (unsigned long)s->failures, (unsigned long)s->reauth_left);
+		n = app(buf, max, n, "\"mac\":\"%s\",\"user\":\"%s\",\"ok\":%lu,\"fail\":%lu,\"reauth_left\":%lu,"
+		    "\"vlan\":%u,\"guest\":%u,\"authfail\":%u}",
+		    mac, user, (unsigned long)s->successes, (unsigned long)s->failures, (unsigned long)s->reauth_left,
+		    s->vlan, dot1x_cfg.guest_vlan[i], dot1x_cfg.fail_vlan[i]);
 		first = false;
 	}
-	out("]}");
+	return app(buf, max, n, "]}");
+}
+
+
+void send_dot1x(void)
+{
+	slen = strtox(outbuf, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n");
+	slen += dot1x_json((char *)outbuf + slen, TCP_OUTBUF_SIZE - slen);
 }

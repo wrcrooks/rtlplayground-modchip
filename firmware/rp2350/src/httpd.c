@@ -324,11 +324,12 @@ static bool handle_metrics(struct conn *c, const char *path)
 		respond_body(c, "application/json", body, len);
 		return true;
 	}
-	if (!strcmp(path, "/events.json") || !strcmp(path, "/features.json")) {
+	if (!strcmp(path, "/events.json") || !strcmp(path, "/features.json") || !strcmp(path, "/dot1x.json")) {
 		body = malloc(FEATURES_JSON_MAX);
 		if (!body)
 			return false;
 		len = path[1] == 'e' ? events_json((char *)body, FEATURES_JSON_MAX, 0)
+				     : path[1] == 'd' ? dot1x_json((char *)body, FEATURES_JSON_MAX)
 				     : features_json((char *)body, FEATURES_JSON_MAX);
 		respond_body(c, "application/json", body, len);
 		return true;
