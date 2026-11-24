@@ -80,6 +80,15 @@ def packet(payload):
     return struct.pack(">IB", 1 + len(payload) + pad, pad) + payload + bytes(pad)
 
 
+def messages(out):
+    """The types of the unencrypted packets after the version line"""
+    p, types = out.index(b"\n") + 1, []
+    while p + 6 <= len(out):
+        types.append(out[p + 5])
+        p += 4 + struct.unpack_from(">I", out, p)[0]
+    return types
+
+
 def kexinit(kex, strict=False):
     names = [kex + (b",kex-strict-c-v00@openssh.com" if strict else b""), b"ecdsa-sha2-nistp256", b"aes128-ctr", b"aes128-ctr",
              b"hmac-sha2-256", b"hmac-sha2-256", b"none", b"none", b"", b""]
@@ -188,7 +197,7 @@ def run(ssh, base, env, fp, proc, d):
     out, closed = raw(b"SSH-2.0-x\r\n" + packet(b"\x02\0\0\0\0") + packet(kexinit(b"curve25519-sha256", True)))
     check(closed, "strict KEX: an IGNORE before KEXINIT ends it (Terrapin)")
     out, closed = raw(b"SSH-2.0-x\r\n" + packet(kexinit(b"curve25519-sha256")) + packet(b"\x1e" + struct.pack(">I", 32) + bytes(32)))
-    check(closed and b"\x1f" not in out[-60:], "curve25519: the zero point is refused")
+    check(closed and 20 in messages(out) and 31 not in messages(out), "curve25519: the zero point is refused")
     out, closed = raw(b"SSH-2.0-x\r\n" + packet(kexinit(b"ecdh-sha2-nistp256")) + packet(b"\x1e" + struct.pack(">I", 65) + b"\x04" + b"\x01" * 64))
     check(closed, "P-256: a point off the curve is refused")
     out, closed = raw(b"SSH-2.0-x\r\n" + packet(kexinit(b"curve25519-sha256")) + packet(b"\x15"))
