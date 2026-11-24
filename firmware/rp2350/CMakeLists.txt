@@ -96,6 +96,7 @@ add_library(rtlp OBJECT
     src/rtl_metrics.c
     src/rtl_poe.c
     src/dot1x_plat.c
+    src/rtl_guard.c
 )
 add_dependencies(rtlp modchip_version)
 
@@ -143,6 +144,10 @@ add_executable(modchip
     src/dot1x.c
     src/dot1x_udp.c
     src/md5.c
+    src/events.c
+    src/store.c
+    src/safety.c
+    src/extras.c
     src/rtl_sfr.S
     ${GEN}/web_assets.c
     $<TARGET_OBJECTS:rtlp>)

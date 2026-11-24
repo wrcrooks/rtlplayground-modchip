@@ -42,7 +42,13 @@ bool bridge_is_up(void) { return true; }
 uint32_t plat_uptime_s(void) { return time(NULL); }
 uint32_t plat_random32(void) { return rand(); }
 void plat_reboot(void) { reboots++; }
-bool plat_config_write(const uint8_t *src, uint32_t len) { (void)src; (void)len; return true; }
+static uint8_t config[PLAT_CONFIG_LEN];
+bool plat_config_write(const uint8_t *src, uint32_t len) { memset(config, 0xff, sizeof(config)); memcpy(config, src, len); return true; }
+void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, config + off, len); }
+void plat_sector_read(int id, uint8_t *dst, uint32_t len) { (void)id; memset(dst, 0xff, len); }
+bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { (void)id; (void)src; (void)len; return true; }
+char hostname[24] = "sw/1";
+size_t rtl_guard_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 bool rtl_http_get(char *path)
 {
 	if (strcmp(path, "/status.json"))

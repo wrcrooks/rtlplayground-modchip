@@ -23,6 +23,9 @@
 #include "lwip/timeouts.h"
 
 #include "bridge.h"
+#include "events.h"
+#include "safety.h"
+#include "store.h"
 #include "net.h"
 #include "metrics.h"
 #include "modchip_version.h"
@@ -229,6 +232,41 @@ bool plat_config_write(const uint8_t *src, uint32_t len)
 	return flash_safe_execute(config_program, sector, 100) == PICO_OK;
 }
 
+/* Sector n below the configuration's and the certificate's (tls.c) */
+static uint8_t sector_buf[FLASH_SECTOR_SIZE];
+
+static uint32_t sector_offset(int id)
+{
+	return PICO_FLASH_SIZE_BYTES - (3 + id) * FLASH_SECTOR_SIZE;
+}
+
+
+static void sector_program(void *off)
+{
+	flash_range_erase((uint32_t)off, FLASH_SECTOR_SIZE);
+	flash_range_program((uint32_t)off, sector_buf, FLASH_SECTOR_SIZE);
+}
+
+
+void plat_sector_read(int id, uint8_t *dst, uint32_t len)
+{
+	memcpy(dst, (const uint8_t *)(XIP_BASE + sector_offset(id)), len);
+}
+
+
+bool plat_sector_write(int id, const uint8_t *src, uint32_t len)
+{
+	uint32_t off = sector_offset(id);
+
+	if (len > sizeof(sector_buf))
+		return false;
+	memset(sector_buf, 0xff, sizeof(sector_buf));
+	memcpy(sector_buf, src, len);
+	if (!memcmp(sector_buf, (const void *)(XIP_BASE + off), sizeof(sector_buf)))
+		return true;
+	return flash_safe_execute(sector_program, (void *)off, 100) == PICO_OK;
+}
+
 /* ---- the bridge's events ---- */
 
 void bridge_on_up(void)
@@ -384,6 +422,9 @@ int main(void)
 	net_init();
 	httpd_init();
 	rtl_boot();
+	store_load();
+	safety_boot();
+	event(EV_SYSTEM, 0, 0, "Mod chip started%s, firmware " MODCHIP_VERSION, watchdog_reset ? " by the watchdog" : "");
 
 	run_main_loop();
 }
@@ -429,6 +470,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 		if (plat_uptime_s() != second_last) {
 			second_last = plat_uptime_s();
 			bridge_second();
+			safety_second();
 			rtl_second();
 			net_second();
 			httpd_second();

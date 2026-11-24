@@ -19,6 +19,7 @@
  * commands they land in the command history and the saved configuration.
  */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,15 +35,14 @@
 #include "plat.h"
 #include "dot1x.h"
 #include "rtl837x_acl.h"
+#include "rtl_ext.h"
+#include "safety.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
 extern __xdata char port_names[9][PORT_NAME_SIZE];
-extern __xdata uint8_t cmd_words_len;
-extern __xdata uint8_t cmd_words_b[];
-uint8_t cmd_compare(uint8_t start, __code const uint8_t *cmd);
 
-static void ext_error(__code const char *msg)
+void ext_error(__code const char *msg)
 {
 	err_status = ERR_INVALID_ARGUMENT;
 	print_string("Error: ");
@@ -51,7 +51,7 @@ static void ext_error(__code const char *msg)
 
 
 /* The rest of the line from word w, as parse_passwd() takes a password */
-static const char *rest(uint8_t w)
+const char *ext_rest(uint8_t w)
 {
 	return (const char *)&cmd_buffer[cmd_words_b[w]];
 }
@@ -100,13 +100,13 @@ static bool parse_snmp(void)
 	} else if (cmd_words_len == 2 && cmd_compare(1, "off")) {
 		plat_snmp_set(PLAT_SNMP_ENABLED, NULL);
 	} else if (cmd_words_len == 3 && cmd_compare(1, "community")) {
-		if (!plat_snmp_set(PLAT_SNMP_COMMUNITY, rest(2)))
+		if (!plat_snmp_set(PLAT_SNMP_COMMUNITY, ext_rest(2)))
 			ext_error("community too long\n");
 	} else if (cmd_words_len >= 3 && cmd_compare(1, "location")) {
-		if (!plat_snmp_set(PLAT_SNMP_LOCATION, rest(2)))
+		if (!plat_snmp_set(PLAT_SNMP_LOCATION, ext_rest(2)))
 			ext_error("location too long\n");
 	} else if (cmd_words_len >= 3 && cmd_compare(1, "contact")) {
-		if (!plat_snmp_set(PLAT_SNMP_CONTACT, rest(2)))
+		if (!plat_snmp_set(PLAT_SNMP_CONTACT, ext_rest(2)))
 			ext_error("contact too long\n");
 	} else {
 		ext_error("snmp [on|off|community <name>|location <text>|contact <text>]\n");
@@ -236,8 +236,6 @@ static bool parse_t3(void)
  *   dot1x port <n> mab on|off                MAC authentication for devices without a supplicant
  *   dot1x port <n> restart                   authenticate again now
  */
-uint8_t cmd_parse_port_separator(uint8_t idx);
-extern __xdata uint8_t atoi_results_u8;
 
 static void dot1x_print_status(void)
 {
@@ -271,7 +269,7 @@ static void dot1x_print_status(void)
 
 
 /* A decimal number at *s, up to max, then sep (or the end of the word); moves *s past it */
-static bool num(const char **s, unsigned max, char sep, unsigned *v)
+bool ext_num(const char **s, unsigned max, char sep, unsigned *v)
 {
 	const char *p = *s;
 
@@ -290,9 +288,102 @@ static bool num(const char **s, unsigned max, char sep, unsigned *v)
 }
 
 
-static bool parse_ip(const char *s, unsigned a[4])
+bool ext_ip(const char *s, unsigned a[4])
 {
-	return num(&s, 255, '.', &a[0]) && num(&s, 255, '.', &a[1]) && num(&s, 255, '.', &a[2]) && num(&s, 255, 0, &a[3]);
+	return ext_num(&s, 255, '.', &a[0]) && ext_num(&s, 255, '.', &a[1]) && ext_num(&s, 255, '.', &a[2]) && ext_num(&s, 255, 0, &a[3]);
+}
+
+
+const char *ext_word(uint8_t w, char *buf, uint8_t max)
+{
+	const char *p = ext_rest(w);
+	uint8_t n = 0;
+
+	while (p[n] && p[n] != ' ') {
+		if (n + 1 >= max)
+			return NULL;
+		buf[n] = p[n];
+		n++;
+	}
+	buf[n] = 0;
+	return buf;
+}
+
+
+bool ext_word_num(uint8_t w, unsigned min, unsigned max, unsigned *v)
+{
+	const char *p = ext_rest(w);
+
+	return ext_num(&p, max, 0, v) && *v >= min;
+}
+
+
+/* The line being typed or parsed is kept: commands share one buffer */
+extern __xdata char save_cmd;
+
+bool ext_run(const char *fmt, ...)
+{
+	static uint8_t line[CMD_BUF_SIZE];
+	char cmd[CMD_BUF_SIZE];
+	uint8_t words = cmd_words_len, err = err_status;
+	char save = save_cmd;
+	va_list ap;
+	bool ok;
+
+	va_start(ap, fmt);
+	vsnprintf(cmd, sizeof(cmd), fmt, ap);
+	va_end(ap);
+	memcpy(line, cmd_buffer, sizeof(line));
+	save_cmd = 0;
+	execute_commands((__xdata uint8_t *)cmd);
+	ok = err_status == ERR_OK;
+	save_cmd = save;
+	err_status = err;
+	cmd_words_len = words;
+	memcpy(cmd_buffer, line, sizeof(line));
+	return ok;
+}
+
+
+/*
+ *   reboot                     what is pending
+ *   reboot now                 the switch and the mod chip
+ *   reboot in <1-1440>         in that many minutes
+ *   reboot cancel
+ *   rollback                   what is pending
+ *   rollback in <1-1440>       back to the configuration saved now, unless confirmed
+ *   rollback confirm
+ * Not configuration: nothing of it is saved.
+ */
+static bool parse_reboot(void)
+{
+	bool rb = cmd_compare(0, "rollback");
+	unsigned v;
+	char b[80];
+
+	if (cmd_words_len == 1) {
+		uint32_t left = rb ? safety_rollback_left() : safety_reboot_left();
+
+		if (left)
+			snprintf(b, sizeof(b), "%s in %lu s\n", rb ? "Rollback" : "Restart", (unsigned long)left);
+		else
+			snprintf(b, sizeof(b), "No %s pending\n", rb ? "rollback" : "restart");
+		print_string_x(b);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "in") && ext_word_num(2, 1, SAFETY_MAX_MIN, &v)) {
+		if (!rb)
+			safety_reboot_in(v);
+		else if (!safety_rollback_start(v))
+			ext_error("the saved configuration could not be kept\n");
+	} else if (!rb && cmd_words_len == 2 && cmd_compare(1, "now")) {
+		plat_reboot();
+	} else if (!rb && cmd_words_len == 2 && cmd_compare(1, "cancel")) {
+		safety_reboot_in(0);
+	} else if (rb && cmd_words_len == 2 && cmd_compare(1, "confirm")) {
+		safety_rollback_confirm();
+	} else {
+		ext_error(rb ? "rollback [in <1-1440>|confirm]\n" : "reboot [now|in <1-1440>|cancel]\n");
+	}
+	return true;
 }
 
 
@@ -308,10 +399,10 @@ static bool parse_dot1x(void)
 	if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
 		dot1x_cfg.enabled = cmd_compare(1, "on");
 	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "radius")
-		   && parse_ip(rest(2), a)) {
+		   && ext_ip(ext_rest(2), a)) {
 		port = 1812;
-		w = rest(3);
-		if (cmd_words_len == 4 && (!num(&w, 65535, 0, &port) || !port)) {
+		w = ext_rest(3);
+		if (cmd_words_len == 4 && (!ext_num(&w, 65535, 0, &port) || !port)) {
 			ext_error("dot1x radius <a.b.c.d> [<udp port>]\n");
 			return true;
 		}
@@ -319,15 +410,15 @@ static bool parse_dot1x(void)
 			dot1x_cfg.radius_ip[k] = a[k];
 		dot1x_cfg.radius_port = port;
 	} else if (cmd_words_len >= 3 && cmd_compare(1, "secret")) {
-		if (strlen(rest(2)) >= sizeof(dot1x_cfg.secret)) {
+		if (strlen(ext_rest(2)) >= sizeof(dot1x_cfg.secret)) {
 			ext_error("the secret is too long\n");
 			return true;
 		}
-		strcpy(dot1x_cfg.secret, rest(2));
+		strcpy(dot1x_cfg.secret, ext_rest(2));
 	} else if (cmd_words_len == 3 && cmd_compare(1, "reauth")) {
 		unsigned s = 0;
-		w = rest(2);
-		if (!cmd_compare(2, "off") && (!num(&w, 86400, 0, &s) || s < 60)) {
+		w = ext_rest(2);
+		if (!cmd_compare(2, "off") && (!ext_num(&w, 86400, 0, &s) || s < 60)) {
 			ext_error("dot1x reauth <60-86400>|off\n");
 			return true;
 		}
@@ -410,7 +501,7 @@ static void acl_print(const char *what, const uint32_t *w)
 
 static bool hex32(uint8_t word, uint32_t *v)
 {
-	const char *p = rest(word);
+	const char *p = ext_rest(word);
 
 	*v = 0;
 	for (uint8_t n = 0; ; n++, p++) {
@@ -433,10 +524,10 @@ static bool parse_acl(void)
 {
 	uint32_t d[ACL_WORDS], c[ACL_WORDS];
 	unsigned idx;
-	const char *w = rest(2);
+	const char *w = ext_rest(2);
 	bool rule = cmd_compare(1, "rule");
 
-	if (cmd_words_len < 3 || !(rule || cmd_compare(1, "action")) || !num(&w, ACL_ENTRIES - 1, 0, &idx)) {
+	if (cmd_words_len < 3 || !(rule || cmd_compare(1, "action")) || !ext_num(&w, ACL_ENTRIES - 1, 0, &idx)) {
 		ext_error("acltbl rule|action <0-95> [<hex words>]\n");
 		return true;
 	}
@@ -469,6 +560,10 @@ static bool parse_acl(void)
 
 bool rtl_cmd_ext(void)
 {
+	if (cmd_compare(0, "reboot") || cmd_compare(0, "rollback"))
+		return parse_reboot();
+	if (rtl_guard_cmd())
+		return true;
 	if (cmd_compare(0, "acltbl"))
 		return parse_acl();
 	if (cmd_compare(0, "dot1x"))

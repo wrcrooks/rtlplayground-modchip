@@ -15,6 +15,10 @@
 #include "rtl8238.h"
 #include "bridge.h"
 #include "dot1x.h"
+#include "rtl_guard.h"
+extern uint8_t stp_pflags[];
+extern uint8_t cmd_buffer[];
+#define cmd_buffer_test cmd_buffer
 #include "plat.h"
 #include "rtl837x_acl.h"
 
@@ -351,7 +355,11 @@ void plat_console_putc(char c)
 void plat_delay_ms(uint32_t ms) { (void)ms; }
 uint32_t plat_random32(void) { return (uint32_t)random(); }
 void plat_sys_led(uint8_t state) { (void)state; }
-void plat_reboot(void) { printf("CHECK FAIL unexpected reboot\n"); exit(1); }
+static int reboots;
+void plat_reboot(void) { reboots++; }
+static uint8_t sectors[2][4096];
+void plat_sector_read(int id, uint8_t *dst, uint32_t len) { memcpy(dst, sectors[id], len); }
+bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { memcpy(sectors[id], src, len); return true; }
 uint32_t plat_uptime_s(void) { return uptime; }
 uint32_t plat_ms(void) { return uptime * 1000; }
 
@@ -975,6 +983,125 @@ int main(void)
 			      "%s: masks and limit as configured (%x, %x, %x, %x)", boot ? "restart into a config without dot1x on" : "  opened",
 			      regs[0x50c0 + 4 * l2], regs[0x50c0 + 4 * l1], regs[0x5384 + 4 * l2], regs[0x50c0 + 4 * l3]);
 		}
+	}
+
+	/* Error-disable, DHCP snooping and QoS (rtl_guard.c) */
+	{
+		uint8_t l1 = machine.phys_to_log_port[0], l2 = machine.phys_to_log_port[1];
+		uint16_t iso2 = 0x50c0 + 4 * l2, iso1 = 0x50c0 + 4 * l1, lrn2 = 0x5384 + 4 * l2;
+		uint32_t was1 = regs[iso1], was2 = regs[iso2];
+		uint16_t vl;
+		uint8_t g[64];
+
+		memcpy(g, "\xff\xff\xff\xff\xff\xff\x02\x00\x00\x00\x00\x22\x88\x99\x04\x00\x00\x00\x00", 19);
+		g[19] = l2; memcpy(g + 20, "\x81\x00\x00\x01\x08\x06", 6);
+		memset(g + 26, 0, sizeof(g) - 26);
+		uint8_t g0[64];
+		memcpy(g0, g, sizeof(g));
+		check(rtl_rx_frame(g, sizeof(g), &vl) != 0, "an ARP from port 2 reaches the IP stack");
+
+		cmd("errdisable");
+		check(strstr((char *)outbuf, "bpduguard on, l2-limit off, link-flap off"), "errdisable: the causes as they start");
+		cmd("errdisable recovery 10");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "recovery below 30 s is refused");
+		cmd("errdisable recovery 60");
+		cmd("errdisable cause link-flap on");
+
+		/* link flaps */
+		uint8_t lk[12] = { 0 };
+		uint32_t sts = l2 < 8 ? 1u << (16 + l2) : 1u << l2;
+		for (int i = 0; i < 6; i++) {
+			memset(lk, 0, sizeof(lk));
+			if (!(i & 1))
+				memcpy(lk, &sts, 4);
+			rtl_on_link(lk);
+		}
+		check(regs[iso2] == 0x200 && regs[iso1] == (was1 & ~(1u << l2)) && regs[lrn2] == 0,
+		      "six link changes within 10 s: port 2 is fenced off (%x, %x, %x)", regs[iso2], regs[iso1], regs[lrn2]);
+		memcpy(g, g0, sizeof(g));
+		check(rtl_rx_frame(g, sizeof(g), &vl) == 0, "and its frames don't reach the CPU");
+		cmd("errdisable");
+		check(strstr((char *)outbuf, "port 2: link-flap"), "errdisable shows it");
+		for (int i = 0; i < 59; i++) { uptime++; rtl_second(); }
+		check(regs[iso2] == 0x200, "still off after 59 s");
+		uptime++; rtl_second();
+		check(regs[iso2] == was2 && regs[iso1] == was1, "back after the recovery time (%x, %x)", regs[iso2], regs[iso1]);
+		memcpy(g, g0, sizeof(g));
+		check(rtl_rx_frame(g, sizeof(g), &vl) != 0, "and its frames are taken again");
+		cmd("errdisable cause link-flap off");
+
+		/* l2 limit */
+		cmd("l2 limit 2 3");
+		cmd("errdisable cause l2-limit on");
+		check(regs[lrn2] == 4, "l2-limit: one address more may be learned, to see it (%x)", regs[lrn2]);
+		regs[0x53ac + 4 * l2] = 3;
+		rtl_second();
+		check(regs[iso2] == was2, "at the limit nothing happens");
+		regs[0x53ac + 4 * l2] = 4;
+		rtl_second();
+		check(regs[iso2] == 0x200 && regs[lrn2] == 0, "past it the port is disabled");
+		regs[0x53ac + 4 * l2] = 0;
+		cmd("dot1x port 2 force-auth");
+		check(regs[iso2] == 0x200, "802.1X doesn't reopen it");
+		cmd("errdisable port 2 clear");
+		rtl_second();
+		check(regs[iso2] == was2 && regs[lrn2] == 4, "errdisable port 2 clear (%x, %x)", regs[iso2], regs[lrn2]);
+		cmd("errdisable cause l2-limit off");
+		check(regs[lrn2] == 3, "without the cause the limit is as configured");
+		cmd("l2 limit 2 off");
+
+		/* BPDU guard: STP's own, with the port fenced off and recovered */
+		cmd("stp on");
+		cmd("stp port 2 guard bpdu");
+		stp_pflags[l2] |= 0x80;		/* tripped, as stp_in() sets it */
+		rtl_second();
+		check(regs[iso2] == 0x200, "a tripped BPDU guard disables the port");
+		strcpy((char *)cmd_buffer_test, "half a line");
+		for (int i = 0; i < 60; i++) { uptime++; rtl_second(); }
+		check(regs[iso2] == was2 && !(stp_pflags[l2] & 0x80), "and it recovers, rejoining STP (%x, %02x)", regs[iso2], stp_pflags[l2]);
+		check(!strcmp((char *)cmd_buffer_test, "half a line"), "without touching a line being typed");
+		cmd("stp off");
+		rtl_http_get("/cmd_log");
+		outbuf[slen] = 0;
+		check(!strstr((char *)outbuf, "stp port 2 on"), "nor entering the command history");
+
+		/* DHCP snooping and QoS: ACL rules */
+#define RULE_VALID(n) ((acl_tbl[1][0x80 + (n) - 1][4] >> 21) & 1)
+		cmd("dhcp-snoop on");
+		check(!memcmp(outbuf, "HTTP/1.1 200", 12) && !RULE_VALID(60), "dhcp-snoop on: not yet");
+		rtl_second();
+		check(RULE_VALID(60) && RULE_VALID(61) && !RULE_VALID(62), "DHCP server replies dropped, IPv4 and IPv6");
+		static uint32_t r60[5];
+		memcpy(r60, acl_tbl[1][0x80 + 59], 20);
+		cmd("dhcp-snoop trust 1 on");
+		rtl_second();
+		check(RULE_VALID(60) && memcmp(r60, acl_tbl[1][0x80 + 59], 20) | memcmp(acl_tbl[1][59], r60, 20), "a trusted port changes the rule's ports");
+		cmd("dhcp-snoop ra on");
+		rtl_second();
+		check(RULE_VALID(62), "router advertisements too");
+		cmd("dhcp-snoop off");
+		rtl_second();
+		check(!RULE_VALID(60) && !RULE_VALID(61) && !RULE_VALID(62), "dhcp-snoop off");
+		cmd("qos port 1 trust dscp");
+		cmd("qos port 2 priority 5");
+		rtl_second();
+		check(RULE_VALID(41) && RULE_VALID(47) && RULE_VALID(49) && !RULE_VALID(48), "qos: seven DSCP classes and port 2's priority");
+		cmd("qos port 2 priority 8");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "priority 8 is refused");
+		cmd("qos port 1 trust none");
+		cmd("qos port 2 priority off");
+		rtl_second();
+		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		static char gj[4096];
+		rtl_guard_json(gj, sizeof(gj));
+		check(strstr(gj, "{\"port\":2,\"disabled\":\"\""), "the guard's JSON");
+		printf("JSON %s\n", gj);
+		cmd("reboot in 5");
+		cmd("reboot");
+		check(strstr((char *)outbuf, "Restart in 300 s"), "reboot in 5");
+		cmd("reboot cancel");
+		cmd("rollback in 0");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12) && !reboots, "rollback in 0 is refused");
 	}
 
 	printf("REQUESTS %u\n", requests);

@@ -33,6 +33,8 @@
 #include "dot1x.h"
 #include "dot1x_plat.h"
 #include "rtl837x_acl.h"
+#include "events.h"
+#include "rtl_guard.h"
 
 void rtl_iso_reset(void);	/* rtl_env.c */
 void rtl_iso_release(void);
@@ -146,6 +148,7 @@ void rtl_bridge_up(void)
 	rtl_iso_reset();
 	dot1x_plat_bridge_up();
 	acl_reset();
+	rtl_guard_reset();
 
 	flash_region.addr = CONFIG_START;
 	flash_region.len = 0x100;
@@ -196,7 +199,7 @@ void rtl_tick(void)
 	if (!(ticks % (SYS_TICK_HZ / 10))) {
 		/* not what a closed port learned for MAC authentication */
 		uint16_t sticky = l2_sticky_pmask;
-		l2_sticky_pmask &= ~dot1x_blocked();
+		l2_sticky_pmask &= ~(dot1x_blocked() | rtl_errdis());
 		l2_sticky_tick();
 		l2_sticky_pmask = sticky;
 	}
@@ -327,6 +330,7 @@ void rtl_second(void)
 	rtl_metrics_second();
 	dot1x_second();
 	acl_poll();
+	rtl_guard_second();
 	handle_button();
 	for (uint8_t sfp = 0; sfp < 2; sfp++) {
 		if (!sfp_read_due[sfp] || --sfp_read_due[sfp])
@@ -449,6 +453,8 @@ void tcpip_output(void)
 uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 {
 	if (!up || len < ETH_TYPE_OFFSET + 2 || len > UIP_CONF_BUFFER_SIZE)
+		return 0;
+	if ((rtl_errdis() >> (frame[19] & 0x0f)) & 1)
 		return 0;
 	/* EAPOL, and anything from a port 802.1X keeps closed */
 	if (dot1x_plat_rx(frame, len, ETH_TYPE_OFFSET))

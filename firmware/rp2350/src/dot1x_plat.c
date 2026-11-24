@@ -27,6 +27,7 @@
 
 #include "dot1x.h"
 #include "dot1x_plat.h"
+#include "events.h"
 #include "plat.h"
 
 extern __code const struct machine machine;
@@ -128,10 +129,7 @@ const uint8_t *dot1x_hw_mac(void)
 
 void dot1x_hw_log(const char *msg, uint8_t port)
 {
-	print_string(msg);
-	write_char(' ');
-	itoa(dot1x_hw_front_port(port));
-	write_char('\n');
+	event(EV_DOT1X, dot1x_hw_front_port(port), 0, "%s %u", msg, dot1x_hw_front_port(port));
 }
 
 

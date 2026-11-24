@@ -11,7 +11,8 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c rtl837x_acl.c rtl837x_acl_cmd.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	../src/rtl_poe.c ../src/dot1x_plat.c ../src/dot1x.c ../src/md5.c $(BUILD)/web_assets.c sim.c
+	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c \
+	$(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext -DRTLP_ACL \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
 	-DRTLP_HOST_TEST -DMACHINE_$(MACHINE) -DMACHINE_NAME=$(MACHINE) \
@@ -24,9 +25,11 @@ MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
 SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
-all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
 	$(BUILD)/test_dot1x
+	$(BUILD)/test_safety
+	python3 run_config_words.py $(BUILD)/test_safety
 	$(BUILD)/test_upload
 	python3 run_sim.py $(BUILD)/sim
 	python3 run_sim.py $(BUILD)/sim-poe
@@ -57,16 +60,22 @@ $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/p
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -I$(RTLP)/modchip/bridge -o $@ test_metrics.c ../src/metrics.c
 
+$(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_safety.c ../src/events.c ../src/store.c ../src/safety.c
+
 $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_upload.c ../src/upload.c ../src/link.c
 
 LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c
 
-$(BUILD)/test_httpd: test_httpd.c ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h
+HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/safety.c ../src/extras.c
+
+$(BUILD)/test_httpd: test_httpd.c $(HTTPD_SRC) ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
-		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c ../src/upload.c ../src/link.c $(LWIP_CORE)
+		'-DMODCHIP_VERSION="test"' -o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) $(LWIP_CORE)
 
 # The same with TLS (the SDK's altcp_tls_mbedtls.c, as the firmware builds it): HTTPS
 # switched on and off, the listener closed under lwIP's asserts
@@ -75,7 +84,7 @@ $(BUILD)/test_httpd_tls: test_httpd.c ../src/httpd.c ../src/tls_cert.c ../src/lw
 	$(CC) -std=gnu11 -O1 -g -w -DTEST_HTTPD_TLS -Ilwip_httpd_tls -Ilwip_httpd -I. -I../src -I$(LWIP)/src/include \
 		-I$(RTLP)/modchip/bridge -I$(LWIP)/src/apps/altcp_tls -I$(MBEDTLS)/include -I$(MBEDTLS)/library \
 		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' '-DMODCHIP_VERSION="test"' \
-		-o $@ test_httpd.c ../src/httpd.c ../src/upload.c ../src/link.c ../src/tls_cert.c $(LWIP_CORE) \
+		-o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) ../src/tls_cert.c $(LWIP_CORE) \
 		$(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c \
 		$(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c $(wildcard $(MBEDTLS)/library/*.c)
 

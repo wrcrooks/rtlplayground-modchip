@@ -16,9 +16,12 @@
 #include "lwip/tcp.h"
 
 #include "bridge.h"
+#include "events.h"
+#include "extras.h"
 #include "metrics.h"
 #include "net.h"
 #include "plat.h"
+#include "safety.h"
 #include "upload.h"
 #include "web_assets.h"
 
@@ -28,6 +31,7 @@
 #define CMD_LINE_MAX		127			/* CMD_BUF_SIZE - 1 */
 #define TLS_CONNS		2			/* each holds about 25 KB of mbedTLS buffers */
 #define METRICS_JSON_MAX	6144
+#define FEATURES_JSON_MAX	8192
 #define WRITE_MAX		2048			/* below MBEDTLS_SSL_OUT_CONTENT_LEN: one TLS record */
 
 enum { ST_FREE, ST_RX, ST_TX, ST_UPLOAD, ST_DRAIN };
@@ -320,6 +324,15 @@ static bool handle_metrics(struct conn *c, const char *path)
 		respond_body(c, "application/json", body, len);
 		return true;
 	}
+	if (!strcmp(path, "/events.json") || !strcmp(path, "/features.json")) {
+		body = malloc(FEATURES_JSON_MAX);
+		if (!body)
+			return false;
+		len = path[1] == 'e' ? events_json((char *)body, FEATURES_JSON_MAX, 0)
+				     : features_json((char *)body, FEATURES_JSON_MAX);
+		respond_body(c, "application/json", body, len);
+		return true;
+	}
 	if (!strcmp(path, "/history.bin")) {
 		body = metrics_history(&len);
 		if (!body)
@@ -330,6 +343,8 @@ static bool handle_metrics(struct conn *c, const char *path)
 	return false;
 }
 
+
+static void handle_backup(struct conn *c);
 
 static void handle_get(struct conn *c, char *target)
 {
@@ -356,6 +371,10 @@ static void handle_get(struct conn *c, char *target)
 	}
 	if (handle_metrics(c, path))
 		return;
+	if (!strcmp(path, "/backup")) {
+		handle_backup(c);
+		return;
+	}
 	if (!strcmp(path, "/reset")) {
 		c->reboot_after = true;
 		send_ok(c);
@@ -368,12 +387,22 @@ static void handle_get(struct conn *c, char *target)
 }
 
 
+static const char *peer(struct conn *c)
+{
+	const ip_addr_t *a = c->pcb ? altcp_get_ip(c->pcb, 0) : NULL;
+
+	return a ? ipaddr_ntoa(a) : "?";
+}
+
+
 static void handle_login(struct conn *c, char *body)
 {
 	if (strncmp(body, "pwd=", 4) || !rtl_password_ok(body + 4)) {
+		event(EV_LOGIN_FAILED, 0, 0, "Web login failed from %s", peer(c));
 		send_to_login(c);
 		return;
 	}
+	event(EV_LOGIN, 0, 0, "Web login from %s%s", peer(c), c->tls ? " over HTTPS" : "");
 	for (int i = 0; i < RTL_SESSION_ID_LEN; i++)
 		session_id[i] = "0123456789abcdef"[plat_random32() & 0xf];
 	session_id[RTL_SESSION_ID_LEN] = 0;
@@ -397,27 +426,38 @@ static const char *memfind(const char *p, const char *end, const char *s)
 }
 
 
-/*
- * POST /config, multipart/form-data: the part with a filename holds the
- * configuration. Checked as config_take() in httpd.c does: it must fit the
- * sector with its terminator, and no line may outgrow the command buffer.
- */
-static void handle_config(struct conn *c, char *body, uint16_t len)
+/* The plain-text verdicts of RTLPlayground's /upload: "OK: ..." or "NO: ..." */
+static int verdict(char *r, size_t max, int status, const char *text)
 {
-	static uint8_t sector[PLAT_CONFIG_LEN];
+	return snprintf(r, max, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n"
+			"Content-Length: %u\r\n\r\n%s\n", status == 200 ? "200 OK" : status == 400 ? "400 Bad Request"
+			: status == 401 ? "401 Unauthorized" : "503 Service Unavailable", (unsigned)strlen(text) + 1, text);
+}
+
+
+static void text_verdict(struct conn *c, int status, const char *text)
+{
+	char r[220];
+
+	respond(c, r, verdict(r, sizeof(r), status, text));
+}
+
+
+/*
+ * The file in a multipart/form-data body: the part with a filename.
+ * Returns where it starts and its length in *n, or NULL.
+ */
+static char *file_part(struct conn *c, char *body, uint16_t len, size_t *n)
+{
 	char delim[80];
 	char *ct = header(c, "content-type:");
 	const char *end = body + len;
 
-	if (!ct || strncmp(ct, "multipart/form-data; boundary=", 30)) {
-		send_bad_request(c);
-		return;
-	}
+	if (!ct || strncmp(ct, "multipart/form-data; boundary=", 30))
+		return NULL;
 	size_t bl = strcspn(ct + 30, "\r");
-	if (bl == 0 || bl > sizeof(delim) - 5) {
-		send_bad_request(c);
-		return;
-	}
+	if (bl == 0 || bl > sizeof(delim) - 5)
+		return NULL;
 	memcpy(delim, "\r\n--", 4);
 	memcpy(delim + 4, ct + 30, bl);
 	delim[4 + bl] = 0;
@@ -434,33 +474,116 @@ static void handle_config(struct conn *c, char *body, uint16_t len)
 		if (!next)
 			break;
 		if (memfind(hdr, data, "filename")) {
-			size_t n = next - data;
-			int run = 0;
-
-			if (n + 1 > sizeof(sector)) {
-				send_bad_request(c);
-				return;
-			}
-			for (size_t i = 0; i < n; i++) {
-				if (data[i] == '\n')
-					run = 0;
-				else if (++run >= CMD_LINE_MAX) {
-					send_bad_request(c);
-					return;
-				}
-			}
-			memset(sector, 0xff, sizeof(sector));
-			memcpy(sector, data, n);
-			sector[n] = 0;
-			if (plat_config_write(sector, sizeof(sector)))
-				send_ok(c);
-			else
-				respond_str(c, "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-			return;
+			*n = next - data;
+			return (char *)data;
 		}
 		part = next + 2;
 	}
-	send_bad_request(c);
+	return NULL;
+}
+
+
+static uint8_t config_sector[PLAT_CONFIG_LEN];
+
+static bool config_store(struct conn *c, const char *text, size_t n)
+{
+	memset(config_sector, 0xff, sizeof(config_sector));
+	memcpy(config_sector, text, n);
+	config_sector[n] = 0;
+	if (plat_config_write(config_sector, sizeof(config_sector)))
+		return true;
+	respond_str(c, "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
+	return false;
+}
+
+
+/*
+ * POST /config: checked as config_take() in httpd.c does: it must fit the
+ * sector with its terminator, and no line may outgrow the command buffer.
+ */
+static void handle_config(struct conn *c, char *body, uint16_t len)
+{
+	size_t n;
+	char *data = file_part(c, body, len, &n);
+	int run = 0;
+
+	if (!data || n + 1 > sizeof(config_sector)) {
+		send_bad_request(c);
+		return;
+	}
+	for (size_t i = 0; i < n; i++) {
+		if (data[i] == '\n')
+			run = 0;
+		else if (++run >= CMD_LINE_MAX) {
+			send_bad_request(c);
+			return;
+		}
+	}
+	if (!config_store(c, data, n))
+		return;
+	event(EV_CONFIG, 0, 0, "Configuration saved from the web UI");
+	send_ok(c);
+}
+
+
+/*
+ * POST /restore?confirm=<minutes>: a configuration file, checked line by line
+ * before anything is written. With confirm, the one saved now comes back
+ * unless "rollback confirm" follows in time. The switch restarts with it.
+ */
+static void handle_restore(struct conn *c, const char *query, char *body, uint16_t len)
+{
+	size_t n;
+	char *data = file_part(c, body, len, &n), err[80], msg[110];
+	unsigned confirm = 0;
+
+	if (!strncmp(query, "confirm=", 8))
+		confirm = strtoul(query + 8, NULL, 10);
+	if (!data) {
+		text_verdict(c, 400, "NO: expected a multipart upload of the file");
+		return;
+	}
+	int k = config_check(data, n, err, sizeof(err));
+	if (k < 0 || k + 1 > (int)sizeof(config_sector)) {
+		snprintf(msg, sizeof(msg), "NO: %s", k < 0 ? err : "the file is too long");
+		text_verdict(c, 400, msg);
+		return;
+	}
+	if (confirm > SAFETY_MAX_MIN || (confirm && !safety_rollback_start(confirm))) {
+		text_verdict(c, 400, "NO: the rollback could not be prepared");
+		return;
+	}
+	if (!config_store(c, data, k))
+		return;
+	event(EV_CONFIG, 0, 0, "Configuration restored from a file");
+	c->reboot_after = true;
+	text_verdict(c, 200, "OK: restored, restarting");
+}
+
+
+/* GET /backup: the saved configuration as a file */
+static void handle_backup(struct conn *c)
+{
+	char *t = malloc(PLAT_CONFIG_LEN + 400), name[32];
+	size_t n, k = 0;
+
+	if (!t) {
+		respond_str(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+		return;
+	}
+	for (const char *p = hostname; *p && k < sizeof(name) - 1; p++)
+		name[k++] = (*p >= '0' && *p <= '9') || ((*p | 0x20) >= 'a' && (*p | 0x20) <= 'z') || *p == '-' ? *p : '_';
+	name[k] = 0;
+	plat_config_read(0, config_sector, sizeof(config_sector));
+	n = snprintf(t, 400, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\n"
+		     "Content-Disposition: attachment; filename=\"%s-config.txt\"\r\nConnection: close\r\n\r\n"
+		     "# %s: configuration backup. Holds passwords and secrets.\n", name, name);
+	for (size_t i = 0; i < sizeof(config_sector) && config_sector[i] && config_sector[i] != 0xff; i++)
+		t[n++] = config_sector[i];
+	if (t[n - 1] != '\n')
+		t[n++] = '\n';
+	respond(c, t, n);
+	free(t);
 }
 
 
@@ -501,7 +624,11 @@ static void handle_request(struct conn *c)
 		send_unauthorized(c);
 		return;
 	}
-	if (!strcmp(target, "/cmd")) {
+	char *query = strchr(target, '?');
+	query = query ? query + 1 : sp;
+	if (!strncmp(target, "/restore", 8) && (!target[8] || target[8] == '?')) {
+		handle_restore(c, query, body, c->content_length);
+	} else if (!strcmp(target, "/cmd")) {
 		rtl_http_cmd(body);
 		respond_outbuf(c);
 	} else if (!strcmp(target, "/config")) {
@@ -519,23 +646,6 @@ static void up_put(const uint8_t *p, size_t n)
 		up_head = (up_head + 1) % UP_RING;
 		up_count++;
 	}
-}
-
-
-/* The plain-text verdicts of RTLPlayground's /upload: "OK: ..." or "NO: ..." */
-static int verdict(char *r, size_t max, int status, const char *text)
-{
-	return snprintf(r, max, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n"
-			"Content-Length: %u\r\n\r\n%s\n", status == 200 ? "200 OK" : status == 400 ? "400 Bad Request"
-			: status == 401 ? "401 Unauthorized" : "503 Service Unavailable", (unsigned)strlen(text) + 1, text);
-}
-
-
-static void upload_verdict(struct conn *c, int status, const char *text)
-{
-	char r[220];
-
-	respond(c, r, verdict(r, sizeof(r), status, text));
 }
 
 
@@ -637,11 +747,11 @@ bool httpd_poll(void)
 	if (upload_state() == UP_DONE) {
 		printf("upload: image staged and verified, rebooting to install it\n");
 		c->reboot_after = true;
-		upload_verdict(c, 200, "OK: checksum verified, rebooting");
+		text_verdict(c, 200, "OK: checksum verified, rebooting");
 	} else {
 		printf("upload: %s\n", upload_error());
 		snprintf(msg, sizeof(msg), "NO: %s", upload_error());
-		upload_verdict(c, 400, msg);
+		text_verdict(c, 400, msg);
 	}
 	return true;
 }

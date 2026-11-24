@@ -25,6 +25,7 @@
 
 #include "bridge.h"
 #include "plat.h"
+#include "rtl_guard.h"
 
 /* page_impl.h defines itohex() inline: one TU must also emit it */
 extern char itohex(uint8_t val);
@@ -380,7 +381,7 @@ static bool tbl_read(uint32_t ctrl)
  */
 #define ISO_PORTS	CPU_PORT
 static uint32_t iso_cfg[ISO_PORTS];
-static uint16_t iso_set, iso_gated;
+static uint16_t iso_set, iso_gated, iso_errdis;
 static bool iso_held;
 
 /*
@@ -417,8 +418,13 @@ static uint32_t lrn_configured(uint8_t port)
 
 static uint32_t lrn_effective(uint8_t port)
 {
+	if ((iso_errdis >> port) & 1)
+		return 0;
 	if ((iso_gated >> port) & 1)
 		return (iso_learn >> port) & 1;
+	/* error-disable sees a violation by the one address too many */
+	if (rtl_errdis_limit(port) && lrn_configured(port) < L2_LEARN_UNLIMITED)
+		return lrn_configured(port) + 1;
 	return lrn_configured(port);
 }
 
@@ -433,9 +439,11 @@ static int iso_port(uint16_t reg)
 
 static uint32_t iso_effective(uint8_t port)
 {
-	if ((iso_gated >> port) & 1)
+	uint16_t fenced = iso_gated | iso_errdis;
+
+	if ((fenced >> port) & 1)
 		return PMASK_CPU;
-	return iso_configured(port) & ~(uint32_t)iso_gated;
+	return iso_configured(port) & ~(uint32_t)fenced;
 }
 
 
@@ -450,13 +458,33 @@ static void iso_write(uint8_t port)
 }
 
 
+static void iso_write_all(void)
+{
+	for (uint8_t port = machine.min_port; port <= machine.max_port && port < ISO_PORTS; port++)
+		iso_write(port);
+}
+
+
 /* From dot1x_plat.c: the ports to gate */
 void rtl_iso_gate(uint16_t gated, uint16_t learn)
 {
 	iso_gated = gated;
 	iso_learn = learn;
-	for (uint8_t port = machine.min_port; port <= machine.max_port && port < ISO_PORTS; port++)
-		iso_write(port);
+	iso_write_all();
+}
+
+
+/* From rtl_guard.c: the ports error-disable fences off */
+void rtl_iso_errdis(uint16_t ports)
+{
+	iso_errdis = ports;
+	iso_write_all();
+}
+
+
+uint32_t rtl_l2_limit(uint8_t port)
+{
+	return lrn_configured(port);
 }
 
 
@@ -474,7 +502,7 @@ void rtl_iso_reset(void)
 void rtl_iso_release(void)
 {
 	iso_held = false;
-	rtl_iso_gate(iso_gated, iso_learn);
+	iso_write_all();
 }
 
 

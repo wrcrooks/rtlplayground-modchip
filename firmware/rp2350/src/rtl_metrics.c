@@ -19,7 +19,9 @@
 #include "sfp.h"
 
 #include "bridge.h"
+#include "events.h"
 #include "plat.h"
+#include "rtl_guard.h"
 #include "rtl_metrics.h"
 
 #define LINK_EVENTS		32
@@ -251,6 +253,8 @@ uint8_t rtl_link_events(struct rtl_link_event *out, uint8_t max)
 
 
 /* From MSG_LINK: a timeline entry for each port whose link changed */
+static const char *const link_names[] = { "down", "up 10M", "up 100M", "up 1G", "up 500M", "up 10G", "up 2.5G", "up 5G" };
+
 void rtl_metrics_link(uint32_t sts, uint32_t links, uint32_t links_89)
 {
 	for (uint8_t i = machine.min_port; i <= machine.max_port && i <= RTL_MAX_PORTS; i++) {
@@ -266,6 +270,8 @@ void rtl_metrics_link(uint32_t sts, uint32_t links, uint32_t links_89)
 		e->t_ms = plat_ms();
 		e->port = machine.log_to_phys_port[i];
 		e->link = now;
+		event(EV_LINK, e->port, now, "Port %u link %s", e->port, link_names[now & 7]);
+		rtl_guard_link(i, now);
 		ev_next = (ev_next + 1) % LINK_EVENTS;
 	}
 	link_seen = true;
