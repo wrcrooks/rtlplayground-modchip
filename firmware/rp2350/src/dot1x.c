@@ -371,6 +371,13 @@ static uint16_t rad_mac(uint8_t *r, uint16_t n, uint8_t type, const uint8_t *mac
 }
 
 
+/* RFC 6614 2.3: over TLS it's "radsec", TLS does the protecting */
+static const char *secret(void)
+{
+	return dot1x_cfg.radsec && !dot1x_cfg.secret[0] ? "radsec" : dot1x_cfg.secret;
+}
+
+
 /* RFC 2865 5.2: the password, hidden with the secret and the Request Authenticator */
 static uint16_t rad_password(uint8_t *r, uint16_t n, const char *pw, const uint8_t *ra)
 {
@@ -383,7 +390,7 @@ static uint16_t rad_password(uint8_t *r, uint16_t n, const char *pw, const uint8
 	memset(c, 0, plen);
 	memcpy(c, pw, len < plen ? len : plen);
 	for (uint16_t i = 0; i < plen; i += 16) {
-		dot1x_md5((const uint8_t *)dot1x_cfg.secret, strlen(dot1x_cfg.secret), prev, 16, b);
+		dot1x_md5((const uint8_t *)secret(), strlen(secret()), prev, 16, b);
 		for (int k = 0; k < 16; k++)
 			c[i + k] ^= b[k];
 		prev = c + i;
@@ -435,7 +442,7 @@ static void access_request(uint8_t port, const uint8_t *eap, uint16_t eap_len)
 	n = rad_attr(r, n, A_MESSAGE_AUTH, ma, 16);
 	r[2] = n >> 8;
 	r[3] = n;
-	dot1x_hmac_md5((const uint8_t *)dot1x_cfg.secret, strlen(dot1x_cfg.secret), r, n, ma);
+	dot1x_hmac_md5((const uint8_t *)secret(), strlen(secret()), r, n, ma);
 	memcpy(r + ma_at, ma, 16);
 	p->rad_len = n;
 	dot1x_hw_radius_tx(r, n);
@@ -446,7 +453,7 @@ static void access_request(uint8_t port, const uint8_t *eap, uint16_t eap_len)
 static bool rad_verify(const struct port *p, uint8_t *r, uint16_t len, bool need_ma)
 {
 	uint8_t got[16], want[16], ra[16];
-	uint16_t slen = strlen(dot1x_cfg.secret);
+	uint16_t slen = strlen(secret());
 	struct md5 c;
 	int ma_at = -1;
 
@@ -455,7 +462,7 @@ static bool rad_verify(const struct port *p, uint8_t *r, uint16_t len, bool need
 	md5_update(&c, r, 4);
 	md5_update(&c, p->req_auth, 16);
 	md5_update(&c, r + 20, len - 20);
-	md5_update(&c, (const uint8_t *)dot1x_cfg.secret, slen);
+	md5_update(&c, (const uint8_t *)secret(), slen);
 	md5_final(&c, want);
 	if (memcmp(got, want, 16))
 		return false;
@@ -470,7 +477,7 @@ static bool rad_verify(const struct port *p, uint8_t *r, uint16_t len, bool need
 	memcpy(got, r + ma_at, 16);
 	memcpy(r + 4, p->req_auth, 16);
 	memset(r + ma_at, 0, 16);
-	dot1x_hmac_md5((const uint8_t *)dot1x_cfg.secret, slen, r, len, want);
+	dot1x_hmac_md5((const uint8_t *)secret(), slen, r, len, want);
 	memcpy(r + 4, ra, 16);
 	memcpy(r + ma_at, got, 16);
 	return !memcmp(got, want, 16);

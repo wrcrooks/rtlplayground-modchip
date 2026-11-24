@@ -24,6 +24,7 @@
 
 #include "bridge.h"
 #include "events.h"
+#include "radsec.h"
 #include "safety.h"
 #include "store.h"
 #include "telemetry.h"
@@ -478,6 +479,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			httpd_second();
 			snmp_second();
 			telemetry_second();
+			radsec_second();
 			ssh_conn_second();
 			read_rp_temp();
 			metrics_second();

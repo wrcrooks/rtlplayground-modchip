@@ -47,6 +47,10 @@ bool plat_mqtt_tls(const char *fingerprint);
 void plat_mqtt_interval(uint16_t s);
 size_t plat_mqtt_status(char *buf, size_t max);
 
+/* RADIUS over TLS (radsec.c); NULL: over UDP */
+bool plat_radsec(const char *fingerprint);
+void plat_radsec_restart(void);
+
 /* SSH on port 22 (ssh_lwip.c) */
 bool plat_ssh_enable(bool on);
 bool plat_ssh_newkey(void);
@@ -68,6 +72,7 @@ bool plat_https_enable(bool on);
 bool plat_https_enabled(void);
 bool plat_https_newcert(void);
 void plat_https_status(char *fingerprint, size_t len);
+size_t plat_https_cert(char *buf, size_t max);	/* as PEM; 0: none */
 
 /* The SNMP agent's settings (snmp.c); set() with NULL clears, false: too long */
 enum { PLAT_SNMP_ENABLED, PLAT_SNMP_COMMUNITY, PLAT_SNMP_LOCATION, PLAT_SNMP_CONTACT };

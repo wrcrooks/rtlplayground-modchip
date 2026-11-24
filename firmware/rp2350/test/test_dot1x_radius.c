@@ -1,8 +1,10 @@
 /*
  * dot1x.c against a real RADIUS server: EAP-MD5 accepted and rejected, MAB
- * accepted and rejected. run_dot1x_radius.sh starts FreeRADIUS in Docker with
+ * accepted and rejected, a VLAN from the server. run_dot1x_radius.sh starts FreeRADIUS in Docker with
  * the users this expects and runs it; the server is at 127.0.0.1:1812, secret
- * testing123.
+ * testing123. Built with RADSEC, the same over TLS through radsec.c, to port
+ * 2083: test_radsec cert <dir> makes our certificate, test_radsec <dir>
+ * <server's fingerprint> runs the test.
  */
 #include <arpa/inet.h>
 #include <poll.h>
@@ -12,12 +14,25 @@
 #include <unistd.h>
 
 #include "dot1x.h"
+#ifdef RADSEC
+#include <stdlib.h>
+#include <time.h>
+#include "lwip/init.h"
+#include "psa/crypto.h"
+#include "events.h"
+#include "plat.h"
+#include "radsec.h"
+#include "relay.h"
+#include "tls_cert.h"
+#include "tls_client.h"
+#endif
 
 static int failures, checks;
 #define check(c, ...) do { checks++; if (c) { printf("PASS  "); } else { printf("FAIL  "); failures++; } \
 	printf(__VA_ARGS__); printf("\n"); } while (0)
 
 static int sock;
+static uint16_t vlan_set;
 static const uint8_t sw_mac[6] = { 0x06, 0x0f, 0x00, 0xdd, 0x3b, 0x3e };
 
 uint16_t dot1x_hw_ports(void) { return 0x1f8; }
@@ -27,15 +42,51 @@ void dot1x_hw_random(uint8_t *p, uint8_t n) { FILE *f = fopen("/dev/urandom", "r
 void dot1x_hw_nas_ip(uint8_t ip[4]) { ip[0] = 127; ip[1] = 0; ip[2] = 0; ip[3] = 1; }
 const uint8_t *dot1x_hw_mac(void) { return sw_mac; }
 void dot1x_hw_log(const char *msg, uint8_t port) { printf("      log: %s %u\n", msg, port); }
-bool dot1x_hw_vlan(uint8_t port, uint16_t vlan) { (void)port; printf("VLAN %u\n", vlan); return true; }
+bool dot1x_hw_vlan(uint8_t port, uint16_t vlan) { (void)port; vlan_set = vlan; return true; }
 void dot1x_hw_gate(uint16_t blocked, uint16_t learn, bool on) { (void)blocked; (void)learn; (void)on; }
 
+#ifdef RADSEC
+static uint8_t key[1024], cert[1024];
+static size_t key_len = sizeof(key), cert_len = sizeof(cert);
+bool tls_identity(struct tls_identity *id)
+{
+	id->key = key; id->key_len = key_len; id->cert = cert; id->cert_len = cert_len;
+	return true;
+}
+u32_t sys_now(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+uint32_t plat_uptime_s(void) { return sys_now() / 1000; }
+const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
+void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+static void on_event(const struct event *e) { printf("      event: %s\n", e->text); }
+
+static void file(const char *dir, const char *name, uint8_t *b, size_t *n, bool out)
+{
+	char path[300];
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	FILE *f = fopen(path, out ? "wb" : "rb");
+	if (!f) {
+		perror(path);
+		exit(1);
+	}
+	*n = out ? fwrite(b, 1, *n, f) : fread(b, 1, *n, f);
+	fclose(f);
+}
+
+void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len) { radsec_tx(p, len); }
+#else
 void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len)
 {
 	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(1812) };
 	a.sin_addr.s_addr = htonl(0x7f000001);
 	sendto(sock, p, len, 0, (struct sockaddr *)&a, sizeof(a));
 }
+
+#endif
 
 /* The supplicant: EAP-MD5 */
 static const char *user, *password;
@@ -94,6 +145,18 @@ static void run(int s)
 			dot1x_second();
 		while (pending_port >= 0)
 			supplicant();
+#ifdef RADSEC
+		(void)buf;
+		if (t % 10 == 0)
+			radsec_second();
+		for (int k = 0; k < 100; k++) {
+			relay_poll();
+			while (pending_port >= 0)
+				supplicant();
+			usleep(1000);
+		}
+		continue;
+#else
 		struct pollfd pf = { sock, POLLIN, 0 };
 		while (poll(&pf, 1, 100) > 0) {
 			ssize_t n = recv(sock, buf, sizeof(buf), 0);
@@ -102,14 +165,46 @@ static void run(int s)
 			while (pending_port >= 0)
 				supplicant();
 		}
+#endif
 	}
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	dot1x_cfg.enabled = true;
+#ifdef RADSEC
+	psa_crypto_init();
+	if (argc > 2 && !strcmp(argv[1], "cert")) {
+		tls_make_cert("testswitch", key, &key_len, cert, &cert_len);
+		file(argv[2], "key.der", key, &key_len, true);
+		file(argv[2], "cert.der", cert, &cert_len, true);
+		return 0;
+	}
+	file(argv[1], "key.der", key, &key_len, false);
+	file(argv[1], "cert.der", cert, &cert_len, false);
+	lwip_init();
+	netif_set_default(netif_list);
+	event_listen(on_event);
+	relay_out(2083, 2083);
+	memcpy(dot1x_cfg.radius_ip, "\x7f\0\0\x01", 4);
+	dot1x_cfg.radsec = plat_radsec(argv[2]);
+	dot1x_cfg.radius_port = 2083;
+	if (argc > 3) {		/* a server that isn't the one */
+		dot1x_cfg.mode[4] = DOT1X_AUTO;
+		dot1x_init();
+		dot1x_apply();
+		user = "alice"; password = "secret";
+		dot1x_link(4, true);
+		run(12);
+		check(!dot1x_port_status(4)->authorized && !successes, "another certificate: nobody gets in");
+		return failures ? 1 : 0;
+	}
+#else
+	(void)argc; (void)argv;
 	strcpy(dot1x_cfg.secret, "testing123");
+#endif
+	dot1x_cfg.radius_vlan = true;
 	dot1x_cfg.mode[4] = DOT1X_AUTO;
 	dot1x_cfg.mode[6] = DOT1X_AUTO;
 	dot1x_cfg.mab[6] = true;
@@ -118,8 +213,19 @@ int main(void)
 
 	user = "alice"; password = "secret";
 	dot1x_link(4, true);
+	for (int t = 0; t < 12 && !successes; t++) {
+		run(1);
+		if (successes)
+			printf("      after %d s\n", t + 1);
+	}
+	check(successes && dot1x_port_status(4)->authorized, "FreeRADIUS: EAP-MD5 alice accepted");
+
+	check(!vlan_set, "no VLAN asked for");
+	user = "bob";
+	dot1x_restart(4);
 	run(3);
-	check(successes == 1 && dot1x_port_status(4)->authorized, "FreeRADIUS: EAP-MD5 alice accepted");
+	check(dot1x_port_status(4)->authorized && vlan_set == 42, "FreeRADIUS: bob goes into VLAN 42");
+	user = "alice";
 
 	password = "wrong";
 	dot1x_restart(4);

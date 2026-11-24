@@ -150,6 +150,7 @@ add_executable(modchip
     src/metrics.c
     src/dot1x.c
     src/dot1x_udp.c
+    src/radsec.c
     src/md5.c
     src/events.c
     src/store.c

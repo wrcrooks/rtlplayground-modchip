@@ -14,6 +14,7 @@
 #include "pico/stdlib.h"
 #include "hardware/flash.h"
 #include "lwip/altcp_tls.h"
+#include "mbedtls/base64.h"
 #include "mbedtls/platform_time.h"
 #include "mbedtls/sha256.h"
 #include "psa/crypto.h"
@@ -176,4 +177,24 @@ void plat_https_status(char *fp, size_t len)
 	fp[0] = 0;
 	for (int i = 0; i < 32 && 3 * i + 3 <= (int)len; i++)
 		snprintf(fp + 3 * i, len - 3 * i, i < 31 ? "%02X:" : "%02X", h[i]);
+}
+
+
+size_t plat_https_cert(char *buf, size_t max)
+{
+	struct tls_identity id;
+	size_t n;
+
+	if (!tls_identity(&id))
+		return 0;
+	n = snprintf(buf, max, "-----BEGIN CERTIFICATE-----\n");
+	for (unsigned i = 0; i < id.cert_len; i += 48) {
+		size_t k = id.cert_len - i < 48 ? id.cert_len - i : 48, o;
+
+		if (mbedtls_base64_encode((unsigned char *)buf + n, max - n, &o, id.cert + i, k) || max - n - o < 60)
+			return 0;
+		n += o;
+		buf[n++] = '\n';
+	}
+	return n + snprintf(buf + n, max - n, "-----END CERTIFICATE-----\n");
 }

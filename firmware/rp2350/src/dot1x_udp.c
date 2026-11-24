@@ -11,6 +11,7 @@
 #include "lwip/udp.h"
 
 #include "dot1x.h"
+#include "radsec.h"
 
 static struct udp_pcb *pcb;
 
@@ -23,7 +24,7 @@ static void radius_recv(void *arg, struct udp_pcb *upcb, struct pbuf *p, const i
 	ip_addr_t server;
 
 	IP_ADDR4(&server, dot1x_cfg.radius_ip[0], dot1x_cfg.radius_ip[1], dot1x_cfg.radius_ip[2], dot1x_cfg.radius_ip[3]);
-	if (ip_addr_cmp(addr, &server)) {
+	if (!radsec_on() && ip_addr_cmp(addr, &server)) {
 		n = pbuf_copy_partial(p, buf, sizeof(buf), 0);
 		dot1x_radius_rx(buf, n);
 	}
@@ -36,6 +37,10 @@ void dot1x_hw_radius_tx(const uint8_t *p, uint16_t len)
 	ip_addr_t dst;
 	struct pbuf *b;
 
+	if (radsec_on()) {
+		radsec_tx(p, len);
+		return;
+	}
 	if (!pcb) {
 		pcb = udp_new_ip_type(IPADDR_TYPE_V4);
 		if (!pcb)

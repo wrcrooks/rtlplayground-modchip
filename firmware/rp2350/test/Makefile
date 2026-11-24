@@ -141,8 +141,16 @@ $(BUILD)/test_dot1x_radius: test_dot1x_radius.c ../src/dot1x.c ../src/md5.c ../s
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -Wno-unused-result -o $@ test_dot1x_radius.c ../src/dot1x.c ../src/md5.c
 
-dot1x-radius: $(BUILD)/test_dot1x_radius
+$(BUILD)/test_radsec: test_dot1x_radius.c relay.h ../src/radsec.c ../src/dot1x.c ../src/tls_client.c $(BUILD)/libmbed.a
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DRADSEC -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(LWIP)/src/apps/altcp_tls $(MBED_INC) \
+		-o $@ test_dot1x_radius.c ../src/radsec.c ../src/dot1x.c ../src/md5.c ../src/tls_client.c ../src/tls_cert.c ../src/rng.c ../src/events.c \
+		$(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
+
+dot1x-radius: $(BUILD)/test_dot1x_radius $(BUILD)/test_radsec
 	sh run_dot1x_radius.sh $<
+	sh run_dot1x_radius.sh - $(BUILD)/test_radsec
+	TLS_MAX=1.2 sh run_dot1x_radius.sh - $(BUILD)/test_radsec
 
 $(BUILD)/test_link: test_link.c ../src/link.c ../src/link.h
 	@mkdir -p $(BUILD)

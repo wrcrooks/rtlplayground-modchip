@@ -392,6 +392,9 @@ bool plat_mqtt_topic(const char *t) { sprintf(mqtt_last, "topic %s", t); return 
 bool plat_mqtt_tls(const char *f) { sprintf(mqtt_last, "tls %s", f ? f : "-"); return true; }
 void plat_mqtt_interval(uint16_t s) { sprintf(mqtt_last, "interval %u", s); }
 size_t plat_mqtt_status(char *buf, size_t max) { return snprintf(buf, max, "MQTT\n"); }
+bool plat_radsec(const char *f) { sprintf(mqtt_last, "radsec %s", f ? f : "-"); return !f || strlen(f) == 64; }
+void plat_radsec_restart(void) { }
+size_t plat_https_cert(char *buf, size_t max) { return snprintf(buf, max, "-----BEGIN\n"); }
 bool plat_ssh_enable(bool on) { sprintf(mqtt_last, "ssh %d", on); return true; }
 bool plat_ssh_newkey(void) { strcpy(mqtt_last, "newkey"); return true; }
 size_t plat_ssh_status(char *buf, size_t max) { return snprintf(buf, max, "SSH off\n"); }
@@ -1139,6 +1142,15 @@ int main(void)
 			cmd((char *)tele[k][0]);
 			check(!strcmp(mqtt_last, tele[k][1]), "%s", tele[k][0]);
 		}
+		cmd("dot1x radius 10.0.0.1");
+		cmd("dot1x radsec 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+		check(dot1x_cfg.radsec && dot1x_cfg.radius_port == 2083 && !strncmp(mqtt_last, "radsec 0011", 11), "RADIUS over TLS, on its port");
+		cmd("dot1x radsec 1234");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12) && dot1x_cfg.radsec, "a short fingerprint is refused");
+		cmd("dot1x radsec off");
+		check(!dot1x_cfg.radsec && dot1x_cfg.radius_port == 1812, "and back to UDP");
+		cmd("https cert");
+		check(strstr(outbuf, "-----BEGIN") != NULL, "https cert");
 		cmd("mqtt interval 2");
 		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "mqtt interval 2 is refused");
 		{

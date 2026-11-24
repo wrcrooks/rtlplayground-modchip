@@ -73,11 +73,18 @@ static bool parse_https(void)
 			ext_error("HTTPS could not start\n");
 	} else if (cmd_words_len == 2 && cmd_compare(1, "off")) {
 		plat_https_enable(false);
+	} else if (cmd_words_len == 2 && cmd_compare(1, "cert")) {
+		char pem[1600];
+
+		if (plat_https_cert(pem, sizeof(pem)))
+			print_string_x(pem);
+		else
+			ext_error("there is no certificate\n");
 	} else if (cmd_words_len == 2 && cmd_compare(1, "newcert")) {
 		if (!plat_https_newcert())
 			ext_error("could not create a certificate\n");
 	} else {
-		ext_error("https [on|off|newcert]\n");
+		ext_error("https [on|off|newcert|cert]\n");
 	}
 	return true;
 }
@@ -264,6 +271,8 @@ static bool parse_t3(void)
  *   dot1x on|off
  *   dot1x radius <a.b.c.d> [<udp port>]      the RADIUS server, port 1812 by default
  *   dot1x secret <text>                      its shared secret
+ *   dot1x radsec <fingerprint>|off           over TLS, to the server with that certificate (SHA-256);
+ *                                            the port is then 2083 by default
  *   dot1x reauth <60-86400>|off              periodic re-authentication
  *   dot1x port <n> auto|force-auth|force-unauth
  *   dot1x port <n> mab on|off                MAC authentication for devices without a supplicant
@@ -274,9 +283,9 @@ static void dot1x_print_status(void)
 {
 	char b[160];
 
-	snprintf(b, sizeof(b), "802.1X %s, RADIUS %u.%u.%u.%u:%u, secret %s, re-authentication %s",
+	snprintf(b, sizeof(b), "802.1X %s, RADIUS %u.%u.%u.%u:%u%s, secret %s, re-authentication %s",
 		 dot1x_cfg.enabled ? "on" : "off", dot1x_cfg.radius_ip[0], dot1x_cfg.radius_ip[1],
-		 dot1x_cfg.radius_ip[2], dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port,
+		 dot1x_cfg.radius_ip[2], dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port, dot1x_cfg.radsec ? " over TLS" : "",
 		 dot1x_cfg.secret[0] ? "set" : "not set", dot1x_cfg.reauth_s ? "" : "off");
 	print_string_x(b);
 	if (dot1x_cfg.reauth_s) {
@@ -556,7 +565,7 @@ static bool parse_dot1x(void)
 		dot1x_cfg.enabled = cmd_compare(1, "on");
 	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "radius")
 		   && ext_ip(ext_rest(2), a)) {
-		port = 1812;
+		port = dot1x_cfg.radsec ? 2083 : 1812;
 		w = ext_rest(3);
 		if (cmd_words_len == 4 && (!ext_num(&w, 65535, 0, &port) || !port)) {
 			ext_error("dot1x radius <a.b.c.d> [<udp port>]\n");
@@ -565,12 +574,26 @@ static bool parse_dot1x(void)
 		for (int k = 0; k < 4; k++)
 			dot1x_cfg.radius_ip[k] = a[k];
 		dot1x_cfg.radius_port = port;
+		plat_radsec_restart();
 	} else if (cmd_words_len >= 3 && cmd_compare(1, "secret")) {
 		if (strlen(ext_rest(2)) >= sizeof(dot1x_cfg.secret)) {
 			ext_error("the secret is too long\n");
 			return true;
 		}
 		strcpy(dot1x_cfg.secret, ext_rest(2));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "radsec")) {
+		bool off = cmd_compare(2, "off");
+
+		if (!plat_radsec(off ? NULL : ext_rest(2))) {
+			ext_error("dot1x radsec <SHA-256 fingerprint>|off\n");
+			return true;
+		}
+		/* the other way's usual port follows along */
+		if (!off && (dot1x_cfg.radius_port == 1812 || !dot1x_cfg.radius_port))
+			dot1x_cfg.radius_port = 2083;
+		else if (off && dot1x_cfg.radius_port == 2083)
+			dot1x_cfg.radius_port = 1812;
+		dot1x_cfg.radsec = !off;
 	} else if (cmd_words_len == 3 && cmd_compare(1, "reauth")) {
 		unsigned s = 0;
 		w = ext_rest(2);
@@ -612,7 +635,7 @@ static bool parse_dot1x(void)
 			return true;
 		}
 	} else {
-		ext_error("dot1x [on|off|radius <a.b.c.d> [<port>]|secret <text>|reauth <s>|off|radius-vlan on|off|port <n> ...]\n");
+		ext_error("dot1x [on|off|radius <a.b.c.d> [<port>]|secret <text>|radsec <fingerprint>|off|reauth <s>|off|radius-vlan on|off|port <n> ...]\n");
 		return true;
 	}
 	dot1x_apply();

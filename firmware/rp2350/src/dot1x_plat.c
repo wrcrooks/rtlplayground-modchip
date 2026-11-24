@@ -280,9 +280,9 @@ size_t dot1x_json(char *buf, size_t max)
 	bool first = true;
 	size_t n = 0;
 
-	n = app(buf, max, n, "{\"enabled\":%d,\"radius\":\"%u.%u.%u.%u\",\"radius_port\":%u,\"secret\":%d,\"reauth\":%lu,\"radius_vlan\":%d,\"ports\":[",
+	n = app(buf, max, n, "{\"enabled\":%d,\"radius\":\"%u.%u.%u.%u\",\"radius_port\":%u,\"secret\":%d,\"radsec\":%d,\"reauth\":%lu,\"radius_vlan\":%d,\"ports\":[",
 	    dot1x_cfg.enabled, dot1x_cfg.radius_ip[0], dot1x_cfg.radius_ip[1], dot1x_cfg.radius_ip[2],
-	    dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port, dot1x_cfg.secret[0] != 0, (unsigned long)dot1x_cfg.reauth_s,
+	    dot1x_cfg.radius_ip[3], dot1x_cfg.radius_port, dot1x_cfg.secret[0] != 0, dot1x_cfg.radsec, (unsigned long)dot1x_cfg.reauth_s,
 	    dot1x_cfg.radius_vlan);
 	for (uint8_t i = machine.min_port; i <= machine.max_port && i < DOT1X_PORTS; i++) {
 		const struct dot1x_status *s = dot1x_port_status(i);

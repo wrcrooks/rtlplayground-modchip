@@ -51,6 +51,7 @@ struct dot1x_config {
 	uint8_t radius_ip[4];
 	uint16_t radius_port;
 	char secret[DOT1X_SECRET_MAX];
+	bool radsec;			/* over TLS, radsec.c */
 	uint8_t mode[DOT1X_PORTS];
 	bool mab[DOT1X_PORTS];
 	uint32_t reauth_s;		/* 0: no periodic re-authentication */
