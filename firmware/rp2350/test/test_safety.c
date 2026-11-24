@@ -181,6 +181,35 @@ int main(int argc, char **argv)
 	check(!safety_rollback_start(5) && !store.rollback, "no rollback when the copy cannot be kept");
 	sector_fail = 0;
 
+	/* a restore with time to confirm: its own restart isn't the one that rolls back */
+	{
+		char t[200], m[110];
+
+		#define RESTORE(min) (strcpy(t, "ip 10.7.7.7\n"), config_restore(t, strlen(t), min, m, sizeof(m)))
+		set_config("ip 10.0.0.1\n");
+		check(RESTORE(2), "restored with 2 minutes to confirm: %s", m);
+		restart();
+		check(!strcmp((char *)config, "ip 10.7.7.7\n") && safety_rollback_left() == 120, "in effect after the restart, the time starts there");
+		seconds(60);
+		safety_rollback_confirm();
+		seconds(1000);
+		restart();
+		check(!strcmp((char *)config, "ip 10.7.7.7\n"), "confirmed: it stays");
+		set_config("ip 10.0.0.1\n");
+		RESTORE(2);
+		restart();
+		seconds(121);
+		check(!strcmp((char *)config, "ip 10.0.0.1\n") && !store.rollback, "not confirmed: the old one is back");
+		RESTORE(2);
+		restart();
+		restart();
+		check(!strcmp((char *)config, "ip 10.0.0.1\n") && !store.rollback, "a second restart rolls back");
+		RESTORE(0);
+		restart();
+		check(!strcmp((char *)config, "ip 10.7.7.7\n") && !store.rollback && !safety_rollback_left(), "without minutes it just stays");
+		set_config("ip 10.0.0.1\n");
+	}
+
 	/* the restore check */
 	check(cc("# c\r\n\r\n  ip 10.0.0.1  \r\nvlan 5 t 1\n#x\nport 1 off", out, err) > 0
 	      && !strcmp(out, "ip 10.0.0.1\nvlan 5 t 1\nport 1 off\n"), "comments, blanks and CRLF go: [%s]", out);

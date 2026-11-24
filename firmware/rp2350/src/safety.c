@@ -27,8 +27,17 @@ static bool restore_snapshot(void)
 
 void safety_boot(void)
 {
+	rollback_left = 0;
 	if (!store.rollback)
 		return;
+	if (store.rollback == ROLLBACK_RESTORED && store.rollback_min && store.rollback_min <= SAFETY_MAX_MIN) {
+		store.rollback = ROLLBACK_PENDING;	/* first: a start that crashes must not repeat this */
+		if (store_save()) {
+			rollback_left = (uint32_t)store.rollback_min * 60;
+			event(EV_CONFIG, 0, store.rollback_min, "Rollback in %u min unless confirmed", store.rollback_min);
+			return;
+		}
+	}
 	if (restore_snapshot()) {
 		event(EV_SYSTEM, 0, 0, "Configuration rolled back: the change was not confirmed");
 	} else {
@@ -63,7 +72,7 @@ bool safety_rollback_start(uint16_t minutes)
 		plat_config_read(0, sector, sizeof(sector));
 		if (!plat_sector_write(SECTOR_SNAPSHOT, sector, sizeof(sector)))
 			return false;
-		store.rollback = 1;
+		store.rollback = ROLLBACK_PENDING;
 		if (!store_save()) {
 			store.rollback = 0;
 			return false;
@@ -202,6 +211,15 @@ bool config_restore(char *text, size_t len, unsigned minutes, char *msg, size_t 
 	if (!plat_config_write(sector, sizeof(sector))) {
 		app(msg, max, 0, "NO: writing to the flash failed");
 		return false;
+	}
+	if (minutes) {
+		store.rollback = ROLLBACK_RESTORED;
+		store.rollback_min = minutes;
+		if (!store_save()) {
+			store.rollback = ROLLBACK_PENDING;
+			app(msg, max, 0, "NO: the rollback could not be prepared, the restart will undo this");
+			return false;
+		}
 	}
 	event(EV_CONFIG, 0, 0, "Configuration restored from a file");
 	app(msg, max, 0, "OK: restored, restarting");

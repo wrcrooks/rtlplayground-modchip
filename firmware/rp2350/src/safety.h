@@ -4,7 +4,8 @@
 /*
  * Ways back from a change that cuts the switch off: a timed restart, and a
  * rollback, which returns to the configuration saved when it was started
- * unless it is confirmed in time. A restart before that rolls back too.
+ * unless it is confirmed in time. A restart before that rolls back too, but for
+ * the one with which a restored configuration takes effect.
  * Also the check a configuration file gets before it is restored.
  */
 
