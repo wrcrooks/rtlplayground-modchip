@@ -4,10 +4,10 @@ This firmware takes over everything RTLPlayground's 8051 firmware did above the 
 runs only the bridge firmware (RTLPlayground, branch `feat/modchip`, `modchip/bridge/`), and the RP2350
 reaches the switch through it over T5.
 
-**Status:** builds and passes its host tests. The base firmware has run on a MokerLink through the
-Beetle rig. These have run on the host only, not on a switch yet: the Features page and everything
-under "Port protection and QoS" to "Firmware updates of the mod chip" below, 802.1X VLANs and RadSec,
-SNMPv3 and notifications, and TLS 1.3.
+**Status:** builds and passes its host tests, and runs on a MokerLink through the Beetle rig. Tried there
+with one link (2026-11-24): HTTPS with TLS 1.2 and 1.3, SSH, IPv6, SNMPv3 and notifications, MQTT over
+TLS, Prometheus, rollback, backup and restore, DHCP snooping and RA guard, IGMP and MLD snooping with
+the querier, error-disable, and all of them at once. "Not done yet" has what hasn't been.
 
 What it runs:
 
@@ -132,10 +132,11 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 - **SNMP writes.** The agent is read-only.
 - **The Features page in other languages.** It is in English only; RTLPlayground's own pages aren't.
-- **Hardware tests** of what "Status" above lists. What to look at first: the L2 multicast and VLAN
-  entries, the MLD trap, IPv6 multicast reaching the CPU port, the isolation that error-disable lays
-  over STP's, the ACL rules behind DHCP snooping and QoS, how long TLS 1.3 and SSH key exchanges take,
-  RAM with several TLS connections open, and a whole firmware update with its trial.
+- **Hardware tests that need two links.** That error-disable and 802.1X's VLANs cut a port off from the
+  others, where snooped multicast goes and where it doesn't, DHCP snooping between ports, QoS under
+  load. EAP logins and RadSec with a server.
+- **Other hardware tests.** A whole firmware update with its trial, error-disable for link flaps, and
+  SNMP, SSH and so on with the mod chip board itself.
 
 ## Register access over T3
 
