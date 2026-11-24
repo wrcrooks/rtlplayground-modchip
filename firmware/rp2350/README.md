@@ -4,7 +4,10 @@ This firmware takes over everything RTLPlayground's 8051 firmware did above the 
 runs only the bridge firmware (RTLPlayground, branch `feat/modchip`, `modchip/bridge/`), and the RP2350
 reaches the switch through it over T5.
 
-**Status:** builds and passes its host tests. It hasn't run on hardware yet.
+**Status:** builds and passes its host tests. The base firmware has run on a MokerLink through the
+Beetle rig. These have run on the host only, not on a switch yet: the Features page and everything
+under "Port protection and QoS" to "Firmware updates of the mod chip" below, 802.1X VLANs and RadSec,
+SNMPv3 and notifications, and TLS 1.3.
 
 What it runs:
 
@@ -14,9 +17,17 @@ What it runs:
 - **Command line.** On the console, and through the web UI's command box.
 - **IP.** lwIP, with static settings or DHCP. The management VLAN is tagged and filtered as before.
 - **Protocols.** DNS, NTP and syslog; STP/RSTP, LACP, IGMP snooping and LLDP.
+- **SSH.** The command line, backup and restore.
+- **IPv6.** For management: link-local, SLAAC and a static address.
+- **Port protection.** Error-disable with recovery, DHCP snooping, 802.1X with guest, auth-fail and
+  RADIUS-assigned VLANs.
+- **Multicast.** IGMP and MLD snooping per VLAN, with a querier.
+- **Safety.** Timed rollback and restart, configuration backup and restore, signed firmware updates of
+  the mod chip with A/B slots.
+- **Monitoring.** Events to syslog, SNMP, MQTT and the web UI; Prometheus metrics.
 - **HTTPS.** TLS on port 443 next to HTTP on port 80, with a key and self-signed certificate made on
   the device.
-- **SNMP.** A read-only SNMPv2c agent: MIB-2, with the switch's ports and their counters in the
+- **SNMP.** A read-only SNMPv2c and SNMPv3 agent with notifications: MIB-2, with the switch's ports and their counters in the
   interfaces group and IF-MIB's `ifXTable`.
 - **Graphs.** A dashboard page with animated charts and an hour of history, in the style of
   OPNsense's. It's linked as "Graphs" in the web UI's menu.
@@ -37,8 +48,8 @@ compile them, with `test/sdcc_shim.h` forced in:
 - the machine definition.
 
 One change in the submodule serves the mod chip: `cmd_parser.c` hands commands it doesn't know to
-`CMD_PARSER_EXT` when that is defined, as it is only here. That is how the `https`, `snmp` and `t3`
-commands reach the parser. The web UI's Save keeps only the commands its `CONF_CMDS` list knows, so
+`CMD_PARSER_EXT` when that is defined, as it is only here. That is how the mod chip's
+own commands (`https`, `snmp`, `dot1x`, `mqtt` and so on) reach the parser. The web UI's Save keeps only the commands its `CONF_CMDS` list knows, so
 `tools/embed_web.py` adds these to it, and `test/check_conf_merge.js` checks the result against the
 submodule's `app.js`.
 
@@ -50,7 +61,13 @@ Around them:
 | `src/rtl_sfr.S` | Storage for the SFR bytes the modules read results from, laid out so `SFR_DATA_U16` overlaps `SFR_DATA_8`/`SFR_DATA_0` as on the 8051 |
 | `src/rtl_app.c` | `main()`'s setup after `HELLO`, the tick and second timers, CPU-port frame dispatch (STP, LACP, IGMP, then ARP/IPv4 to lwIP), `tcpip_output()` and the JSON route table |
 | `src/rtl_udp.c` | The slice of uIP's UDP API that `syslog.c`, `dns.c` and `ntp.c` use, so they run unchanged over lwIP |
-| `src/rtl_ext.c` | The `https` and `snmp` commands |
+| `src/rtl_ext.c` | The mod chip's own commands |
+| `src/rtl_guard.c` | Error-disable, DHCP snooping and QoS, and events to syslog |
+| `src/mcast.c`, `src/rtl_mcast.c` | IGMP and MLD snooping: the protocol, and the switch's side of it |
+| `src/dot1x.c`, `src/dot1x_plat.c`, `src/dot1x_udp.c`, `src/radsec.c` | 802.1X: the protocol, the switch's side, RADIUS over UDP and over TLS |
+| `src/safety.c` | Timed restart and rollback, backup, restore |
+| `src/events.c` | The event log, and who hears of events |
+| `src/store.c` | What is kept in flash besides the configuration |
 | `src/rtl_metrics.c` | What the dashboard and the SNMP agent read from the switch: ports and counters (one `STAT_READ`), chip temperature, MAC table size, SFP diagnostics, the link change timeline, STP/LACP/IGMP activity |
 | `src/plat.h` | The seam between the two halves. The shim redefines `__naked`, `__data` and similar words that the SDK and lwIP headers use, so neither half includes the other's headers |
 | `src/link.c`, `src/bridge.c` | Bridge protocol v1: COBS/CRC framing, UART RX by interrupt into a 16 KiB ring, one request in flight, unsolicited messages queued and dispatched from the main loop |
@@ -58,11 +75,17 @@ Around them:
 | `src/httpd.c` | The web server on lwIP's altcp API: plain TCP on port 80, TLS on port 443 |
 | `src/tls.c`, `src/tls_cert.c` | The HTTPS key and certificate: made with mbedTLS, kept in a flash sector, loaded into altcp_tls |
 | `src/snmp.c`, `src/snmp_mib.c`, `src/snmp_udp.c` | The SNMP agent on lwIP's SNMP core: settings, the MIB, the UDP socket (in place of lwIP's `snmp_raw.c`, so the agent can be switched off) |
-| `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json` and `/history.bin` |
-| `web/dashboard.html` | The dashboard page |
+| `src/usm.c` | SNMPv3's authentication and encryption |
+| `src/telemetry.c`, `src/tls_client.c` | MQTT, and TLS as a client: servers are known by their certificate's fingerprint |
+| `src/ssh.c`, `src/ssh_lwip.c` | The SSH server: the protocol on mbedTLS, and its connections |
+| `src/update.c`, `src/update_flash.c` | Firmware updates of the mod chip: the checks, and the RP2350's A/B slots |
+| `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json`, `/history.bin` and Prometheus's `/metrics` |
+| `src/extras.c` | `/features.json` |
+| `web/dashboard.html`, `web/extras.html` | The Graphs and Features pages |
+| `tools/sign_update.py` | Signs firmware updates, and makes the image with the slots |
 | `src/main.c` | Power sensing, the 200 Hz tick, the status LED, the config sector, the main loop on its 32 KiB stack |
-| `tools/embed_web.py` | Gzips `html/` and `web/` into the image, adds the Graphs link to `index.html`, and embeds `config.txt` as the default config |
-| `tools/dashboard_preview.py` | The dashboard with simulated data, for working on it without a switch |
+| `tools/embed_web.py` | Gzips `html/` and `web/` into the image, adds the Graphs and Features links to `index.html`, and embeds `config.txt` as the default config |
+| `tools/dashboard_preview.py` | Both pages with simulated data, for working on it without a switch |
 
 **Main loop.** Everything runs from one loop on core 0, as on the 8051. A module's register access
 blocks until the bridge replies. Frames and events that arrive meanwhile are queued and handled on the
@@ -107,9 +130,12 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 ## Not done yet
 
-- **RP2350 firmware updates through the web UI.** Flash the RP2350 by SWD, or over USB on the Beetle.
-- **TLS 1.3.** HTTPS speaks TLS 1.2. Every current browser accepts that.
-- **SNMP writes, v3 and traps.** The agent is read-only SNMPv2c.
+- **SNMP writes.** The agent is read-only.
+- **The Features page in other languages.** It is in English only; RTLPlayground's own pages aren't.
+- **Hardware tests** of what "Status" above lists. What to look at first: the L2 multicast and VLAN
+  entries, the MLD trap, IPv6 multicast reaching the CPU port, the isolation that error-disable lays
+  over STP's, the ACL rules behind DHCP snooping and QoS, how long TLS 1.3 and SSH key exchanges take,
+  RAM with several TLS connections open, and a whole firmware update with its trial.
 
 ## Register access over T3
 
@@ -230,12 +256,13 @@ measured on hardware yet). Browsers
 warn about a self-signed certificate, so compare the fingerprint `https` prints with the one the
 browser shows, the first time.
 
-**Protocol.** TLS 1.2 with ECDHE over X25519 or P-256, and AES-128-GCM, ChaCha20-Poly1305 or
+**Protocol.** TLS 1.3 and 1.2 with ECDHE over X25519 or P-256, and AES-128-GCM, ChaCha20-Poly1305 or
 AES-256-GCM.
 
 **Memory.** Two TLS connections at a time, about 25 KB each (16 KiB in, 4 KiB out, plus state).
 
-**Session resumption.** The server keeps 8 TLS sessions for an hour. A browser polling the
+**Session resumption.** The server keeps 8 TLS 1.2 sessions for an hour, and gives out tickets for
+TLS 1.3. A browser polling the
 dashboard resumes them instead of repeating the key exchange. A third waits for one to close.
 
 ## Graphs
@@ -293,6 +320,11 @@ simulated data at http://localhost:8080/dashboard.html.
 snmp community <name>     # default "public"
 snmp location <text>
 snmp contact <text>
+snmp v2c on|off           # SNMPv2c, on at first; off leaves SNMPv3
+snmp user <name> auth sha|sha256 <password> [aes <password>]
+snmp user <name> off
+snmp trap <a.b.c.d> [<user>]   # notifications, v2c or as that SNMPv3 user
+snmp trap <a.b.c.d> off
 snmp on                   # UDP port 161
 snmp                      # the settings
 snmp off
@@ -309,6 +341,11 @@ interfaces are the switch's ports, numbered as on the front panel:
 
 **Counters.** They come from the ASIC's MIB counters, read again at most once a second.
 
+**SNMPv3.** Up to four users, with SHA-1 or SHA-256 authentication and AES-128. Passwords have 8 to 64
+characters. A user without `aes` is authenticated, not encrypted.
+
+**Notifications.** SNMPv2 traps go to at most two addresses.
+
 ## 802.1X port authentication
 
 The switch is the authenticator. It asks a device on a port set to `auto` for its identity
@@ -320,9 +357,13 @@ server share works, since the switch only relays: PEAP, EAP-TLS, EAP-TTLS, EAP-M
 dot1x on|off
 dot1x radius <a.b.c.d> [<udp port>]     1812 by default
 dot1x secret <text>
+dot1x radsec <fingerprint>|off          RADIUS over TLS, see below
+dot1x radius-vlan on|off                VLANs from the RADIUS server
 dot1x reauth <60-86400>|off             periodic re-authentication
 dot1x port <n> auto|force-auth|force-unauth
 dot1x port <n> mab on|off               MAC authentication (MAB)
+dot1x port <n> guest-vlan <1-4094>|off      for devices that don't answer
+dot1x port <n> auth-fail-vlan <1-4094>|off  for devices that were refused
 dot1x port <n> restart
 dot1x                                   status
 ```
@@ -369,12 +410,21 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 
   Replies are checked against their Response Authenticator, and against their Message-Authenticator
   whenever EAP is involved.
+- **VLANs.** With `radius-vlan on`, an Access-Accept's Tunnel-Type VLAN, Tunnel-Medium-Type 802 and
+  Tunnel-Private-Group-ID move the port there, untagged. A guest VLAN opens the port for a device that
+  never answered, an auth-fail VLAN for one that was refused. The port goes back when it closes.
+  - Tagged frames on a hybrid port aren't restricted by a guest VLAN.
+  - Don't save VLANs in the web UI while a port is in such a VLAN: that would save the membership.
+- **RadSec.** `dot1x radsec <fingerprint>` talks to the server over TLS (RFC 6614, TCP port 2083), and
+  only to one whose certificate has that SHA-256 fingerprint. The switch shows its HTTPS certificate;
+  `https cert` prints it, for the server to trust. `https newcert` changes it. The shared secret is
+  then `radsec` unless one is set.
+- **MAB is a weak check.** A MAC address is easily copied.
 - **Port based.** One authenticated device opens the port for everything behind it, as in
   802.1X-2004.
 - **Not done:**
   - RADIUS accounting;
   - a second server;
-  - dynamic VLAN assignment;
   - more than one device per port.
 
 **Tested.** On the host only, so far:
@@ -382,8 +432,8 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 - **`test/test_dot1x.c`.** The protocol against a simulated supplicant and RADIUS server: success,
   rejection, logoff, MAB, a 900-byte EAP exchange, re-authentication, Session-Timeout, a dead server
   and a wrong secret. It also checks MD5 and HMAC-MD5 against their RFC vectors.
-- **`make -C test dot1x-radius`.** The same code against a real FreeRADIUS 3.2 in Docker: EAP-MD5
-  accepted and rejected, MAB accepted and rejected.
+- **`make -C test dot1x-radius`.** The same code against a real FreeRADIUS 3.2 in Docker, over UDP and
+  over TLS 1.3 and 1.2: EAP-MD5 accepted and rejected, MAB accepted and rejected, a VLAN assigned.
 - **The simulator.** The commands, the trap and isolation registers, the CPU-tagged Request/Identity
   and the Access-Request it sets off.
 
@@ -399,6 +449,126 @@ All but `restart` and the status are configuration lines, which Save keeps. The 
 
 An EAP login end to end still needs a supplicant on a second port; EAP so far went as far as
 FreeRADIUS's challenge.
+
+## Features page
+
+`extras.html` (Features in the web UI's menu) has the settings and states of what follows. Changes
+apply at once, and Save on the switch's page keeps them. Settings given on the command line are kept the
+same way.
+
+## Port protection and QoS
+
+```
+errdisable                              status
+errdisable recovery <30-86400>|off      seconds until a port comes back, 300 at first
+errdisable cause bpduguard|l2-limit|link-flap on|off
+errdisable port <n> clear
+dhcp-snoop on|off                       drop DHCP servers' replies on untrusted ports
+dhcp-snoop trust <n> on|off             a port servers may be behind
+dhcp-snoop ra on|off                    IPv6 router advertisements too
+qos port <n> trust dscp|none            priority from the IPv4 DSCP's class
+qos port <n> priority <0-7>|off         priority of what else comes in
+```
+
+- **Error-disable.** The port forwards nothing and learns nothing, while its link stays up. BPDU guard
+  itself is RTLPlayground's `stp port <n> guard`.
+- **DHCP snooping** drops by ACL rule; there is no binding table.
+
+## Multicast snooping
+
+```
+mcsnoop on|off                    IGMP and MLD snooping per VLAN
+mcsnoop querier on|off
+mcsnoop interval <10-3600>        s between queries, 125 at first
+mcsnoop unknown flood|router      IPv4 multicast nobody asked for
+mcsnoop router <n> on|off         a port to a multicast router
+```
+
+It replaces RTLPlayground's `igmp`, which snoops without regard to VLANs: only one of them can be on.
+
+## Configuration safety
+
+```
+rollback in <1-1440>       back to the configuration saved now, unless confirmed
+rollback confirm
+reboot in <1-1440>         in that many minutes
+reboot cancel
+```
+
+- **Rollback.** Start it before a risky change. Without `rollback confirm` in time the switch restarts
+  with the configuration saved when it started. A restart before that rolls back too.
+- **Backup and restore.** On the Features page, or `GET /backup` and `POST /restore[?confirm=<min>]`, or
+  over SSH. Every line is checked before anything is written. A backup has the passwords in it.
+
+## Events
+
+Link changes, logins, 802.1X, error-disable, configuration and restarts are kept for the Features page
+(`/events.json`) and go to syslog, SNMP notifications and MQTT, where those are on.
+
+## MQTT and Prometheus
+
+```
+mqtt server <a.b.c.d> [<port>]      1883, or 8883 with TLS
+mqtt login <user> <password>|off
+mqtt topic <prefix>|off             off: the hostname
+mqtt tls <fingerprint>|off          TLS, to the server with that certificate (SHA-256)
+mqtt interval <5-3600>
+mqtt on|off
+prometheus on|off                   GET /metrics without a login
+prometheus token <text>|off         but with "Authorization: Bearer <text>"
+```
+
+Below the topic prefix are `status` (`online`, or `offline` as the last will), `switch`, `port/<n>` and
+`event`, in JSON but for `status`. All but `event` are retained. Nothing is taken from the broker.
+
+## SSH
+
+```
+ssh on|off
+ssh                                 status, the host key's fingerprint
+ssh newkey
+ssh admin@<switch>                  from a computer: any user name, the web UI's password
+ssh admin@<switch> backup > config.txt
+ssh admin@<switch> restore 5 < config.txt      rolls back unless confirmed in 5 minutes
+```
+
+The server is our own (`src/ssh.c`): curve25519 or P-256 key exchange, an ECDSA host key, AES-GCM or
+AES-CTR with HMAC-SHA-256. No keys for login, no file transfer, no forwarding. After wrong passwords,
+SSH logins are refused for everybody for 30 s; the web UI isn't affected.
+
+## IPv6
+
+```
+ip6 on|off                 link-local and SLAAC addresses
+ip6 addr <address>|none    and one of our own (/64)
+ip6 gw <address>|auto      the gateway, or as router advertisements say
+```
+
+## Firmware updates of the mod chip
+
+Over the network, signed, into the half of the flash that isn't running. It takes some setting up:
+
+```
+tools/sign_update.py keygen update.pem                 # keep it secret, and a copy of it
+cmake ... -DMODCHIP_UPDATE_KEY=$PWD/update.pem         # firmware that trusts that key
+tools/sign_update.py factory build/modchip.bin factory.bin    # partition table and slot A, once per board
+openocd ... -c "program factory.bin 0x10000000 verify reset exit"
+tools/sign_update.py sign update.pem build/modchip.bin modchip.mcu   # each update
+curl -b session=... --data-binary @modchip.mcu http://<switch>/update    # or the Features page
+```
+
+On a board with more than 2 MiB of flash, `factory` and `sign` can be given its `--flash-size`.
+
+- **Checked before anything is written:** the signature (ECDSA P-256), that the update is for this board
+  and machine, and that it is not older than one already installed. The image itself is checked by its
+  hash, from the flash, before the sector that makes it bootable is written.
+- **Trial.** The boot ROM starts the new image once. After a minute with the switch answering and the
+  network up it is kept; `update keep` does that at once. Should it crash, hang, or not get that far in
+  five minutes, the next start is the old firmware's. `update` says which slot runs.
+- **Without setup, nothing changes.** A build without a key, or a board without the partition table,
+  refuses updates and runs as before. Settings survive either way of flashing.
+- **This isn't secure boot.** It keeps foreign updates out that come over the network. Whoever has the
+  SWD pins can flash anything; no OTP is burned.
 
 ## ACL rules
 
@@ -453,6 +623,7 @@ the build date, change only when that version does.
 
 Options:
 
+- `-DMODCHIP_UPDATE_KEY=<key.pem>`: take firmware updates signed with that key, see above.
 - `-DRTLP_MACHINE=SWGT024_V2_0_MANAGED` for the XikeStor. The default, `SWGT024_V2_0_UNMANAGED`,
   is the MokerLink.
 - `-DMODCHIP_RP2354=ON` for the RP2354A build, which uses the 2 MiB in-package flash.
@@ -497,8 +668,8 @@ make -C firmware/rp2350/test PICO_SDK_PATH=/path/to/pico-sdk
 ```
 
 `test_tls` and `test_snmp` build mbedTLS and lwIP from the SDK, so they need `PICO_SDK_PATH`;
-without it they are skipped. `run_snmp.py` also needs net-snmp's command-line tools, and
-`check_dashboard.js` needs Node.
+without it they are skipped. `run_snmp.py` also needs net-snmp's command-line tools, `run_ssh.py`
+OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and the `check_*.js` Node.
 
 - **`test_link`** checks the framing against the frames the 8051's own `link.c` produces
   (`firmware/micropython/bridge_vectors.txt`).
@@ -551,3 +722,13 @@ without it they are skipped. `run_snmp.py` also needs net-snmp's command-line to
   `snmp_mib.c`, six simulated ports, and an OS socket in place of `snmp_udp.c`. `run_snmp.py` then
   queries it with `snmpget`, `snmpwalk` and `snmpset`. It checks the system group, every `ifTable`
   column, the 64-bit counters, a walk of all of MIB-2, a wrong community, and refused writes.
+- **`test_usm`** checks SNMPv3's keys, authentication and encryption; `run_snmp.py` uses them with
+  net-snmp.
+- **`test_safety`**, **`test_mcast`** and **`test_net6`**: rollback, restart and restore; IGMP and MLD
+  snooping; IPv6 addresses and neighbours.
+- **`run_https.py`**, **`run_ssh.py`** and **`run_mqtt.py`** put OpenSSL's client, OpenSSH's client and a
+  broker in Python against the firmware's own server and client code on lwIP.
+- **`test_update`** takes updates made by `sign_update.py`: good ones, and ones with a changed header,
+  signature or image, another key, board or size, cut short, or on failing flash. After none of these
+  can the slot boot. It also runs through a trial that succeeds, and ones that don't.
+- **`check_extras.js`** runs the Features page's script and checks the command behind every control.

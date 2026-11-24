@@ -152,7 +152,15 @@ void update_flash_start(void)
 
 bool update_flash_keep(void)
 {
-	if (rom_explicit_buy(work, sizeof(work)) != 0)
+	/* The boot ROM arms the watchdog for a trial (main.c's took over) and may disarm it here */
+	uint32_t on = watchdog_hw->ctrl & WATCHDOG_CTRL_ENABLE_BITS;
+	int rc = rom_explicit_buy(work, sizeof(work));
+
+	if (on) {
+		watchdog_update();
+		hw_set_bits(&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS);
+	}
+	if (rc != 0)
 		return false;
 	trial = false;
 	return true;
