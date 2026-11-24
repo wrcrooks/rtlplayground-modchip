@@ -22,6 +22,12 @@ bool safety_rollback_start(uint16_t minutes);
 void safety_rollback_confirm(void);
 uint32_t safety_rollback_left(void);
 
+/* The saved configuration as a file; its length */
+size_t config_backup(char *buf, size_t max);
+/* Checks text (changed) and saves it, with a rollback in minutes unless 0; the
+ * caller restarts the switch. A verdict in msg, either way. */
+bool config_restore(char *text, size_t len, unsigned minutes, char *msg, size_t max);
+
 /*
  * A configuration file: comments ('#') and blank lines go, CRLF becomes LF,
  * and each line must be a command the switch knows and can take. The result

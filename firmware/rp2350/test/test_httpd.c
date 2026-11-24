@@ -23,7 +23,11 @@
 #include "net.h"
 #include "plat.h"
 #include "upload.h"
+#include "safety.h"
 #include "web_assets.h"
+#ifdef TEST_HTTPD_TLS
+#include "relay.h"
+#endif
 
 #define FLASH_SIZE	0x80000
 #define STAGE		0x3f000
@@ -48,6 +52,7 @@ void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, co
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { (void)id; memset(dst, 0xff, len); }
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { (void)id; (void)src; (void)len; return true; }
 char hostname[24] = "sw/1";
+size_t metrics_prometheus(char *b, size_t m) { return snprintf(b, m, "switch_up 1\n"); }
 size_t dot1x_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 size_t mc_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 size_t rtl_guard_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
@@ -183,7 +188,9 @@ static err_t c_connected(void *arg, struct tcp_pcb *pcb, err_t err)
 
 #ifdef TEST_HTTPD_TLS
 #include "mbedtls/platform_time.h"
+#include "psa/crypto.h"
 #include "tls_cert.h"
+#include "tls_client.h"
 
 /* The RP2350's TRNG and clock, as pico_mbedtls and tls.c provide them */
 int mbedtls_hardware_poll(void *data, unsigned char *out, size_t len, size_t *olen)
@@ -205,6 +212,7 @@ mbedtls_ms_time_t mbedtls_ms_time(void)
 	return (mbedtls_ms_time_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
 
+bool tls_identity(struct tls_identity *id) { return false; }
 static bool tls_c_gone;
 static void tls_c_err(void *arg, err_t err)
 {
@@ -276,7 +284,7 @@ static void make_image(uint8_t *img, size_t n, unsigned seed)
 
 static uint8_t img[0x80000];	/* up to the standard layout's image, for the wrong-layout case */
 
-int main(void)
+int main(int argc, char **argv)
 {
 	char cookie[64] = "";
 	const char *r;
@@ -284,6 +292,30 @@ int main(void)
 	lwip_init();
 	netif_set_default(netif_list);	/* the loopback interface */
 	httpd_init();
+#ifdef TEST_HTTPD_TLS
+	psa_crypto_init();
+	if (argc > 1) {		/* for run_https.py: HTTPS on that port of the host */
+		static uint8_t sk[1024], sc[1024];
+		size_t skl = sizeof(sk), scl = sizeof(sc);
+		uint32_t last = 0;
+		struct altcp_tls_config *conf;
+
+		tls_make_cert("sim-switch", sk, &skl, sc, &scl);
+		conf = altcp_tls_create_config_server_privkey_cert(sk, skl, NULL, 0, sc, scl);
+		tls_tickets(conf);
+		httpd_tls_start(conf);
+		relay_in(atoi(argv[1]), 443);
+		for (;;) {
+			relay_poll();
+			httpd_poll();
+			if (plat_uptime_s() != last) {
+				last = plat_uptime_s();
+				httpd_second();
+			}
+			usleep(300);
+		}
+	}
+#endif
 	memset(flash, 0x5a, sizeof(flash));
 
 	r = request((const uint8_t *)"GET /status.json HTTP/1.1\r\n\r\n", 29);
@@ -308,6 +340,62 @@ int main(void)
 	k = sprintf(rq, "GET /status.json HTTP/1.1\r\nCookie: session=000000000000\r\n\r\n");
 	r = request((const uint8_t *)rq, k);
 	check(!strncmp(r, "HTTP/1.1 401", 12), "a wrong session cookie: 401");
+
+	/* Prometheus: off, open, with a token */
+	char *prom = "GET /metrics HTTP/1.1\r\n\r\n";
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(!strncmp(r, "HTTP/1.1 401", 12), "/metrics is off at first");
+	plat_prometheus(true);
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(strstr(r, "200 OK") && strstr(r, "version=0.0.4") && strstr(r, "switch_up 1\n"), "/metrics on: no login needed");
+	plat_prometheus_token("sesame");
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(!strncmp(r, "HTTP/1.1 401", 12), "a token set: 401 without it");
+	prom = "GET /metrics HTTP/1.1\r\nAuthorization: Bearer sesamE\r\n\r\n";
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(!strncmp(r, "HTTP/1.1 401", 12), "  or with another one");
+	prom = "GET /metrics HTTP/1.1\r\nAuthorization: Bearer sesame\r\n\r\n";
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(!strncmp(r, "HTTP/1.1 200", 12), "  200 with it");
+	prom = "GET /events.json HTTP/1.1\r\nAuthorization: Bearer sesame\r\n\r\n";
+	r = request((const uint8_t *)prom, strlen(prom));
+	check(!strncmp(r, "HTTP/1.1 401", 12), "  and it opens nothing else");
+
+	/* Events, backup and restore */
+	k = sprintf(rq, "GET /events.json HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
+	r = request((const uint8_t *)rq, k);
+	check(strstr(r, "200 OK") && strstr(r, "Web login from 127.0.0.1"), "/events.json, with the login");
+	k = sprintf(rq, "GET /features.json HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
+	r = request((const uint8_t *)rq, k);
+	check(strstr(r, "200 OK") && strstr(r, "{"), "/features.json");
+	plat_config_write((const uint8_t *)"ip 10.0.0.2\nvlan 5 1 2", 23);
+	k = sprintf(rq, "GET /backup HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
+	r = request((const uint8_t *)rq, k);
+	check(strstr(r, "filename=\"sw_1-config.txt\"") && strstr(r, "\nip 10.0.0.2\nvlan 5 1 2\n"), "/backup");
+	r = request((const uint8_t *)"GET /backup HTTP/1.1\r\n\r\n", 24);
+	check(!strncmp(r, "HTTP/1.1 401", 12), "  not without a login");
+	static const struct { const char *query, *file, *answer, *config; } files[] = {
+		{ "", "# a comment\r\nip 10.0.0.3\r\n\r\nvlan 6 1\r\n", "OK: restored, restarting", "ip 10.0.0.3\nvlan 6 1" },
+		{ "", "ip 10.0.0.4\nformat c:\n", "NO: ", "ip 10.0.0.3\nvlan 6 1" },
+		{ "?confirm=99999", "ip 10.0.0.4\n", "NO: the rollback", "ip 10.0.0.3\nvlan 6 1" },
+		{ "?confirm=5", "ip 10.0.0.5\n", "OK: restored, restarting", "ip 10.0.0.5" },
+	};
+	for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+		static char body[600];
+		int bn = sprintf(body, "--%s\r\nContent-Disposition: form-data; name=\"f\"; filename=\"c.txt\"\r\n\r\n%s\r\n--%s--\r\n",
+				 BOUNDARY, files[i].file, BOUNDARY);
+		static char rr[1200];
+		k = sprintf(rr, "POST /restore%s HTTP/1.1\r\nCookie: %s\r\nContent-Type: multipart/form-data; boundary=%s\r\n"
+			    "Content-Length: %d\r\n\r\n%s", files[i].query, cookie, BOUNDARY, bn, body);
+		r = request((const uint8_t *)rr, k);
+		check(strstr(r, files[i].answer) && !strncmp((char *)config, files[i].config, strlen(files[i].config)), files[i].answer);
+	}
+	check(safety_rollback_left() > 200, "  the last one with a rollback ahead");
+	safety_rollback_confirm();
+	for (int i = 0; i < 3; i++)
+		httpd_second();
+	check(reboots, "  and a restart");
+	reboots = 0;
 
 	/* Not logged in: the refusal comes after the whole body */
 	make_image(img, IMAGE, 1);

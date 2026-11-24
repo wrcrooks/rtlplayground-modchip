@@ -19,6 +19,9 @@ struct altcp_tls_config;
 bool httpd_tls_start(struct altcp_tls_config *conf);
 void httpd_tls_stop(void);
 
+void ssh_conn_poll(void);	/* each main loop pass */
+void ssh_conn_second(void);
+
 void snmp_second(void);
 
 void t3_power(bool on);		/* the T3 bus, with the switch's power */

@@ -369,3 +369,136 @@ uint8_t *metrics_history(size_t *len)
 	}
 	return out;
 }
+
+
+/* ---- MQTT and Prometheus ---- */
+
+size_t metrics_switch_json(char *buf, size_t max)
+{
+	struct out o = { buf, max - 1, 0 };
+	struct plat_sys sys;
+
+	refresh(false);
+	plat_sys_read(&sys);
+	add(&o, "{\"name\":");
+	add_str(&o, hostname);
+	add(&o, ",\"uptime\":%lu,\"bridge_up\":%s,\"temp\":%.1f,\"mac\":%u,\"modchip_temp\":%.1f,\"load\":%.1f,\"heap_free\":%lu}",
+	    (unsigned long)plat_uptime_s(), b(bridge_is_up()), status.chip_temp / 128.0, status.mac_entries, sys.temp / 10.0,
+	    sys.load_pm / 10.0, (unsigned long)sys.heap_free);
+	buf[o.len] = 0;
+	return o.len;
+}
+
+
+bool metrics_port_json(int n, char *buf, size_t max)
+{
+	struct out o = { buf, max - 1, 0 };
+	const struct rtl_port *p;
+
+	refresh(false);
+	if (n < 1 || n > n_ports)
+		return false;
+	p = &ports[n - 1];
+	add(&o, "{\"name\":");
+	add_str(&o, p->name);
+	add(&o, ",\"enabled\":%s,\"mbps\":%u,\"rx_bytes\":%llu,\"tx_bytes\":%llu,\"rx_packets\":%llu,\"tx_packets\":%llu,"
+	    "\"rx_errors\":%lu,\"tx_errors\":%lu,\"rx_discards\":%lu,\"tx_discards\":%lu}",
+	    b(p->enabled), p->link < 8 ? speed_mbps[p->link] : 0,
+	    (unsigned long long)p->in_octets, (unsigned long long)p->out_octets,
+	    (unsigned long long)(p->in_ucast + p->in_mcast + p->in_bcast),
+	    (unsigned long long)(p->out_ucast + p->out_mcast + p->out_bcast),
+	    (unsigned long)p->in_errors, (unsigned long)p->out_errors,
+	    (unsigned long)p->in_discards, (unsigned long)p->out_discards);
+	buf[o.len] = 0;
+	return true;
+}
+
+
+static void prom_head(struct out *o, const char *name, const char *type, const char *help)
+{
+	add(o, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, type);
+}
+
+
+static void prom_one(struct out *o, const char *name, const char *type, const char *help, double v)
+{
+	prom_head(o, name, type, help);
+	add(o, "%s %g\n", name, v);
+}
+
+
+size_t metrics_prometheus(char *buf, size_t max)
+{
+	static const struct {
+		const char *name, *help;
+		uint8_t what;
+	} series[] = {
+		{ "switch_port_receive_bytes_total", "Bytes received", 0 },
+		{ "switch_port_transmit_bytes_total", "Bytes sent", 1 },
+		{ "switch_port_receive_unicast_packets_total", "Unicast packets received", 2 },
+		{ "switch_port_receive_multicast_packets_total", "Multicast packets received", 3 },
+		{ "switch_port_receive_broadcast_packets_total", "Broadcast packets received", 4 },
+		{ "switch_port_transmit_unicast_packets_total", "Unicast packets sent", 5 },
+		{ "switch_port_transmit_multicast_packets_total", "Multicast packets sent", 6 },
+		{ "switch_port_transmit_broadcast_packets_total", "Broadcast packets sent", 7 },
+		{ "switch_port_receive_errors_total", "Frames received with errors", 8 },
+		{ "switch_port_transmit_errors_total", "Frames not sent for errors", 9 },
+		{ "switch_port_receive_discards_total", "Frames received and discarded", 10 },
+		{ "switch_port_transmit_discards_total", "Frames discarded at the output", 11 },
+	};
+	struct out o = { buf, max - 1, 0 };
+	struct plat_sys sys;
+
+	refresh(false);
+	plat_sys_read(&sys);
+	prom_one(&o, "switch_up", "gauge", "The mod chip's link to the switch is up", bridge_is_up());
+	prom_one(&o, "switch_uptime_seconds", "gauge", "Since the mod chip started", plat_uptime_s());
+	if (bridge_is_up()) {
+		prom_one(&o, "switch_temperature_celsius", "gauge", "Of the switch chip", status.chip_temp / 128.0);
+		prom_one(&o, "switch_mac_addresses", "gauge", "Addresses learned", status.mac_entries);
+		prom_one(&o, "switch_stp_topology_changes_total", "counter", "Spanning tree topology changes", status.stp_tc);
+	}
+	prom_one(&o, "modchip_temperature_celsius", "gauge", "Of the RP2350", sys.temp / 10.0);
+	prom_one(&o, "modchip_load_ratio", "gauge", "Main loop busy, over the last second", sys.load_pm / 1000.0);
+	prom_one(&o, "modchip_heap_free_bytes", "gauge", "Free heap", sys.heap_free);
+	prom_one(&o, "modchip_bridge_timeouts_total", "counter", "Requests the bridge did not answer", bridge_stats.timeouts);
+	if (n_ports) {
+		prom_head(&o, "switch_port_speed_bits_per_second", "gauge", "0: link down");
+		for (uint8_t i = 0; i < n_ports; i++) {
+			add(&o, "switch_port_speed_bits_per_second{port=\"%u\",name=", i + 1);
+			add_str(&o, ports[i].name);
+			add(&o, "} %llu\n", (ports[i].link < 8 ? speed_mbps[ports[i].link] : 0) * 1000000ull);
+		}
+		prom_head(&o, "switch_port_enabled", "gauge", "1: not switched off");
+		for (uint8_t i = 0; i < n_ports; i++)
+			add(&o, "switch_port_enabled{port=\"%u\"} %d\n", i + 1, ports[i].enabled);
+	}
+	for (unsigned k = 0; n_ports && k < sizeof(series) / sizeof(series[0]); k++) {
+		prom_head(&o, series[k].name, "counter", series[k].help);
+		for (uint8_t i = 0; i < n_ports; i++) {
+			const struct rtl_port *p = &ports[i];
+			const uint64_t v[] = { p->in_octets, p->out_octets, p->in_ucast, p->in_mcast, p->in_bcast, p->out_ucast,
+				p->out_mcast, p->out_bcast, p->in_errors, p->out_errors, p->in_discards, p->out_discards };
+			add(&o, "%s{port=\"%u\"} %llu\n", series[k].name, i + 1, (unsigned long long)v[series[k].what]);
+		}
+	}
+	bool ddm = false;
+	for (uint8_t i = 0; i < rtl_sfp_count() && i < 2 && bridge_is_up(); i++)
+		ddm |= sfp[i].present && sfp[i].ddm;
+	if (ddm) {
+		prom_head(&o, "switch_sfp_temperature_celsius", "gauge", "Of the module");
+		for (uint8_t i = 0; i < rtl_sfp_count() && i < 2; i++)
+			if (sfp[i].present && sfp[i].ddm)
+				add(&o, "switch_sfp_temperature_celsius{slot=\"%u\"} %.2f\n", i + 1, sfp[i].temp / 256.0);
+		prom_head(&o, "switch_sfp_receive_power_watts", "gauge", "Light received");
+		for (uint8_t i = 0; i < rtl_sfp_count() && i < 2; i++)
+			if (sfp[i].present && sfp[i].ddm)
+				add(&o, "switch_sfp_receive_power_watts{slot=\"%u\"} %.3e\n", i + 1, sfp[i].rx_power * 1e-7);
+		prom_head(&o, "switch_sfp_transmit_power_watts", "gauge", "Light sent");
+		for (uint8_t i = 0; i < rtl_sfp_count() && i < 2; i++)
+			if (sfp[i].present && sfp[i].ddm)
+				add(&o, "switch_sfp_transmit_power_watts{slot=\"%u\"} %.3e\n", i + 1, sfp[i].tx_power * 1e-7);
+	}
+	buf[o.len] = 0;
+	return o.len;
+}

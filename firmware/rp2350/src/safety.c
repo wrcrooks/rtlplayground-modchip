@@ -167,3 +167,43 @@ int config_check(char *text, size_t len, char *err, size_t err_len)
 	}
 	return out;
 }
+
+
+size_t config_backup(char *buf, size_t max)
+{
+	size_t n = app(buf, max, 0, "# %s: configuration backup. Holds passwords and secrets.\n", hostname);
+
+	plat_config_read(0, sector, sizeof(sector));
+	for (size_t i = 0; i < sizeof(sector) && sector[i] && sector[i] != 0xff && n < max - 2; i++)
+		buf[n++] = sector[i];
+	if (buf[n - 1] != '\n')
+		buf[n++] = '\n';
+	buf[n] = 0;
+	return n;
+}
+
+
+bool config_restore(char *text, size_t len, unsigned minutes, char *msg, size_t max)
+{
+	char err[80];
+	int k = config_check(text, len, err, sizeof(err));
+
+	if (k < 0 || k + 1 > (int)sizeof(sector)) {
+		app(msg, max, 0, "NO: %s", k < 0 ? err : "the file is too long");
+		return false;
+	}
+	if (minutes > SAFETY_MAX_MIN || (minutes && !safety_rollback_start(minutes))) {
+		app(msg, max, 0, "NO: the rollback could not be prepared");
+		return false;
+	}
+	memset(sector, 0xff, sizeof(sector));
+	memcpy(sector, text, k);
+	sector[k] = 0;
+	if (!plat_config_write(sector, sizeof(sector))) {
+		app(msg, max, 0, "NO: writing to the flash failed");
+		return false;
+	}
+	event(EV_CONFIG, 0, 0, "Configuration restored from a file");
+	app(msg, max, 0, "OK: restored, restarting");
+	return true;
+}

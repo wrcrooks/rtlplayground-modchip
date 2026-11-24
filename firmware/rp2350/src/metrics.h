@@ -25,6 +25,10 @@ void plat_sys_read(struct plat_sys *s);
 
 void metrics_second(void);		/* once a second */
 size_t metrics_json(char *buf, size_t max);	/* /metrics.json, body only */
+/* For telemetry.c and /metrics */
+size_t metrics_switch_json(char *buf, size_t max);
+bool metrics_port_json(int n, char *buf, size_t max);	/* from 1; false: no such port */
+size_t metrics_prometheus(char *buf, size_t max);
 uint8_t *metrics_history(size_t *len);	/* /history.bin, malloc()ed; NULL: nothing yet */
 
 #endif

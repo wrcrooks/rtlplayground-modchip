@@ -6,6 +6,7 @@
  * offers, against a client that verifies the certificate and the name.
  * Built by test/Makefile.
  */
+#define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,9 @@
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 
+#include "psa/crypto.h"
 #include "tls_cert.h"
+#include "tls_client.h"
 
 static int failures;
 
@@ -96,10 +99,11 @@ static mbedtls_x509_crt crt;
 static mbedtls_pk_context key;
 static mbedtls_ssl_cache_context cache;	/* as altcp_tls sets up with ALTCP_MBEDTLS_USE_SESSION_CACHE */
 static mbedtls_ssl_session saved;
+static size_t full_bytes;		/* ... in a full one */
 static size_t server_bytes;		/* sent by the server during the last handshake */
 
 /* One connection with the given suite and group (0: the client's defaults) */
-static void session(const char *what, int suite, uint16_t group, bool resume)
+static void session(const char *what, bool tls13, int suite, uint16_t group, bool resume)
 {
 	static struct queue c2s, s2c;
 	struct end srv_end = { &s2c, &c2s }, cli_end = { &c2s, &s2c };
@@ -125,6 +129,9 @@ static void session(const char *what, int suite, uint16_t group, bool resume)
 	mbedtls_ssl_conf_rng(&cconf, mbedtls_ctr_drbg_random, &drbg);
 	mbedtls_ssl_conf_own_cert(&sconf, &crt, &key);
 	mbedtls_ssl_conf_session_cache(&sconf, &cache, mbedtls_ssl_cache_get, mbedtls_ssl_cache_set);
+	tls_tickets((struct altcp_tls_config *)&sconf);
+	mbedtls_ssl_conf_tls13_enable_signal_new_session_tickets(&cconf, MBEDTLS_SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED);
+	mbedtls_ssl_conf_max_tls_version(&cconf, tls13 ? MBEDTLS_SSL_VERSION_TLS1_3 : MBEDTLS_SSL_VERSION_TLS1_2);
 	mbedtls_ssl_conf_authmode(&cconf, MBEDTLS_SSL_VERIFY_REQUIRED);
 	mbedtls_ssl_conf_ca_chain(&cconf, &crt, NULL);
 	if (suite)
@@ -169,22 +176,37 @@ static void session(const char *what, int suite, uint16_t group, bool resume)
 		ok &= mbedtls_ssl_write(&srv, big + off, len) == (int)len;
 	}
 	size_t got = 0;
-	while (got < sizeof(back) && (n = mbedtls_ssl_read(&cli, back + got, sizeof(back) - got)) > 0)
+	if (!resume) {
+		mbedtls_ssl_session_free(&saved);
+		mbedtls_ssl_session_init(&saved);
+		if (!tls13)
+			mbedtls_ssl_get_session(&cli, &saved);
+	}
+	for (int tries = 0; got < sizeof(back); ) {
+		n = mbedtls_ssl_read(&cli, back + got, sizeof(back) - got);
+		if (n == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) {
+			if (!resume && !saved.start)
+				mbedtls_ssl_get_session(&cli, &saved);
+			continue;
+		}
+		if (n == MBEDTLS_ERR_SSL_WANT_READ && tries++ < 5)
+			continue;	/* a ticket was read */
+		if (n <= 0)
+			break;
 		got += n;
+	}
 	ok &= got == sizeof(big) && !memcmp(back, big, got);
 
 	char detail[128];
 	snprintf(detail, sizeof(detail), "%s, %s, certificate verified", mbedtls_ssl_get_ciphersuite(&cli),
 		 mbedtls_ssl_get_version(&cli));
 	check(ok && mbedtls_ssl_get_verify_result(&cli) == 0, what, detail, 0);
-	if (!resume) {
-		mbedtls_ssl_session_free(&saved);
-		mbedtls_ssl_session_init(&saved);
-		mbedtls_ssl_get_session(&cli, &saved);
-	} else {
+	ok = !strcmp(mbedtls_ssl_get_version(&cli), tls13 ? "TLSv1.3" : "TLSv1.2");
+	check(ok, "  that version", NULL, 0);
+	if (resume) {
 		/* A full handshake sends the certificate and a signed key exchange */
 		snprintf(detail, sizeof(detail), "the server sent %zu bytes", server_bytes);
-		check(server_bytes < 200, "resumed without certificate or key exchange", detail, 0);
+		check(server_bytes + 350 < full_bytes, "resumed without certificate or key exchange", detail, 0);
 	}
 out:
 	mbedtls_ssl_free(&srv);
@@ -207,6 +229,7 @@ int main(void)
 	mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy, NULL, 0);
 
 	r = tls_make_cert("sim-switch", der_key, &key_len, der_cert, &cert_len);
+	check(psa_crypto_init() == PSA_SUCCESS, "PSA", NULL, 0);
 	check(r == 0 && key_len < 200 && cert_len < 600, "key and certificate made", NULL, r);
 	r = mbedtls_x509_crt_parse_der(&crt, der_cert, cert_len);
 	check(r == 0, "certificate parses", NULL, r);
@@ -217,16 +240,22 @@ int main(void)
 
 	mbedtls_ssl_cache_init(&cache);
 	mbedtls_ssl_session_init(&saved);
-	session("AES-128-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 0, false);
-	session("ChaCha20-Poly1305", MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, 0, false);
-	session("AES-256-GCM", MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 0, false);
-	session("X25519 offered first", 0, MBEDTLS_SSL_IANA_TLS_GROUP_X25519, false);
-	session("P-256 only", 0, MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1, false);
-	session("client defaults", 0, 0, false);
-	char full[64];
-	snprintf(full, sizeof(full), "the server sent %zu bytes", server_bytes);
-	check(server_bytes > 400, "a full handshake for comparison", full, 0);
-	session("a second connection, resuming the session", 0, 0, true);
+	session("AES-128-GCM", false, MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 0, false);
+	session("ChaCha20-Poly1305", false, MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, 0, false);
+	session("AES-256-GCM", false, MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, 0, false);
+	session("AES-128-GCM", true, MBEDTLS_TLS1_3_AES_128_GCM_SHA256, 0, false);
+	session("ChaCha20-Poly1305", true, MBEDTLS_TLS1_3_CHACHA20_POLY1305_SHA256, 0, false);
+	session("AES-256-GCM", true, MBEDTLS_TLS1_3_AES_256_GCM_SHA384, 0, false);
+	for (int v13 = 0; v13 < 2; v13++) {
+		session("X25519 offered first", v13, 0, MBEDTLS_SSL_IANA_TLS_GROUP_X25519, false);
+		session("P-256 only", v13, 0, MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1, false);
+		session("client defaults", v13, 0, 0, false);
+		full_bytes = server_bytes;
+		char full[64];
+		snprintf(full, sizeof(full), "the server sent %zu bytes", server_bytes);
+		check(server_bytes > 400, "a full handshake for comparison", full, 0);
+		session("a second connection, resuming the session", v13, 0, 0, true);
+	}
 
 	printf("%s\n", failures ? "FAILED" : "all passed");
 	return failures ? 1 : 0;

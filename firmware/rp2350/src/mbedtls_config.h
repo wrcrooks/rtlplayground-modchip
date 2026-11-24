@@ -2,9 +2,10 @@
 #define _MBEDTLS_CONFIG_H_
 
 /*
- * mbedTLS for the web server's HTTPS: a TLS 1.2 server with an ECDSA P-256
- * key and a self-signed certificate made on the device (tls.c).
- * ECDHE over X25519 or P-256; AES-GCM or ChaCha20-Poly1305.
+ * mbedTLS for the web server's HTTPS: a TLS 1.2 and 1.3 server with an ECDSA
+ * P-256 key and a self-signed certificate made on the device (tls.c).
+ * ECDHE over X25519 or P-256; AES-GCM or ChaCha20-Poly1305. As a client
+ * (tls_client.c) also to servers with RSA certificates or P-384.
  */
 
 /* Platform: the RP2350's TRNG feeds the entropy pool (pico_mbedtls) */
@@ -17,6 +18,9 @@
 
 /* The SDK's altcp_tls_mbedtls.c reads fields mbedTLS 3 marks private */
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
+
+/* TLS 1.3 is built on the PSA interface; nothing is stored through it */
+#define MBEDTLS_PSA_CRYPTO_C
 
 /* Randomness */
 #define MBEDTLS_ENTROPY_C
@@ -31,23 +35,31 @@
 #define MBEDTLS_SHA512_C
 #define MBEDTLS_AES_C
 #define MBEDTLS_CIPHER_MODE_CFB	/* SNMPv3 */
+#define MBEDTLS_CIPHER_MODE_CTR	/* SSH */
 #define MBEDTLS_GCM_C
 #define MBEDTLS_CHACHA20_C
 #define MBEDTLS_POLY1305_C
 #define MBEDTLS_CHACHAPOLY_C
 #define MBEDTLS_CIPHER_C
+#define MBEDTLS_HKDF_C
 
 /* Public key */
 #define MBEDTLS_BIGNUM_C
 #define MBEDTLS_ECP_C
 #define MBEDTLS_ECP_NIST_OPTIM
 #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
+#define MBEDTLS_ECP_DP_SECP384R1_ENABLED
 #define MBEDTLS_ECP_DP_CURVE25519_ENABLED
 #define MBEDTLS_ECDH_C
 #define MBEDTLS_ECDSA_C
+#define MBEDTLS_RSA_C
+#define MBEDTLS_PKCS1_V15
+#define MBEDTLS_PKCS1_V21
+#define MBEDTLS_X509_RSASSA_PSS_SUPPORT
 #define MBEDTLS_ASN1_PARSE_C
 #define MBEDTLS_ASN1_WRITE_C
 #define MBEDTLS_OID_C
+#define MBEDTLS_BASE64_C		/* SSH fingerprints */
 #define MBEDTLS_PK_C
 #define MBEDTLS_PK_PARSE_C
 #define MBEDTLS_PK_WRITE_C
@@ -61,8 +73,17 @@
 /* TLS */
 #define MBEDTLS_SSL_TLS_C
 #define MBEDTLS_SSL_SRV_C
+#define MBEDTLS_SSL_CLI_C		/* MQTT and RADIUS over TLS, tls_client.c */
 #define MBEDTLS_SSL_PROTO_TLS1_2
+#define MBEDTLS_SSL_PROTO_TLS1_3
+#define MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE
+#define MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
+#define MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
+#define MBEDTLS_SSL_KEEP_PEER_CERTIFICATE
+#define MBEDTLS_SSL_SESSION_TICKETS	/* resumption in TLS 1.3 */
+#define MBEDTLS_SSL_TICKET_C
 #define MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+#define MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
 #define MBEDTLS_SSL_EXTENDED_MASTER_SECRET
 #define MBEDTLS_SSL_ENCRYPT_THEN_MAC
 #define MBEDTLS_SSL_SERVER_NAME_INDICATION
@@ -73,8 +94,14 @@
 #define MBEDTLS_SSL_OUT_CONTENT_LEN	4096
 
 #define MBEDTLS_SSL_CIPHERSUITES \
+	MBEDTLS_TLS1_3_AES_128_GCM_SHA256, \
+	MBEDTLS_TLS1_3_CHACHA20_POLY1305_SHA256, \
+	MBEDTLS_TLS1_3_AES_256_GCM_SHA384, \
 	MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, \
 	MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, \
-	MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+	MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, \
+	MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, \
+	MBEDTLS_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, \
+	MBEDTLS_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
 
 #endif

@@ -110,6 +110,8 @@ void plat_sys_read(struct plat_sys *s)
 static uint32_t u32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint16_t u16(const uint8_t *p) { return p[0] | p[1] << 8; }
 
+char hostname[24] = "test \"sw\"";
+
 int main(int argc, char **argv)
 {
 	const char *dir = argc > 1 ? argv[1] : "build";
@@ -166,6 +168,20 @@ int main(int argc, char **argv)
 	fwrite(h, 1, len, f);
 	fclose(f);
 	free(h);
+
+	static char prom[16384], small[300];
+	len = metrics_prometheus(prom, sizeof(prom));
+	snprintf(path, sizeof(path), "%s/metrics.prom", dir);
+	f = fopen(path, "w");
+	fwrite(prom, 1, len, f);
+	fclose(f);
+	check(len > 2000 && len < sizeof(prom) - 1, "Prometheus text");
+	len = metrics_prometheus(small, sizeof(small));
+	check(len < sizeof(small) && !small[len], "cut off in a small buffer, not past it");
+	len = metrics_switch_json(json, sizeof(json));
+	check(strstr(json, "\"name\":\"test \\\"sw\\\"\"") && json[len - 1] == '}', "MQTT's switch message");
+	check(metrics_port_json(6, json, sizeof(json)) && strstr(json, "\"rx_bytes\":") && !metrics_port_json(7, json, sizeof(json))
+	      && !metrics_port_json(0, json, sizeof(json)), "and the ports'");
 
 	printf("%s\n", failures ? "FAILED" : "all passed");
 	return failures ? 1 : 0;

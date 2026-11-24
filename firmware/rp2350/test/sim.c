@@ -333,6 +333,8 @@ int bridge_request(uint8_t type, const void *p1, size_t n1, const void *p2, size
 }
 
 bool bridge_is_up(void) { return true; }
+extern __xdata uint8_t cmd_capture;
+extern __xdata char passwd[21];
 
 extern uint8_t sfr_data[4];
 void port_isolate(uint8_t port, uint16_t pmask);
@@ -382,6 +384,20 @@ static bool https_on, snmp_on;
 static char snmp_comm[33] = "public";
 static char snmp_last[200];
 static char ip6_last[100];
+static char mqtt_last[200];
+void plat_mqtt_enable(bool on) { sprintf(mqtt_last, "on %d", on); }
+void plat_mqtt_server(const uint8_t ip[4], uint16_t port) { sprintf(mqtt_last, "server %u.%u.%u.%u %u", ip[0], ip[1], ip[2], ip[3], port); }
+bool plat_mqtt_login(const char *u, const char *p) { sprintf(mqtt_last, "login [%s] [%s]", u, p); return true; }
+bool plat_mqtt_topic(const char *t) { sprintf(mqtt_last, "topic %s", t); return true; }
+bool plat_mqtt_tls(const char *f) { sprintf(mqtt_last, "tls %s", f ? f : "-"); return true; }
+void plat_mqtt_interval(uint16_t s) { sprintf(mqtt_last, "interval %u", s); }
+size_t plat_mqtt_status(char *buf, size_t max) { return snprintf(buf, max, "MQTT\n"); }
+bool plat_ssh_enable(bool on) { sprintf(mqtt_last, "ssh %d", on); return true; }
+bool plat_ssh_newkey(void) { strcpy(mqtt_last, "newkey"); return true; }
+size_t plat_ssh_status(char *buf, size_t max) { return snprintf(buf, max, "SSH off\n"); }
+void plat_prometheus(bool on) { sprintf(mqtt_last, "prom %d", on); }
+bool plat_prometheus_token(const char *t) { sprintf(mqtt_last, "token %s", t); return true; }
+size_t plat_prometheus_status(char *buf, size_t max) { return snprintf(buf, max, "Prometheus\n"); }
 bool plat_ip6_enable(bool on) { sprintf(ip6_last, "on %d", on); rtl_ip6(on); return true; }
 bool plat_ip6_addr(const char *a) { sprintf(ip6_last, "addr %s", a ? a : "-"); return true; }
 bool plat_ip6_gw(const char *a) { sprintf(ip6_last, "gw %s", a ? a : "-"); return true; }
@@ -1113,6 +1129,38 @@ int main(void)
 		cmd("qos port 2 priority off");
 		rtl_second();
 		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		static const char *const tele[][2] = {
+			{ "mqtt on", "on 1" }, { "mqtt server 10.0.0.9", "server 10.0.0.9 0" }, { "mqtt server 10.0.0.9 1884", "server 10.0.0.9 1884" },
+			{ "mqtt login u p", "login [u] [p]" }, { "mqtt login off", "login [] []" }, { "mqtt topic a/b", "topic a/b" },
+			{ "mqtt tls off", "tls -" }, { "mqtt tls abcd", "tls abcd" }, { "mqtt interval 60", "interval 60" },
+			{ "prometheus on", "prom 1" }, { "ssh on", "ssh 1" }, { "ssh off", "ssh 0" }, { "ssh newkey", "newkey" }, { "prometheus token xyz", "token xyz" }, { "prometheus token off", "token " },
+		};
+		for (unsigned k = 0; k < sizeof(tele) / sizeof(tele[0]); k++) {
+			cmd((char *)tele[k][0]);
+			check(!strcmp(mqtt_last, tele[k][1]), "%s", tele[k][0]);
+		}
+		cmd("mqtt interval 2");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "mqtt interval 2 is refused");
+		{
+			static char big[9000];
+			char line[40];
+			bool ok = false;
+			size_t n;
+			strcpy(line, "version");
+			n = rtl_run(line, big, sizeof(big), &ok);
+			check(ok && n > 5 && !cmd_capture, "rtl_run() takes a command's output");
+			strcpy(line, "port 99 1g");
+			rtl_run(line, big, sizeof(big), &ok);
+			check(!ok, "and its failure");
+			strcpy(line, "version");
+			check(rtl_run(line, big, 4, &ok) == 3, "no more than fits");
+			strcpy(passwd, "pa&ss");
+			check(rtl_password_plain_ok("pa&ss") && !rtl_password_plain_ok("pa") && !rtl_password_plain_ok("pa&ss1")
+			      && !rtl_password_plain_ok(""), "SSH's password, whole");
+			strcpy(passwd, "");
+			check(!rtl_password_plain_ok(""), "no password, no login");
+			strcpy(passwd, "1234");
+		}
 		/* IPv6 */
 		uint8_t g6[64];
 		memcpy(g6, g0, sizeof(g6));

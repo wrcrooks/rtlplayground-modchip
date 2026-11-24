@@ -4,6 +4,7 @@ dashboard reads from it.
 
   python3 run_metrics.py build/test_metrics build
 """
+import re
 import json
 import pathlib
 import subprocess
@@ -51,6 +52,19 @@ def main():
     check(m["bridge"]["link_load"] == 10.0 and m["bridge"]["frames_ps"] == 20, "bridge link load, frames/s")
     check(m["t3"] == {"up": True, "enabled": True, "khz": 400, "reads": 1000, "writes": 200, "errors": 1}, "T3 status")
     check(m["events"] == [{"seq": 1, "t": 4000, "port": 4, "link": 0, "mbps": 0}], "link events")
+
+    seen, typed, ok = set(), None, True
+    for ln in (pathlib.Path(sys.argv[2]) / "metrics.prom").read_text().splitlines():
+        if ln.startswith("# TYPE "):
+            typed = ln.split()[2]
+            ok &= typed not in seen and ln.split()[3] in ("gauge", "counter")
+            seen.add(typed)
+        elif not ln.startswith("# HELP "):
+            g = re.fullmatch(r'([a-z_]+)(\{[a-z]+="(?:[^"\\]|\\.)*"(?:,[a-z]+="(?:[^"\\]|\\.)*")*\})? -?[0-9.]+(?:e[+-]?[0-9]+)?', ln)
+            ok &= bool(g) and g.group(1) == typed
+            if not g:
+                print("      " + ln)
+    check(ok and len(seen) == 26, "Prometheus text: %d metrics, each well formed and under its TYPE" % len(seen))
     print("FAILED" if failures else "all passed")
     return 1 if failures else 0
 

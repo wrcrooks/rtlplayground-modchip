@@ -687,6 +687,36 @@ void rtl_http_cmd(char *body)
 }
 
 
+/* For SSH: unlike outbuf, out is as large as the caller likes */
+extern uint8_t *cap_buf;
+extern size_t cap_max, cap_len;
+
+size_t rtl_run(char *line, char *out, size_t max, bool *ok)
+{
+	cap_buf = (uint8_t *)out;
+	cap_max = max;
+	cap_len = 0;
+	execute_commands((__xdata uint8_t *)line);
+	cap_buf = NULL;
+	*ok = err_status == ERR_OK;
+	return cap_len;
+}
+
+
+/* As it is, not a form value. No password, no login. */
+bool rtl_password_plain_ok(const char *p)
+{
+	uint8_t d = 0;
+	size_t n = strlen(passwd);
+
+	if (!n || strlen(p) != n)
+		return false;
+	for (size_t i = 0; i < n; i++)
+		d |= p[i] ^ passwd[i];
+	return !d;
+}
+
+
 static uint8_t hexval(uint8_t c)
 {
 	if (c >= '0' && c <= '9')

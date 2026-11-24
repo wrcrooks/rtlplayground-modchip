@@ -32,6 +32,7 @@
 #define TLS_CONNS		2			/* each holds about 25 KB of mbedTLS buffers */
 #define METRICS_JSON_MAX	6144
 #define FEATURES_JSON_MAX	8192
+#define PROMETHEUS_MAX		16384
 #define WRITE_MAX		2048			/* below MBEDTLS_SSL_OUT_CONTENT_LEN: one TLS record */
 
 enum { ST_FREE, ST_RX, ST_TX, ST_UPLOAD, ST_DRAIN };
@@ -347,6 +348,52 @@ static bool handle_metrics(struct conn *c, const char *path)
 
 static void handle_backup(struct conn *c);
 
+static bool prom_on;
+static char prom_token[65];
+
+void plat_prometheus(bool on)
+{
+	prom_on = on;
+}
+
+
+bool plat_prometheus_token(const char *token)
+{
+	if (strlen(token) >= sizeof(prom_token))
+		return false;
+	strcpy(prom_token, token);
+	return true;
+}
+
+
+size_t plat_prometheus_status(char *buf, size_t max)
+{
+	return app(buf, max, 0, "Prometheus /metrics %s%s\n", prom_on ? "on" : "off",
+		   !prom_on ? "" : prom_token[0] ? ", with a token" : ", open to all");
+}
+
+
+/* Authorization: Bearer <token> */
+static bool prom_token_ok(struct conn *c)
+{
+	char *v = header(c, "authorization:");
+	size_t n = strlen(prom_token);
+	uint8_t d;
+
+	if (!n)
+		return true;
+	if (!v || strncasecmp(v, "bearer ", 7))
+		return false;
+	v += 7;
+	if (strcspn(v, "\r\n ") != n)
+		return false;
+	d = 0;
+	for (size_t i = 0; i < n; i++)
+		d |= v[i] ^ prom_token[i];
+	return !d;
+}
+
+
 static void handle_get(struct conn *c, char *target)
 {
 	char path[64] = "";
@@ -365,6 +412,15 @@ static void handle_get(struct conn *c, char *target)
 				serve_asset(c, a);
 			return;
 		}
+	}
+	if (!strcmp(path, "/metrics") && prom_on && (auth || prom_token_ok(c))) {
+		char *body = malloc(PROMETHEUS_MAX);
+
+		if (body)
+			respond_body(c, "text/plain; version=0.0.4", (uint8_t *)body, metrics_prometheus(body, PROMETHEUS_MAX));
+		else
+			respond_str(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+		return;
 	}
 	if (!auth) {
 		send_unauthorized(c);
@@ -535,7 +591,7 @@ static void handle_config(struct conn *c, char *body, uint16_t len)
 static void handle_restore(struct conn *c, const char *query, char *body, uint16_t len)
 {
 	size_t n;
-	char *data = file_part(c, body, len, &n), err[80], msg[110];
+	char *data = file_part(c, body, len, &n), msg[110];
 	unsigned confirm = 0;
 
 	if (!strncmp(query, "confirm=", 8))
@@ -544,21 +600,12 @@ static void handle_restore(struct conn *c, const char *query, char *body, uint16
 		text_verdict(c, 400, "NO: expected a multipart upload of the file");
 		return;
 	}
-	int k = config_check(data, n, err, sizeof(err));
-	if (k < 0 || k + 1 > (int)sizeof(config_sector)) {
-		snprintf(msg, sizeof(msg), "NO: %s", k < 0 ? err : "the file is too long");
+	if (!config_restore(data, n, confirm, msg, sizeof(msg))) {
 		text_verdict(c, 400, msg);
 		return;
 	}
-	if (confirm > SAFETY_MAX_MIN || (confirm && !safety_rollback_start(confirm))) {
-		text_verdict(c, 400, "NO: the rollback could not be prepared");
-		return;
-	}
-	if (!config_store(c, data, k))
-		return;
-	event(EV_CONFIG, 0, 0, "Configuration restored from a file");
 	c->reboot_after = true;
-	text_verdict(c, 200, "OK: restored, restarting");
+	text_verdict(c, 200, msg);
 }
 
 
@@ -575,14 +622,9 @@ static void handle_backup(struct conn *c)
 	for (const char *p = hostname; *p && k < sizeof(name) - 1; p++)
 		name[k++] = (*p >= '0' && *p <= '9') || ((*p | 0x20) >= 'a' && (*p | 0x20) <= 'z') || *p == '-' ? *p : '_';
 	name[k] = 0;
-	plat_config_read(0, config_sector, sizeof(config_sector));
 	n = snprintf(t, 400, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nCache-Control: no-store\r\n"
-		     "Content-Disposition: attachment; filename=\"%s-config.txt\"\r\nConnection: close\r\n\r\n"
-		     "# %s: configuration backup. Holds passwords and secrets.\n", name, name);
-	for (size_t i = 0; i < sizeof(config_sector) && config_sector[i] && config_sector[i] != 0xff; i++)
-		t[n++] = config_sector[i];
-	if (t[n - 1] != '\n')
-		t[n++] = '\n';
+		     "Content-Disposition: attachment; filename=\"%s-config.txt\"\r\nConnection: close\r\n\r\n", name);
+	n += config_backup(t + n, PLAT_CONFIG_LEN + 400 - n);
 	respond(c, t, n);
 	free(t);
 }

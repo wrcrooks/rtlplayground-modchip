@@ -16,6 +16,7 @@ static int reboots, sector_fail;
 
 uint32_t plat_uptime_s(void) { return now; }
 void plat_reboot(void) { reboots++; }
+char hostname[24] = "sw";
 void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, config + off, len); }
 bool plat_config_write(const uint8_t *src, uint32_t len) { memcpy(config, src, len); return true; }
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { memcpy(dst, sectors[id], len); }

@@ -379,6 +379,100 @@ bool ext_run(const char *fmt, ...)
 
 
 /*
+ *   mqtt                                status
+ *   mqtt on|off
+ *   mqtt server <a.b.c.d> [<port>]      1883, or 8883 with TLS
+ *   mqtt login <user> <password>|off
+ *   mqtt topic <prefix>|off             off: the hostname
+ *   mqtt tls <fingerprint>|off          TLS, to the server with that certificate (SHA-256)
+ *   mqtt interval <5-3600>
+ */
+static bool parse_mqtt(void)
+{
+	char a[70], b[70];
+	unsigned ip[4], v = 0;
+	bool ok = true;
+
+	if (cmd_words_len == 1) {
+		char st[200];
+
+		plat_mqtt_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		plat_mqtt_enable(cmd_compare(1, "on"));
+	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "server") && ext_ip(ext_rest(2), ip)) {
+		uint8_t i[4] = { ip[0], ip[1], ip[2], ip[3] };
+
+		ok = cmd_words_len == 3 || ext_word_num(3, 1, 65535, &v);
+		if (ok)
+			plat_mqtt_server(i, v);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "login") && cmd_compare(2, "off")) {
+		plat_mqtt_login("", "");
+	} else if (cmd_words_len == 4 && cmd_compare(1, "login")) {
+		ok = ext_word(2, a, sizeof(a)) && ext_word(3, b, sizeof(b)) && plat_mqtt_login(a, b);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "topic")) {
+		ok = plat_mqtt_topic(cmd_compare(2, "off") ? "" : ext_rest(2));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "tls")) {
+		ok = plat_mqtt_tls(cmd_compare(2, "off") ? NULL : ext_rest(2));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "interval") && ext_word_num(2, 5, 3600, &v)) {
+		plat_mqtt_interval(v);
+	} else {
+		ok = false;
+	}
+	if (!ok)
+		ext_error("mqtt [on|off|server <a.b.c.d> [<port>]|login <user> <password>|off|topic <prefix>|off|\n"
+			  "  tls <SHA-256 fingerprint>|off|interval <5-3600>]\n");
+	return true;
+}
+
+
+/*
+ *   ssh                                 status, the host key's fingerprint
+ *   ssh on|off|newkey
+ */
+static bool parse_ssh(void)
+{
+	char st[120];
+	bool ok = true;
+
+	if (cmd_words_len == 1) {
+		plat_ssh_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		ok = plat_ssh_enable(cmd_compare(1, "on"));
+	} else if (cmd_words_len == 2 && cmd_compare(1, "newkey")) {
+		ok = plat_ssh_newkey();
+	} else {
+		ext_error("ssh [on|off|newkey]\n");
+	}
+	if (!ok)
+		ext_error("no host key could be made\n");
+	return true;
+}
+
+
+/*
+ *   prometheus on|off                   GET /metrics without a login
+ *   prometheus token <text>|off         but with "Authorization: Bearer <text>"
+ */
+static bool parse_prometheus(void)
+{
+	char st[80];
+
+	if (cmd_words_len == 1) {
+		plat_prometheus_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		plat_prometheus(cmd_compare(1, "on"));
+	} else if (!(cmd_words_len == 3 && cmd_compare(1, "token")
+		     && plat_prometheus_token(cmd_compare(2, "off") ? "" : ext_rest(2)))) {
+		ext_error("prometheus [on|off|token <text>|off]\n");
+	}
+	return true;
+}
+
+
+/*
  *   ip6                        status
  *   ip6 on|off                 IPv6 for management: link-local and SLAAC addresses
  *   ip6 addr <address>|none    and one of our own (/64)
@@ -638,6 +732,12 @@ bool rtl_cmd_ext(void)
 {
 	if (cmd_compare(0, "reboot") || cmd_compare(0, "rollback"))
 		return parse_reboot();
+	if (cmd_compare(0, "mqtt"))
+		return parse_mqtt();
+	if (cmd_compare(0, "ssh"))
+		return parse_ssh();
+	if (cmd_compare(0, "prometheus"))
+		return parse_prometheus();
 	if (cmd_compare(0, "ip6"))
 		return parse_ip6();
 	if (rtl_guard_cmd() || rtl_mcast_cmd())

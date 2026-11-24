@@ -16,9 +16,11 @@
 #include "lwip/altcp_tls.h"
 #include "mbedtls/platform_time.h"
 #include "mbedtls/sha256.h"
+#include "psa/crypto.h"
 
 #include "net.h"
 #include "tls_cert.h"
+#include "tls_client.h"
 #include "plat.h"
 
 #define TLS_OFFSET		(PICO_FLASH_SIZE_BYTES - 2 * FLASH_SECTOR_SIZE)
@@ -84,17 +86,34 @@ static bool make_cert(void)
 }
 
 
+bool tls_identity(struct tls_identity *id)
+{
+	const struct tls_store *s = stored();
+
+	if (!s && (!make_cert() || !(s = stored())))
+		return false;
+	id->key = s->key;
+	id->key_len = s->key_len;
+	id->cert = s->cert;
+	id->cert_len = s->cert_len;
+	return true;
+}
+
+
 static bool start(void)
 {
 	const struct tls_store *s = stored();
 
 	if (!s && (!make_cert() || !(s = stored())))
 		return false;
+	if (psa_crypto_init() != PSA_SUCCESS)	/* TLS 1.3 */
+		return false;
 	tls_conf = altcp_tls_create_config_server_privkey_cert(s->key, s->key_len, NULL, 0, s->cert, s->cert_len);
 	if (!tls_conf) {
 		printf("https: the stored key or certificate doesn't load\n");
 		return false;
 	}
+	tls_tickets(tls_conf);
 	if (!httpd_tls_start(tls_conf)) {
 		altcp_tls_free_config(tls_conf);
 		tls_conf = NULL;

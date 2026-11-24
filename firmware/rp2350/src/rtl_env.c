@@ -51,6 +51,8 @@ __xdata uint8_t sbuf[SBUF_SIZE];
 volatile __xdata uint32_t ticks;
 __bit cmd_available;
 __xdata uint8_t cmd_capture;
+uint8_t *cap_buf;		/* rtl_run() */
+size_t cap_max, cap_len;
 __xdata uint32_t rtl8224_release_tick;
 __xdata uint16_t uip_len;
 __xdata uip_ipaddr_t uip_hostaddr, uip_draddr, uip_netmask;
@@ -74,7 +76,10 @@ __xdata uint16_t session_timeout = 200;
 
 void write_char_no_syslog(char c)
 {
-	if (cmd_capture) {
+	if (cap_buf) {
+		if (cap_len < cap_max - 1)
+			cap_buf[cap_len++] = c;
+	} else if (cmd_capture) {
 		if (slen < TCP_OUTBUF_SIZE - sizeof(CMD_TRUNCATED))
 			outbuf[slen++] = c;
 		else

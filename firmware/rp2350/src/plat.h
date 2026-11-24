@@ -38,6 +38,25 @@ bool plat_config_write(const uint8_t *src, uint32_t len);	/* replaces the whole 
 void plat_dhcp_start(void);
 void plat_dhcp_stop(void);
 
+/* MQTT (telemetry.c); NULL: no TLS */
+void plat_mqtt_enable(bool on);
+void plat_mqtt_server(const uint8_t ip[4], uint16_t port);
+bool plat_mqtt_login(const char *user, const char *password);
+bool plat_mqtt_topic(const char *topic);
+bool plat_mqtt_tls(const char *fingerprint);
+void plat_mqtt_interval(uint16_t s);
+size_t plat_mqtt_status(char *buf, size_t max);
+
+/* SSH on port 22 (ssh_lwip.c) */
+bool plat_ssh_enable(bool on);
+bool plat_ssh_newkey(void);
+size_t plat_ssh_status(char *buf, size_t max);
+
+/* GET /metrics without a login (httpd.c): with a token, if one is set */
+void plat_prometheus(bool on);
+bool plat_prometheus_token(const char *token);
+size_t plat_prometheus_status(char *buf, size_t max);
+
 /* IPv6 management (net.c); NULL: none, or learned */
 bool plat_ip6_enable(bool on);
 bool plat_ip6_addr(const char *addr);
@@ -193,6 +212,8 @@ extern uint16_t session_timeout;		/* seconds */
 bool rtl_http_get(char *path);			/* page_impl.c routes; false: not one */
 void rtl_http_cmd(char *body);			/* POST /cmd */
 bool rtl_password_ok(const char *urlencoded);
+bool rtl_password_plain_ok(const char *password);
+size_t rtl_run(char *line, char *out, size_t max, bool *ok);	/* a command line, its output */
 uint16_t rtl_http_cont(uint8_t *dst, uint16_t max);	/* the rest after outbuf, cont_len */
 
 #endif

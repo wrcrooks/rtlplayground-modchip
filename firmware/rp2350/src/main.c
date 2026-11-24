@@ -26,6 +26,7 @@
 #include "events.h"
 #include "safety.h"
 #include "store.h"
+#include "telemetry.h"
 #include "net.h"
 #include "metrics.h"
 #include "modchip_version.h"
@@ -448,6 +449,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 		sys_check_timeouts();
 		net_poll();
 		work |= httpd_poll();
+		ssh_conn_poll();
 
 		int c = getchar_timeout_us(0);
 		if (c >= 0) {
@@ -475,6 +477,8 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			net_second();
 			httpd_second();
 			snmp_second();
+			telemetry_second();
+			ssh_conn_second();
 			read_rp_temp();
 			metrics_second();
 			load_pm = busy_us > 1000000 ? 1000 : busy_us / 1000;

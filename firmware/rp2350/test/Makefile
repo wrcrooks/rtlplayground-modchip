@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -45,15 +45,18 @@ ifneq ($(PICO_SDK_PATH),)
 	python3 run_snmp.py $(BUILD)/test_snmp
 	$(BUILD)/test_httpd
 	$(BUILD)/test_httpd_tls
+	python3 run_https.py $(BUILD)/test_httpd_tls
+	python3 run_ssh.py $(BUILD)/test_ssh
+	python3 run_mqtt.py $(BUILD)/test_mqtt
 else
 	@echo "SKIP  test_tls, test_snmp, test_httpd: set PICO_SDK_PATH for mbedTLS's and lwIP's sources"
 endif
 
 # mbedTLS as the firmware configures it, plus what the tests need
 MBED_INC = -I. -I$(MBEDTLS)/include -I$(MBEDTLS)/library '-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"'
-$(BUILD)/libmbed.a: mbedtls_test_config.h ../src/mbedtls_config.h
+$(BUILD)/libmbed.a: host_mbed.c mbedtls_test_config.h ../src/mbedtls_config.h
 	@mkdir -p $(BUILD)/mbed
-	cd $(BUILD)/mbed && $(CC) -std=gnu11 -O2 -w -c -I../.. $(patsubst -I.,,$(MBED_INC)) $(wildcard $(MBEDTLS)/library/*.c)
+	cd $(BUILD)/mbed && $(CC) -std=gnu11 -O2 -w -c -I../.. $(patsubst -I.,,$(MBED_INC)) $(wildcard $(MBEDTLS)/library/*.c) ../../host_mbed.c
 	rm -f $@ && ar rcs $@ $(BUILD)/mbed/*.o
 
 $(BUILD)/test_usm: test_usm.c ../src/usm.c ../src/usm.h $(BUILD)/libmbed.a
@@ -79,6 +82,19 @@ $(BUILD)/test_net6: test_net6.c ../src/net.c ../src/events.c ../src/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd -I../src -I$(LWIP)/src/include -o $@ test_net6.c ../src/net.c ../src/events.c $(LWIP_CORE)
 
+ALTCP_TLS = $(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c $(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c
+
+$(BUILD)/test_mqtt: test_mqtt.c relay.h ../src/telemetry.c ../src/tls_client.c ../src/rng.c ../src/events.c $(BUILD)/libmbed.a ../src/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include -I$(LWIP)/src/apps/altcp_tls $(MBED_INC) \
+		-I$(RTLP)/modchip/bridge -o $@ test_mqtt.c ../src/telemetry.c ../src/tls_client.c ../src/rng.c ../src/events.c \
+		$(LWIP)/src/apps/mqtt/mqtt.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
+
+$(BUILD)/test_ssh: test_ssh.c relay.h ../src/ssh.c ../src/ssh.h ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd -I../src -I$(LWIP)/src/include $(MBED_INC) -o $@ test_ssh.c \
+		../src/ssh.c ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(BUILD)/libmbed.a
+
 $(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_safety.c ../src/events.c ../src/store.c ../src/safety.c
@@ -102,20 +118,18 @@ $(BUILD)/test_httpd: test_httpd.c $(HTTPD_SRC) ../src/httpd.c ../src/upload.c ..
 
 # The same with TLS (the SDK's altcp_tls_mbedtls.c, as the firmware builds it): HTTPS
 # switched on and off, the listener closed under lwIP's asserts
-$(BUILD)/test_httpd_tls: test_httpd.c ../src/httpd.c ../src/tls_cert.c ../src/lwipopts.h lwip_httpd_tls/lwipopts.h mbedtls_test_config.h
+$(BUILD)/test_httpd_tls: test_httpd.c relay.h ../src/httpd.c ../src/tls_cert.c ../src/tls_client.c ../src/lwipopts.h lwip_httpd_tls/lwipopts.h $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -DTEST_HTTPD_TLS -Ilwip_httpd_tls -Ilwip_httpd -I. -I../src -I$(LWIP)/src/include \
-		-I$(RTLP)/modchip/bridge -I$(LWIP)/src/apps/altcp_tls -I$(MBEDTLS)/include -I$(MBEDTLS)/library \
-		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' '-DMODCHIP_VERSION="test"' \
-		-o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) ../src/tls_cert.c $(LWIP_CORE) \
+		-I$(RTLP)/modchip/bridge -I$(LWIP)/src/apps/altcp_tls $(MBED_INC) '-DMODCHIP_VERSION="test"' \
+		-o $@ test_httpd.c ../src/httpd.c $(HTTPD_SRC) ../src/tls_cert.c ../src/tls_client.c ../src/rng.c $(LWIP_CORE) \
 		$(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c \
-		$(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c $(wildcard $(MBEDTLS)/library/*.c)
+		$(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c $(BUILD)/libmbed.a
 
-$(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/mbedtls_config.h mbedtls_test_config.h
+$(BUILD)/test_tls: test_tls.c ../src/tls_cert.c ../src/tls_cert.h ../src/tls_client.c ../src/rng.c $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
-	$(CC) -std=gnu11 -O2 -w -I../src -I$(MBEDTLS)/include -I$(MBEDTLS)/library \
-		'-DMBEDTLS_CONFIG_FILE="mbedtls_test_config.h"' -I. \
-		-o $@ test_tls.c ../src/tls_cert.c $(wildcard $(MBEDTLS)/library/*.c)
+	$(CC) -std=gnu11 -O2 -w -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include $(MBED_INC) -Wl,--gc-sections -ffunction-sections \
+		-o $@ test_tls.c ../src/tls_cert.c ../src/tls_client.c ../src/rng.c $(BUILD)/libmbed.a
 
 # 802.1X against a simulated supplicant and RADIUS server; run_dot1x_radius.sh
 # runs test_dot1x_radius against a real FreeRADIUS in Docker (not part of "all")

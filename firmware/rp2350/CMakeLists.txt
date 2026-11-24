@@ -142,6 +142,11 @@ add_executable(modchip
     src/snmp_mib.c
     src/snmp_udp.c
     src/usm.c
+    src/telemetry.c
+    src/ssh.c
+    src/ssh_lwip.c
+    src/rng.c
+    src/tls_client.c
     src/metrics.c
     src/dot1x.c
     src/dot1x_udp.c
@@ -176,7 +181,8 @@ target_sources(modchip PRIVATE
     ${LWIP_SNMP}/snmp_pbuf_stream.c
     ${LWIP_SNMP}/snmp_scalar.c
     ${LWIP_SNMP}/snmp_table.c
-    ${LWIP_SNMP}/snmp_traps.c)
+    ${LWIP_SNMP}/snmp_traps.c
+    ${PICO_LWIP_PATH}/src/apps/mqtt/mqtt.c)
 
 target_link_libraries(modchip
     pico_stdlib

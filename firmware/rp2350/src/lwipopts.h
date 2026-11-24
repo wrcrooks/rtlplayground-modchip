@@ -13,8 +13,10 @@
 #define MEM_SIZE			(48 * 1024)
 #define MEMP_NUM_PBUF			32
 #define PBUF_POOL_SIZE			24
-#define MEMP_NUM_TCP_PCB		8
-#define MEMP_NUM_TCP_PCB_LISTEN		2
+#define MEMP_NUM_TCP_PCB		16
+#define MEMP_NUM_ALTCP_PCB		40	/* TLS takes two each */
+#define MEMP_NUM_TCP_PCB_LISTEN		4
+#define MEMP_NUM_SYS_TIMEOUT		(LWIP_NUM_SYS_TIMEOUT_INTERNAL + 4)
 #define MEMP_NUM_TCP_SEG		32
 #define MEMP_NUM_UDP_PCB		8
 #define MEMP_NUM_ARP_QUEUE		8
@@ -89,6 +91,10 @@ void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, un
 #define SNMP_LWIP_MIB2_SYSDESC		"RTLPlayground mod chip"
 #define SNMP_LWIP_ENTERPRISE_OID	0
 #define SNMP_MAX_VALUE_SIZE		128
+
+/* telemetry.c */
+#define MQTT_OUTPUT_RINGBUF_SIZE	3072
+#define MQTT_REQ_MAX_IN_FLIGHT		16
 
 #define LWIP_DEBUG			0
 
