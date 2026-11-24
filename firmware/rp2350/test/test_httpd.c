@@ -48,6 +48,7 @@ void plat_config_read(uint32_t off, uint8_t *dst, uint32_t len) { memcpy(dst, co
 void plat_sector_read(int id, uint8_t *dst, uint32_t len) { (void)id; memset(dst, 0xff, len); }
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { (void)id; (void)src; (void)len; return true; }
 char hostname[24] = "sw/1";
+size_t mc_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 size_t rtl_guard_json(char *buf, size_t max) { return snprintf(buf, max, "{}"); }
 bool rtl_http_get(char *path)
 {

@@ -11,7 +11,7 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c rtl837x_acl.c rtl837x_acl_cmd.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c \
+	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/rtl_mcast.c ../src/mcast.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c \
 	$(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext -DRTLP_ACL \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
@@ -25,10 +25,11 @@ MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
 SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
-all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
 	$(BUILD)/test_dot1x
 	$(BUILD)/test_safety
+	$(BUILD)/test_mcast
 	python3 run_config_words.py $(BUILD)/test_safety
 	$(BUILD)/test_upload
 	python3 run_sim.py $(BUILD)/sim
@@ -63,6 +64,10 @@ $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/p
 $(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_safety.c ../src/events.c ../src/store.c ../src/safety.c
+
+$(BUILD)/test_mcast: test_mcast.c ../src/mcast.c ../src/mcast.h ../src/events.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_mcast.c ../src/mcast.c ../src/events.c
 
 $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.c
 	@mkdir -p $(BUILD)

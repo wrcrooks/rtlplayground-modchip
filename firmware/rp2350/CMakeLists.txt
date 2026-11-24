@@ -97,6 +97,7 @@ add_library(rtlp OBJECT
     src/rtl_poe.c
     src/dot1x_plat.c
     src/rtl_guard.c
+    src/rtl_mcast.c
 )
 add_dependencies(rtlp modchip_version)
 
@@ -147,6 +148,7 @@ add_executable(modchip
     src/events.c
     src/store.c
     src/safety.c
+    src/mcast.c
     src/extras.c
     src/rtl_sfr.S
     ${GEN}/web_assets.c

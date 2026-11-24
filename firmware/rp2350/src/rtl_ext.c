@@ -562,7 +562,7 @@ bool rtl_cmd_ext(void)
 {
 	if (cmd_compare(0, "reboot") || cmd_compare(0, "rollback"))
 		return parse_reboot();
-	if (rtl_guard_cmd())
+	if (rtl_guard_cmd() || rtl_mcast_cmd())
 		return true;
 	if (cmd_compare(0, "acltbl"))
 		return parse_acl();

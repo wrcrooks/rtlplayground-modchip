@@ -35,6 +35,10 @@
 #include "rtl837x_acl.h"
 #include "events.h"
 #include "rtl_guard.h"
+#include "mcast.h"
+
+void rtl_mcast_links(uint32_t sts);	/* rtl_mcast.c */
+void rtl_mcast_second(void);
 
 void rtl_iso_reset(void);	/* rtl_env.c */
 void rtl_iso_release(void);
@@ -149,6 +153,7 @@ void rtl_bridge_up(void)
 	dot1x_plat_bridge_up();
 	acl_reset();
 	rtl_guard_reset();
+	mc_reset();
 
 	flash_region.addr = CONFIG_START;
 	flash_region.len = 0x100;
@@ -331,6 +336,7 @@ void rtl_second(void)
 	dot1x_second();
 	acl_poll();
 	rtl_guard_second();
+	rtl_mcast_second();
 	handle_button();
 	for (uint8_t sfp = 0; sfp < 2; sfp++) {
 		if (!sfp_read_due[sfp] || --sfp_read_due[sfp])
@@ -373,6 +379,7 @@ void rtl_on_link(const uint8_t *links)
 
 	rtl_metrics_link(sts, l, l89);
 	dot1x_plat_links(sts, l, l89);
+	rtl_mcast_links(sts);
 	if (!memcmp(links, links_last, sizeof(links_last)))
 		return;
 	print_string("\n<new link: ");
@@ -475,6 +482,14 @@ uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 			lacp_in();
 		}
 		return 0;
+	}
+	if (mc_cfg.on && (frame[0] & 1)) {
+		static uint8_t plain[UIP_CONF_BUFFER_SIZE];
+
+		memcpy(plain, frame, 12);
+		memcpy(plain + 12, frame + ETH_TYPE_OFFSET, len - ETH_TYPE_OFFSET);
+		if (mc_rx(frame[19] & 0x0f, *vlan, plain, len - ETH_TYPE_OFFSET + 12))
+			return 0;
 	}
 	if (igmpEnabled && uip_buf[0] == 0x01 && uip_buf[1] == 0x00 && uip_buf[2] == 0x5e)
 		rtl_metrics_igmp(frame, len);

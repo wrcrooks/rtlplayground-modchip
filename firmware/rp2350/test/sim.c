@@ -16,6 +16,7 @@
 #include "bridge.h"
 #include "dot1x.h"
 #include "rtl_guard.h"
+#include "mcast.h"
 extern uint8_t stp_pflags[];
 extern uint8_t cmd_buffer[];
 #define cmd_buffer_test cmd_buffer
@@ -1092,6 +1093,49 @@ int main(void)
 		cmd("qos port 2 priority off");
 		rtl_second();
 		check(!RULE_VALID(41) && !RULE_VALID(47) && !RULE_VALID(49), "and off");
+		/* Multicast snooping (rtl_mcast.c) */
+		uint8_t ig[12 + 8 + 4 + 2 + 24 + 8] = { 0x01, 0, 0x5e, 1, 2, 3, 2, 0, 0, 0, 0, 0x22, 0x88, 0x99, 4 };
+		static const uint8_t body[] = { 0x81, 0, 0, 1, 0x08, 0, 0x46, 0xc0, 0, 32, 0, 0, 0, 0, 1, 2, 0, 0, 10, 0, 0, 9,
+			239, 1, 2, 3, 0x94, 4, 0, 0, 0x16, 0, 0xf9, 0xfa, 239, 1, 2, 3 };
+		memcpy(ig + 20, body, sizeof(body));
+		ig[19] = l2;
+		ig[12 + 8 + 4 + 2 + 24 + 2] = 0xf9; ig[12 + 8 + 4 + 2 + 24 + 3] = 0xfa;
+		{	uint32_t s = 0x1600 + 0xef01 + 0x0203;
+			while (s >> 16) s = (s & 0xffff) + (s >> 16);
+			s = ~s & 0xffff; ig[52] = s >> 8; ig[53] = s; }
+		cmd("mcsnoop on");
+		check((regs[0x52a0 + 4 * l2] & 0x3ff) == 0x2aa && !(regs[0x5350] & 8), "mcsnoop on: IGMP and MLD trapped (%x)", regs[0x52a0 + 4 * l2]);
+		uint8_t ig2[sizeof(ig)];
+		memcpy(ig2, ig, sizeof(ig));
+		check(rtl_rx_frame(ig2, sizeof(ig2), &vl) == 0 && mc_group_count() == 1, "a report through the RX path makes a group");
+		check(regs[0x5cb8] == 0x5e010203 && regs[0x5cbc] == (0x20000000u | (1u << l2 & 3) << 30 | 1 << 16 | 0x0100) && regs[0x5cc0] == (1u << l2) >> 2,
+		      "as an L2 multicast entry (%x %x %x)", regs[0x5cb8], regs[0x5cbc], regs[0x5cc0]);
+		cmd("mcsnoop router 1 on");
+		check(regs[0x5cc0] == ((1u << l2) | (1u << l1)) >> 2, "a router port joins it (%x, ports %u %u)", regs[0x5cc0], l1, l2);
+		vlan_tbl[1][0] = 0x3ff | 0x1ff << 10;
+		n_tx = 0;
+		regs[0x0] = regs[0x0];
+		rtl_on_link((uint8_t[12]){ 0, 0, 0xff, 0x03 });
+		memcpy(ig2, ig, sizeof(ig));
+		rtl_rx_frame(ig2, sizeof(ig2), &vl);
+		check(n_tx == 1 && tx[0][12] == 0x88 && (tx[0][18] << 8 | tx[0][19]) == 1 << l1 && !memcmp(tx[0] + 20, ig + 24, 20),
+		      "and gets the report, CPU-tagged, as it came (%d)", n_tx);
+		n_tx = 0;
+		cmd("mcsnoop querier on");
+		rtl_second();
+		check(n_tx >= 1 && tx[0][20] == 0x08 && tx[0][22] == 0x46, "mcsnoop querier on asks (%d)", n_tx);
+		cmd("mcsnoop interval 5");
+		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "an interval under 10 s is refused");
+		cmd("mcsnoop router 1 off");
+		cmd("mcsnoop querier off");
+		cmd("igmp on");
+		rtl_second();
+		check(!mc_cfg.on && mc_group_count() == 0 && (regs[0x52a0 + 4 * l2] & 0x3ff) == 0x2a, "igmp on takes over");
+		cmd("mcsnoop on");
+		check((regs[0x52a0 + 4 * l2] & 0x3ff) == 0x2aa, "and mcsnoop on from it");
+		cmd("mcsnoop off");
+		check((regs[0x52a0 + 4 * l2] & 0x3ff) == 0x15 && mc_group_count() == 0, "mcsnoop off (%x)", regs[0x52a0 + 4 * l2]);
+		rtl_on_link((uint8_t[12]){ 0 });
 		static char gj[4096];
 		rtl_guard_json(gj, sizeof(gj));
 		check(strstr(gj, "{\"port\":2,\"disabled\":\"\""), "the guard's JSON");
