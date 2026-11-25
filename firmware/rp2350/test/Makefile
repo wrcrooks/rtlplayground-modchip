@@ -45,7 +45,7 @@ endif
 
 SNMP_SRC = asn1 core mib2 mib2_icmp mib2_interfaces mib2_ip mib2_snmp mib2_system mib2_tcp mib2_udp \
 	msg pbuf_stream scalar table traps
-LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c \
+LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c ../src/tcp_reuse.c \
 	$(patsubst %,$(LWIP)/src/apps/snmp/snmp_%.c,$(SNMP_SRC))
 
 $(BUILD)/test_snmp: test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
@@ -61,7 +61,7 @@ $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_upload.c ../src/upload.c ../src/link.c
 
-LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c
+LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(LWIP)/src/netif/ethernet.c ../src/tcp_reuse.c
 
 $(BUILD)/test_httpd: test_httpd.c ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h
 	@mkdir -p $(BUILD)

@@ -129,6 +129,7 @@ add_executable(modchip
     src/bridge.c
     src/link.c
     src/net.c
+    src/tcp_reuse.c
     src/httpd.c
     src/upload.c
     src/upload_bridge.c
