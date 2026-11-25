@@ -35,7 +35,7 @@ struct bridge_stats {
 	uint32_t timeouts;
 	uint32_t link_errors;		/* frames we dropped: CRC, framing */
 	uint32_t events_dropped;	/* unsolicited messages lost to a full queue */
-	uint32_t rx_overruns;		/* bytes lost to a full UART ring */
+	uint32_t rx_overruns;		/* receive errors: bytes lost or damaged */
 	uint32_t resets;		/* reset pulses sent */
 	uint32_t rx_frames;		/* frames from the CPU port */
 	uint32_t tx_frames;		/* frames sent with TX_FRAME */

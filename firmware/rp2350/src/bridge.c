@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "pico/stdlib.h"
-#include "hardware/irq.h"
+#include "hardware/dma.h"
 #include "hardware/uart.h"
 #include "hardware/watchdog.h"
 
@@ -32,8 +32,10 @@
 struct bridge_hello bridge_hello;
 struct bridge_stats bridge_stats;
 
-static uint8_t rx_ring[RX_RING_SIZE];
-static volatile uint16_t rx_head;	/* written by the ISR */
+/* Filled by DMA: with interrupts off, as while a flash sector is erased, the
+ * UART's own 32 bytes last for 0.3 ms */
+static uint8_t __attribute__((aligned(RX_RING_SIZE))) rx_ring[RX_RING_SIZE];
+static int rx_dma = -1;
 static uint16_t rx_tail;
 
 static struct link_rx rx;
@@ -67,26 +69,26 @@ static uint32_t silent_s;
 static uint32_t since_reset_s = RESET_HOLDOFF_S;
 
 
-static void uart_isr(void)
+/* Where the DMA writes next */
+static uint16_t rx_head(void)
 {
-	uart_hw_t *hw = uart_get_hw(UART);
+	return (dma_channel_hw_addr(rx_dma)->write_addr - (uintptr_t)rx_ring) & (RX_RING_SIZE - 1);
+}
 
-	while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
-		uint32_t dr = hw->dr;
-		uint16_t next = (rx_head + 1) & (RX_RING_SIZE - 1);
 
-		if (dr & (UART_UARTDR_OE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_FE_BITS))
-			bridge_stats.rx_overruns++;
-		if (next == rx_tail) {
-			bridge_stats.rx_overruns++;
-			continue;
-		}
-		rx_ring[rx_head] = dr;
-		rx_head = next;
-		if (raw_n < RAW_KEEP)
-			raw_keep[raw_n++] = dr;
-		bridge_stats.uart_rx_bytes++;
-	}
+static void rx_start(void)
+{
+	if (rx_dma < 0)
+		rx_dma = dma_claim_unused_channel(true);
+	dma_channel_config c = dma_channel_get_default_config(rx_dma);
+
+	channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+	channel_config_set_read_increment(&c, false);
+	channel_config_set_write_increment(&c, true);
+	channel_config_set_ring(&c, true, __builtin_ctz(RX_RING_SIZE));
+	channel_config_set_dreq(&c, uart_get_dreq(UART, false));
+	rx_tail = 0;
+	dma_channel_configure(rx_dma, &c, rx_ring, &uart_get_hw(UART)->dr, dma_encode_endless_transfer_count(), true);
 }
 
 
@@ -171,13 +173,10 @@ void bridge_init(void)
 	gpio_set_function(MODCHIP_BRIDGE_RX_PIN, UART_FUNCSEL_NUM(UART, MODCHIP_BRIDGE_RX_PIN));
 	gpio_pull_up(MODCHIP_BRIDGE_RX_PIN);
 
-	rx_head = rx_tail = 0;
 	raw_n = 0;
 	link_rx_reset(&rx);
 	ev_head = ev_tail = ev_used = 0;
-	irq_set_exclusive_handler(UART_IRQ_NUM(UART), uart_isr);
-	irq_set_enabled(UART_IRQ_NUM(UART), true);
-	uart_set_irqs_enabled(UART, true, false);	/* RX and RX timeout */
+	rx_start();
 
 #ifdef MODCHIP_RESET_PIN
 	gpio_init(MODCHIP_RESET_PIN);
@@ -197,8 +196,7 @@ void bridge_deinit(void)
 	if (!running)
 		return;
 	running = false;
-	uart_set_irqs_enabled(UART, false, false);
-	irq_set_enabled(UART_IRQ_NUM(UART), false);
+	dma_channel_abort(rx_dma);
 	uart_deinit(UART);
 	gpio_deinit(MODCHIP_BRIDGE_TX_PIN);
 	gpio_deinit(MODCHIP_BRIDGE_RX_PIN);
@@ -275,9 +273,20 @@ static void handle_msg(void)
 
 void bridge_service(void)
 {
-	while (rx_tail != rx_head) {
+	uart_hw_t *hw = uart_get_hw(UART);
+
+	if (!running)
+		return;
+	if (hw->ris & (UART_UARTRIS_OERIS_BITS | UART_UARTRIS_BERIS_BITS | UART_UARTRIS_FERIS_BITS)) {
+		hw->icr = UART_UARTICR_OEIC_BITS | UART_UARTICR_BEIC_BITS | UART_UARTICR_FEIC_BITS;
+		bridge_stats.rx_overruns++;
+	}
+	while (rx_tail != rx_head()) {
 		uint8_t b = rx_ring[rx_tail];
 
+		if (raw_n < RAW_KEEP)
+			raw_keep[raw_n++] = b;
+		bridge_stats.uart_rx_bytes++;
 		rx_tail = (rx_tail + 1) & (RX_RING_SIZE - 1);
 		switch (link_rx_byte(&rx, b)) {
 		case LINK_RX_MSG:

@@ -211,6 +211,7 @@ target_link_libraries(modchip
     pico_flash
     pico_rand
     hardware_adc
+    hardware_dma
     hardware_flash
     hardware_i2c
     hardware_uart
