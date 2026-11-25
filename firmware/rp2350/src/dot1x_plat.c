@@ -137,7 +137,8 @@ void dot1x_hw_log(const char *msg, uint8_t port)
 
 /* ---- from rtl_app.c ---- */
 
-/* An RX frame, CPU tag and 802.1Q tag in place: true if 802.1X took or dropped it */
+/* An RX frame, CPU tag in place, and the CPU port's 802.1Q tag unless it was
+ * trapped (EAPOL): true if 802.1X took or dropped it */
 bool dot1x_plat_rx(const uint8_t *f, uint16_t len, uint16_t type_at)
 {
 	uint8_t port = f[19] & 0x0f;
@@ -145,6 +146,8 @@ bool dot1x_plat_rx(const uint8_t *f, uint16_t len, uint16_t type_at)
 
 	if (!dot1x_cfg.enabled || len < type_at + 2)
 		return false;
+	if (f[20] != 0x81 || f[21] != 0x00)
+		type_at -= 4;
 	type = f[type_at] << 8 | f[type_at + 1];
 	if (type == EAPOL_TYPE) {
 		dot1x_eapol_rx(port, f + 6, f + type_at + 2, len - type_at - 2);
