@@ -917,6 +917,8 @@ int main(void)
 	cmd("acltbl rule 7 0 0 0 0 0 0 0 0 0 0");
 
 	/* ACL rules: RTLPlayground's acl command (rtl837x_acl.c) over the bridge */
+	check(regs[0x5198] == 0x80000 && regs[0x519c] == 0x80000, "an ACL rule's priority counts");
+	check(regs[0x1d28 + 4 * 0x400] == 1 && regs[0x1d28 + 4 * 0x400 + 7 * 4] == 127, "rising weights of the queues");
 	cmd("acl 1 dmac 06:0f:00:dd:3b:3e drop 1");
 	check(strstr((char *)outbuf, "200 OK") && (acl_tbl[1][0x80][4] >> 21 & 1) && regs[0x4818] && regs[0x481c]
 	      && regs[0x4824] == 0x03020100, "acl 1 dmac ... drop 1: a valid rule, the templates, ACL on");

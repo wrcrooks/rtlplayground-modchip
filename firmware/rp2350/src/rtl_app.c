@@ -7,6 +7,7 @@
 
 #include "rtl837x_common.h"
 #include "rtl837x_regs.h"
+#include "rtl837x_sfr.h"
 #include "rtl837x_port.h"
 #include "rtl837x_stp.h"
 #include "rtl837x_lacp.h"
@@ -111,6 +112,23 @@ static void hostname_default(void)
  * has just booted with forwarding defaults, or we have, and either way the
  * registers we own need their configuration again.
  */
+/* Which source decides a frame's internal priority: none does after a reset,
+ * not even an ACL rule. The priority is the queue's number (QID_TO_PRI's
+ * default); the queues take turns by weight, so that no class starves another. */
+#define RTL837X_PRI_WEIGHT		0x5198	/* and 0x519c: 5 bits per source, the highest wins */
+#define PRI_WEIGHT_ACL			(0x10ul << 15)
+#define RTL837X_SCHED_PORT_Q_CTRL	0x1d28	/* + port * 0x400 + queue * 4: 0-6 weight, 7 strict */
+
+static void qos_queues(void)
+{
+	REG_SET(RTL837X_PRI_WEIGHT, PRI_WEIGHT_ACL);
+	REG_SET(RTL837X_PRI_WEIGHT + 4, PRI_WEIGHT_ACL);
+	for (uint8_t i = machine.min_port; i <= machine.max_port; i++)
+		for (uint8_t q = 0; q < 8; q++)
+			REG_SET(RTL837X_SCHED_PORT_Q_CTRL + i * 0x400 + q * 4, q == 7 ? 127 : 1 << q);
+}
+
+
 void rtl_bridge_up(void)
 {
 	up = false;
@@ -137,6 +155,7 @@ void rtl_bridge_up(void)
 	lacp_init();
 	igmp_setup();
 	bandwidth_setup();
+	qos_queues();
 	lldp_init();
 	management_vlan = 1;
 	hostname[0] = NUL;
