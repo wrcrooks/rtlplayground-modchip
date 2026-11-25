@@ -477,7 +477,9 @@ qos port <n> priority <0-7>|off         priority of what else comes in
 
 - **Error-disable.** The port forwards nothing and learns nothing, while its link stays up. BPDU guard
   itself is RTLPlayground's `stp port <n> guard`.
-- **DHCP snooping** drops by ACL rule; there is no binding table.
+- **DHCP snooping** drops by ACL rule; there is no binding table. Changes take effect within a second.
+- **QoS.** The priority is also the queue; the eight queues of a port share it by weights of 1, 2, 4 to
+  127, from queue 0 to 7. Links that negotiate pause hold the sender back before a queue fills.
 
 ## Multicast snooping
 

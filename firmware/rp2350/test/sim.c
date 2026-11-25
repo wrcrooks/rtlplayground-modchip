@@ -1136,6 +1136,8 @@ int main(void)
 		cmd("qos port 2 priority 5");
 		rtl_second();
 		check(RULE_VALID(41) && RULE_VALID(47) && RULE_VALID(49) && !RULE_VALID(48), "qos: seven DSCP classes and port 2's priority");
+		check(regs[0x5198] == 0x80000 && regs[0x519c] == 0x80000, "qos: an ACL rule's priority counts");
+		check(regs[0x1d28 + 4 * 0x400] == 1 && regs[0x1d28 + 4 * 0x400 + 7 * 4] == 127, "qos: rising weights of the queues");
 		cmd("qos port 2 priority 8");
 		check(!memcmp(outbuf, "HTTP/1.1 400", 12), "priority 8 is refused");
 		cmd("qos port 1 trust none");

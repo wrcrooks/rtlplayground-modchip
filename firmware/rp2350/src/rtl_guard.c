@@ -262,6 +262,23 @@ static void qos_apply(void)
 
 /* ---- */
 
+/* Which source decides a frame's internal priority: none does after a reset,
+ * not even an ACL rule. The priority is the queue's number (QID_TO_PRI's
+ * default); the queues take turns by weight, so that no class starves another. */
+#define RTL837X_PRI_WEIGHT		0x5198	/* and 0x519c: 5 bits per source, the highest wins */
+#define PRI_WEIGHT_ACL			(0x10ul << 15)
+#define RTL837X_SCHED_PORT_Q_CTRL	0x1d28	/* + port * 0x400 + queue * 4: 0-6 weight, 7 strict */
+
+static void qos_queues(void)
+{
+	REG_SET(RTL837X_PRI_WEIGHT, PRI_WEIGHT_ACL);
+	REG_SET(RTL837X_PRI_WEIGHT + 4, PRI_WEIGHT_ACL);
+	FOR_PORTS(i)
+		for (uint8_t q = 0; q < 8; q++)
+			REG_SET(RTL837X_SCHED_PORT_Q_CTRL + i * 0x400 + q * 4, q == 7 ? 127 : 1 << q);
+}
+
+
 void rtl_guard_reset(void)
 {
 	cause_on[CAUSE_BPDU] = true;
@@ -275,6 +292,7 @@ void rtl_guard_reset(void)
 	qos_trust = 0;
 	memset(qos_prio, 0xff, sizeof(qos_prio));
 	rtl_iso_errdis(0);
+	qos_queues();
 	event_listen(console_event);
 }
 
