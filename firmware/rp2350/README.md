@@ -7,7 +7,8 @@ reaches the switch through it over T5.
 **Status:** builds and passes its host tests, and runs on a MokerLink through the Beetle rig. Tried there
 with one link (2026-11-24): HTTPS with TLS 1.2 and 1.3, SSH, IPv6, SNMPv3 and notifications, MQTT over
 TLS, Prometheus, rollback, backup and restore, DHCP snooping and RA guard, IGMP and MLD snooping with
-the querier, error-disable, and all of them at once. "Not done yet" has what hasn't been.
+the querier, error-disable, and all of them at once; signed updates from both slots, with the
+fallback of an image that crashes, hangs or doesn't get healthy. "Not done yet" has what hasn't been.
 
 What it runs:
 
@@ -135,8 +136,8 @@ back to isolated if that rail drops, for example with the board on a bench probe
 - **Hardware tests that need two links.** That error-disable and 802.1X's VLANs cut a port off from the
   others, where snooped multicast goes and where it doesn't, DHCP snooping between ports, QoS under
   load. EAP logins and RadSec with a server.
-- **Other hardware tests.** A whole firmware update with its trial, error-disable for link flaps, and
-  SNMP, SSH and so on with the mod chip board itself.
+- **Other hardware tests.** Error-disable for link flaps, and SNMP, SSH and so on with the mod chip
+  board itself.
 
 ## Register access over T3
 
