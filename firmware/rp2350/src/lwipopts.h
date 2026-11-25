@@ -59,6 +59,14 @@ const struct ip6_addr *net_ip6_gw(struct netif *netif, const struct ip6_addr *de
 #define TCP_SND_BUF			(8 * TCP_MSS)
 #define TCP_SND_QUEUELEN		((4 * TCP_SND_BUF) / TCP_MSS)
 #define LWIP_TCP_KEEPALIVE		0
+/* The web server closes first, so a client's next connection can come from a
+ * port of the last minutes: net_tcp_in() lets its SYN through, which lwIP would
+ * answer with the old connection's ACK until TIME_WAIT is over. */
+#define TCP_MSL				15000UL
+struct tcp_pcb;
+struct tcp_hdr;
+signed char net_tcp_in(struct tcp_pcb *pcb, const struct tcp_hdr *h);
+#define LWIP_HOOK_TCP_INPACKET_PCB(pcb, hdr, optlen, opt1len, opt2, p)	net_tcp_in(pcb, hdr)
 
 #define ETH_PAD_SIZE			0
 

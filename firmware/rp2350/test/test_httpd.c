@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "lwip/priv/tcp_priv.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
 #include "lwip/altcp_tls.h"
@@ -245,6 +246,8 @@ static void tls_c_err(void *arg, err_t err)
 }
 #endif
 
+static u16_t client_port;	/* of the next request, 0: any */
+
 /* One request: returns the response; the main loop runs meanwhile */
 static const char *request(const uint8_t *req, size_t len)
 {
@@ -259,6 +262,8 @@ static const char *request(const uint8_t *req, size_t len)
 	tcp_sent(cl.pcb, c_sent);
 	tcp_err(cl.pcb, c_err);
 	IP_ADDR4(&lo, 127, 0, 0, 1);
+	if (client_port)
+		tcp_bind(cl.pcb, IP4_ADDR_ANY, client_port);
 	tcp_connect(cl.pcb, &lo, 80, c_connected);
 	while (!cl.done && sys_now() - t0 < 60000) {
 		netif_poll_all();
@@ -363,6 +368,26 @@ int main(int argc, char **argv)
 	k = sprintf(rq, "GET /status.json HTTP/1.1\r\nCookie: session=000000000000\r\n\r\n");
 	r = request((const uint8_t *)rq, k);
 	check(!strncmp(r, "HTTP/1.1 401", 12), "a wrong session cookie: 401");
+
+	/* The server closed the first one: it is in TIME_WAIT for the second */
+	client_port = 50123;
+	r = request((const uint8_t *)"GET /status.json HTTP/1.1\r\n\r\n", 29);
+	check(!strncmp(r, "HTTP/1.1 401", 12), "a connection from a chosen port");
+	bool tw = false;
+	uint32_t w0 = sys_now();
+	while (!tw && sys_now() - w0 < 3000) {
+		netif_poll_all();
+		sys_check_timeouts();
+		for (struct tcp_pcb *p = tcp_tw_pcbs; p; p = p->next)
+			tw |= p->remote_port == 50123 && p->local_port == 80;
+	}
+	check(tw, "the server's end of it is in TIME_WAIT");
+	/* time goes by for a client's sequence numbers; here it is the same stack's */
+	for (int i = 0; tw && i < 1000; i++)
+		tcp_next_iss(tcp_tw_pcbs);
+	r = request((const uint8_t *)"GET /status.json HTTP/1.1\r\n\r\n", 29);
+	check(!strncmp(r, "HTTP/1.1 401", 12), "another one from the same port");
+	client_port = 0;
 
 	/* Prometheus: off, open, with a token */
 	char *prom = "GET /metrics HTTP/1.1\r\n\r\n";
