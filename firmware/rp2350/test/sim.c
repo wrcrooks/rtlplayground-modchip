@@ -910,6 +910,21 @@ int main(void)
 		check(rtl_rx_frame(f, sizeof(f), &vl) == 0 && radius_requests == r0 + 1 && radius_last[0] == 1,
 		      "EAP Response/Identity: an Access-Request to the server");
 		check(memmem(radius_last, radius_last_len, "alice", 5) != NULL, "  with the user name");
+		/* on hardware a trapped frame has no 802.1Q tag: a new start, and the same answer again */
+		uint8_t st[64], f2[64];
+		memcpy(st, f, 20); memcpy(st + 20, "\x88\x8e\x02\x01\x00\x00", 6);
+		n_tx = 0;
+		rtl_rx_frame(st, sizeof(st), &vl);
+		eap_tx = -1;
+		for (int i = 0; i < n_tx; i++)
+			if (tx[i][20] == 0x88 && tx[i][21] == 0x8e && tx[i][26] == 1 && tx[i][30] == 1)
+				eap_tx = i;
+		check(eap_tx >= 0, "an untagged EAPOL-Start: asked again");
+		memcpy(f2, f, 20); memcpy(f2 + 20, f + 24, sizeof(f) - 24); memset(f2 + sizeof(f) - 4, 0, 4);
+		if (eap_tx >= 0)
+			f2[23 + 4] = tx[eap_tx][27];
+		r0 = radius_requests;
+		check(rtl_rx_frame(f2, sizeof(f2), &vl) == 0 && radius_requests == r0 + 1, "  and an untagged answer: an Access-Request");
 		check(regs[lrn2] == 0, "  and its MAC known, it learns no more (%x)", regs[lrn2]);
 		/* anything else from the gated port is dropped, its MAC noted */
 		uint8_t g[64];

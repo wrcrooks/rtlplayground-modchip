@@ -71,6 +71,8 @@ extern __xdata char passwd[21];
 __xdata uint8_t stp_tick_last;
 static bool up;
 static bool up_once;
+static bool ip6_frames, ip6_cpu_on;
+static void ip6_cpu(void);
 static uint8_t links_last[12];
 static bool button_last;
 static uint32_t button_since;
@@ -125,6 +127,7 @@ void rtl_bridge_up(void)
 {
 	up = false;
 	up_once = true;
+	ip6_cpu_on = false;
 	machine_detected.isRTL8373 = !!(bridge_hello.flags & HELLO_RTL8373);
 	machine_detected.isN = !!(bridge_hello.flags & HELLO_N_VARIANT);
 	if (machine.isRTL8373 != machine_detected.isRTL8373)
@@ -341,6 +344,7 @@ void rtl_second(void)
 		return;
 	rtl_metrics_second();
 	dot1x_second();
+	ip6_cpu();
 	acl_poll();
 	rtl_guard_second();
 	rtl_mcast_second();
@@ -461,13 +465,23 @@ void tcpip_output(void)
 }
 
 
-static bool ip6_frames;
+/* IPv6 multicast to the CPU port: for IPv6, and for MAB, as a device may send
+ * nothing else */
+static void ip6_cpu(void)
+{
+	bool want = ip6_frames || dot1x_plat_mab();
+
+	if (!up_once || want == ip6_cpu_on)
+		return;
+	ip6_cpu_on = want;
+	rtl_mcast_ipv6_cpu(want);
+}
+
 
 void rtl_ip6(bool on)
 {
 	ip6_frames = on;
-	if (up_once)
-		rtl_mcast_ipv6_cpu(on);
+	ip6_cpu();
 }
 
 
