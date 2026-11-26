@@ -20,6 +20,13 @@ struct store {
 	uint32_t update_pending;	/* the one being tried, 0: none */
 	uint16_t rollback_min;		/* ROLLBACK_RESTORED: minutes to confirm in */
 	uint16_t pad2;
+	/* UniFi (unifi.c), valid with unifi_magic; saved before them, the sector has 0xff there */
+	char unifi_magic[4];
+	uint8_t unifi_key[16];		/* the controller's key for us once adopted */
+	uint8_t unifi_adopted, unifi_gcm;
+	uint16_t pad3;
+	char unifi_url[96];		/* where to inform */
+	char unifi_bad[24];		/* a cfgversion that cut us off from the controller */
 };
 
 /* PENDING: the snapshot goes back at the next start. RESTORED: the next start is
@@ -31,7 +38,7 @@ void store_load(void);
 bool store_save(void);
 
 /* main.c: the sectors below the configuration's and the certificate's */
-enum plat_sector { SECTOR_STORE, SECTOR_SNAPSHOT };
+enum plat_sector { SECTOR_STORE, SECTOR_SNAPSHOT, SECTOR_UNIFI };
 void plat_sector_read(int id, uint8_t *dst, uint32_t len);
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len);
 

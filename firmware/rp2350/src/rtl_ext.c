@@ -481,6 +481,33 @@ static bool parse_ssh(void)
 
 
 /*
+ *   unifi                               status
+ *   unifi on|off
+ *   unifi inform <url>                  http://<a.b.c.d>[:<port>]/inform
+ *   unifi forget                        back to the default key
+ */
+static bool parse_unifi(void)
+{
+	char st[400];
+
+	if (cmd_words_len == 1) {
+		unifi_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		unifi_enable(cmd_compare(1, "on"));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "inform")) {
+		if (!unifi_inform(ext_rest(2)))
+			ext_error("the URL must be http://<a.b.c.d>[:<port>]/inform\n");
+	} else if (cmd_words_len == 2 && cmd_compare(1, "forget")) {
+		unifi_forget();
+	} else {
+		ext_error("unifi [on|off|inform <url>|forget]\n");
+	}
+	return true;
+}
+
+
+/*
  *   prometheus on|off                   GET /metrics without a login
  *   prometheus token <text>|off         but with "Authorization: Bearer <text>"
  */
@@ -806,6 +833,8 @@ bool rtl_cmd_ext(void)
 		return parse_update();
 	if (cmd_compare(0, "ssh"))
 		return parse_ssh();
+	if (cmd_compare(0, "unifi"))
+		return parse_unifi();
 	if (cmd_compare(0, "prometheus"))
 		return parse_prometheus();
 	if (cmd_compare(0, "ip6"))

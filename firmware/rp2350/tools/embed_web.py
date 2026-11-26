@@ -322,10 +322,11 @@ FEATURES = r"""<script>
     /^dot1x\s+radius-vlan\s+(on|off)$/,/^dot1x\s+port\s+\d{1,2}\s+(guest|auth-fail)-vlan\s+(\d{1,4}|off)$/,/^dot1x\s+radsec\s+\S+$/,
     /^snmp\s+v2c\s+(on|off)$/,/^snmp\s+user\s+\S+\s+(off|auth\s+sha(256)?\s+\S+(\s+aes\s+\S+)?)$/,/^snmp\s+trap\s+(\d{1,3}\.){3}\d{1,3}(\s+\S+)?$/,
     /^ip6\s+(on|off)$/,/^ip6\s+(addr|gw)\s+\S+$/,/^prometheus\s+(on|off)$/,/^prometheus\s+token\s+\S+$/,/^ssh\s+(on|off)$/,
-    /^mqtt\s+(on|off)$/,/^mqtt\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+\d{1,5})?$/,/^mqtt\s+login\s+(off|\S+\s+\S+)$/,/^mqtt\s+(topic|tls)\s+\S+$/,/^mqtt\s+interval\s+\d+$/);
+    /^mqtt\s+(on|off)$/,/^mqtt\s+server\s+(\d{1,3}\.){3}\d{1,3}(\s+\d{1,5})?$/,/^mqtt\s+login\s+(off|\S+\s+\S+)$/,/^mqtt\s+(topic|tls)\s+\S+$/,/^mqtt\s+interval\s+\d+$/,
+    /^unifi\s+(on|off)$/);
   CONF_TOGGLE.push(/^(errdisable\s+cause\s+\S+)\s+(on|off)$/,/^(dhcp-snoop)\s+(on|off)$/,/^(dhcp-snoop\s+(trust\s+\d{1,2}|ra))\s+(on|off)$/,
     /^(mcsnoop)\s+(on|off)$/,/^(mcsnoop\s+(querier|router\s+\d{1,2}))\s+(on|off)$/,/^(dot1x\s+radius-vlan)\s+(on|off)$/,
-    /^(snmp\s+v2c)\s+(on|off)$/,/^(ip6|prometheus|ssh|mqtt)\s+(on|off)$/);
+    /^(snmp\s+v2c)\s+(on|off)$/,/^(ip6|prometheus|ssh|mqtt|unifi)\s+(on|off)$/);
   CONF_OVERWRITE.push(/^errdisable\s+recovery\b/,/^qos\s+port\s+\d{1,2}\s+(trust|priority)\b/,/^mcsnoop\s+(interval|unknown)\b/,
     /^dot1x\s+port\s+\d{1,2}\s+(guest|auth-fail)-vlan\b/,/^dot1x\s+radsec\b/,/^snmp\s+user\s+\S+/,/^snmp\s+trap\s+\S+/,
     /^ip6\s+(addr|gw)\b/,/^prometheus\s+token\b/,/^mqtt\s+(server|login|topic|tls|interval)\b/);

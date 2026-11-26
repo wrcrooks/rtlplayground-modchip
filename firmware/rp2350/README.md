@@ -26,6 +26,8 @@ What it runs:
 - **Safety.** Timed rollback and restart, configuration backup and restore, signed firmware updates of
   the mod chip with A/B slots.
 - **Monitoring.** Events to syslog, SNMP, MQTT and the web UI; Prometheus metrics.
+- **UniFi.** Adoption by a UniFi Network controller, which then sets VLANs, port VLAN IDs, port names and
+  fixed speeds, and sees the ports' links and counters.
 - **HTTPS.** TLS on port 443 next to HTTP on port 80, with a key and self-signed certificate made on
   the device.
 - **SNMP.** A read-only SNMPv2c and SNMPv3 agent with notifications: MIB-2, with the switch's ports and their counters in the
@@ -78,6 +80,7 @@ Around them:
 | `src/snmp.c`, `src/snmp_mib.c`, `src/snmp_udp.c` | The SNMP agent on lwIP's SNMP core: settings, the MIB, the UDP socket (in place of lwIP's `snmp_raw.c`, so the agent can be switched off) |
 | `src/usm.c` | SNMPv3's authentication and encryption |
 | `src/telemetry.c`, `src/tls_client.c` | MQTT, and TLS as a client: servers are known by their certificate's fingerprint |
+| `src/unifi.c`, `src/unifi_proto.c`, `src/inflate.c` | UniFi: the inform client; packets, the controller's JSON and its configuration as commands; zlib |
 | `src/ssh.c`, `src/ssh_lwip.c` | The SSH server: the protocol on mbedTLS, and its connections |
 | `src/update.c`, `src/update_flash.c` | Firmware updates of the mod chip: the checks, and the RP2350's A/B slots |
 | `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json`, `/history.bin` and Prometheus's `/metrics` |
@@ -133,6 +136,8 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 - **SNMP writes.** The agent is read-only.
 - **The Features page in other languages.** It is in English only; RTLPlayground's own pages aren't.
+- **UniFi on a switch.** Only tested against a controller in Docker so far. Also: a Features page card
+  for it, and the settings it doesn't take yet (see UniFi).
 - **Hardware tests.** A whole EAP login (a server's first challenge arrived), the auth-fail VLAN, a
   multicast member on a second port, and SNMP, SSH and so on with the mod chip board itself.
 
@@ -526,6 +531,41 @@ prometheus token <text>|off         but with "Authorization: Bearer <text>"
 Below the topic prefix are `status` (`online`, or `offline` as the last will), `switch`, `port/<n>` and
 `event`, in JSON but for `status`. All but `event` are retained. Nothing is taken from the broker.
 
+## UniFi
+
+```
+unifi inform http://<a.b.c.d>[:<port>]/inform     the controller, kept in flash (port 8080 usually)
+unifi on|off
+unifi                                             status
+unifi forget                                      back to the default key, to be adopted again
+```
+
+With `unifi on`, the switch informs the controller every 10 s and shows up there to be adopted. It
+claims to be a **USW Flex 2.5G 5** (USWED35) with five ports or fewer, otherwise a **USW Flex 2.5G 8**
+(USWED36), the copper ports first and the SFP+ ones as ports 9 and 10. The controller's own device list
+has both as microcontroller-based switches.
+
+- **What the controller sets.** VLANs (tagged, untagged or excluded per port), port VLAN IDs, port
+  names and fixed speeds. The controller sends its whole configuration as `system_cfg` lines; the
+  switch turns them into its own commands (`vlan`, `pvid`, `port`), names and speeds only when they
+  change.
+- **What it sees.** Link, speed and counters per port, memory, uptime. It can locate the switch: the
+  system LED flashes.
+- **Its configuration stays the switch's.** Nothing the controller sets is saved in the switch's own
+  configuration. The controller's configuration is kept in a flash sector of its own, and applied
+  again on top of the switch's after every restart of the bridge, so a restart doesn't need the
+  controller.
+- **A change that cuts the switch off.** If the controller isn't reached within 2 minutes of a change,
+  the switch restarts with the configuration of before and refuses that configuration version
+  afterwards. `unifi` shows which.
+- **Firmware upgrades** from the controller are refused and logged; the switch stays adopted.
+- **Not taken yet:** STP, storm control, isolation, port security, egress limits, LAG, mirroring,
+  802.1X and the management VLAN. The controller doesn't send them, since the switch claims none of
+  those features. No SSH for the controller, no L2 discovery (it is adopted once it informs), and
+  only an IP address in the inform URL.
+
+Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.
+
 ## SSH
 
 ```
@@ -737,3 +777,9 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
   signature or image, another key, board or size, cut short, or on failing flash. After none of these
   can the slot boot. It also runs through a trial that succeeds, and ones that don't.
 - **`check_extras.js`** runs the Features page's script and checks the command behind every control.
+- **`test_unifi`** checks zlib against Python's (every block type, damaged streams), packets both
+  ways against Python's AES-CBC and AES-GCM, the JSON reader, and the commands for configurations
+  captured from a controller (`test/unifi/`).
+- **`make -C test unifi-controller`** runs `unifi.c` on lwIP against UniFi Network 10.6.109 in Docker
+  (`ghcr.io/jamesbraid/unifi-network:sim`): adoption, the ports as the controller sees them, VLAN and
+  port changes, locate, a refused upgrade, a restart, and a change that cuts the switch off.

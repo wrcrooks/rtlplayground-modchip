@@ -112,6 +112,12 @@ bool plat_t3_write(uint16_t reg, uint32_t v);
 bool plat_t3_raw_read(uint16_t reg, uint32_t *v);	/* whether enabled or not, for "t3 test" */
 bool plat_t3_raw_write(uint16_t reg, uint32_t v);
 
+/* UniFi (unifi.c, unifi.h) */
+void unifi_enable(bool on);
+bool unifi_inform(const char *url);
+void unifi_forget(void);
+size_t unifi_status(char *buf, size_t max);
+
 /* ---- implemented by the RTLPlayground half (rtl_*.c) ---- */
 
 extern volatile uint32_t ticks;			/* 200 Hz, SYS_TICK_HZ */

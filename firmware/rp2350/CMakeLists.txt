@@ -156,6 +156,9 @@ add_executable(modchip
     src/snmp_udp.c
     src/usm.c
     src/telemetry.c
+    src/unifi.c
+    src/unifi_proto.c
+    src/inflate.c
     src/ssh.c
     src/ssh_lwip.c
     src/rng.c

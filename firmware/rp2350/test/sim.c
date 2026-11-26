@@ -403,6 +403,10 @@ size_t plat_ssh_status(char *buf, size_t max) { return snprintf(buf, max, "SSH o
 void plat_prometheus(bool on) { sprintf(mqtt_last, "prom %d", on); }
 bool plat_prometheus_token(const char *t) { sprintf(mqtt_last, "token %s", t); return true; }
 size_t plat_prometheus_status(char *buf, size_t max) { return snprintf(buf, max, "Prometheus\n"); }
+void unifi_enable(bool on) { sprintf(mqtt_last, "unifi %d", on); }
+bool unifi_inform(const char *u) { sprintf(mqtt_last, "inform %s", u); return !strncmp(u, "http://", 7); }
+void unifi_forget(void) { strcpy(mqtt_last, "forget"); }
+size_t unifi_status(char *buf, size_t max) { return snprintf(buf, max, "UniFi\n"); }
 bool plat_ip6_enable(bool on) { sprintf(ip6_last, "on %d", on); rtl_ip6(on); return true; }
 bool plat_ip6_addr(const char *a) { sprintf(ip6_last, "addr %s", a ? a : "-"); return true; }
 bool plat_ip6_gw(const char *a) { sprintf(ip6_last, "gw %s", a ? a : "-"); return true; }
@@ -1164,6 +1168,8 @@ int main(void)
 			{ "mqtt login u p", "login [u] [p]" }, { "mqtt login off", "login [] []" }, { "mqtt topic a/b", "topic a/b" },
 			{ "mqtt tls off", "tls -" }, { "mqtt tls abcd", "tls abcd" }, { "mqtt interval 60", "interval 60" },
 			{ "prometheus on", "prom 1" }, { "ssh on", "ssh 1" }, { "ssh off", "ssh 0" }, { "ssh newkey", "newkey" }, { "prometheus token xyz", "token xyz" }, { "prometheus token off", "token " },
+			{ "unifi on", "unifi 1" }, { "unifi off", "unifi 0" }, { "unifi forget", "forget" },
+			{ "unifi inform http://192.168.10.100:18080/inform", "inform http://192.168.10.100:18080/inform" },
 		};
 		for (unsigned k = 0; k < sizeof(tele) / sizeof(tele[0]); k++) {
 			cmd((char *)tele[k][0]);

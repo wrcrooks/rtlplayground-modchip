@@ -121,7 +121,7 @@ static const char *const words[] = {
 	"acl", "backup", "bw", "dhcp-snoop", "dns", "dot1x", "eee", "errdisable", "gpio", "gw", "hostname", "https",
 	"igmp", "ingress", "ip", "ip6", "isolate", "l2", "lacp", "lag", "laghash", "leds", "lldp", "mac", "mcsnoop",
 	"mirror", "mqtt", "mtu", "netmask", "ntp", "passwd", "poe", "port", "prometheus", "pvid", "qos", "session",
-	"sfp", "snmp", "ssh", "storm", "stp", "syslog", "t3", "time", "vlan", NULL
+	"sfp", "snmp", "ssh", "storm", "stp", "syslog", "t3", "time", "unifi", "vlan", NULL
 };
 
 int config_check(char *text, size_t len, char *err, size_t err_len)

@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_unifi $(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -40,6 +40,7 @@ all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_m
 	python3 -c "import sys; sys.path.insert(0, '../tools'); import embed_web; print(embed_web.SYSTEM_HTTPS + embed_web.DOT1X + embed_web.FEATURES)" > $(BUILD)/system_https.html
 	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
+	python3 run_unifi.py $(BUILD)/test_unifi unifi
 	$(BUILD)/test_tls
 	$(BUILD)/test_usm
 	$(BUILD)/test_net6
@@ -162,6 +163,20 @@ dot1x-radius: $(BUILD)/test_dot1x_radius $(BUILD)/test_radsec
 	sh run_dot1x_radius.sh - $(BUILD)/test_radsec
 	TLS_MAX=1.2 sh run_dot1x_radius.sh - $(BUILD)/test_radsec
 
+$(BUILD)/test_unifi: test_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h $(BUILD)/libmbed.a
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined $(MBED_INC) -o $@ test_unifi.c ../src/unifi_proto.c ../src/inflate.c $(BUILD)/libmbed.a
+
+# unifi.c against a UniFi Network controller in Docker: make unifi-controller
+$(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DWATCH_S=20 -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include \
+		-I$(LWIP)/src/apps/altcp_tls $(MBED_INC) -o $@ test_unifi_net.c \
+		../src/unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
+
+unifi-controller: $(BUILD)/test_unifi_net
+	python3 run_unifi_controller.py $<
+
 $(BUILD)/test_link: test_link.c ../src/link.c ../src/link.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_link.c ../src/link.c
@@ -190,4 +205,4 @@ $(BUILD)/sim-poe: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean dot1x-radius
+.PHONY: all clean dot1x-radius unifi-controller

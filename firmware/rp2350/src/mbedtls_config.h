@@ -34,6 +34,7 @@
 #define MBEDTLS_SHA384_C
 #define MBEDTLS_SHA512_C
 #define MBEDTLS_AES_C
+#define MBEDTLS_CIPHER_MODE_CBC	/* UniFi inform */
 #define MBEDTLS_CIPHER_MODE_CFB	/* SNMPv3 */
 #define MBEDTLS_CIPHER_MODE_CTR	/* SSH */
 #define MBEDTLS_GCM_C
