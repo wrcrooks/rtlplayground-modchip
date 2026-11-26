@@ -62,6 +62,7 @@ u32_t sys_now(void)
 uint32_t plat_uptime_s(void) { return sys_now() / 1000; }
 const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len) { }
 static void on_event(const struct event *e) { printf("      event: %s\n", e->text); }
 
 static void file(const char *dir, const char *name, uint8_t *b, size_t *n, bool out)

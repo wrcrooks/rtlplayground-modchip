@@ -39,6 +39,7 @@ void plat_sector_read(int id, uint8_t *dst, uint32_t len) { memcpy(dst, store_se
 bool plat_sector_write(int id, const uint8_t *src, uint32_t len) { memcpy(store_sector, src, len); return true; }
 const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len) { }
 int mbedtls_hardware_poll(void *data, unsigned char *out, size_t len, size_t *olen)
 {
 	FILE *f = fopen("/dev/urandom", "rb");

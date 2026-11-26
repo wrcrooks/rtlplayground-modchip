@@ -41,6 +41,7 @@ u32_t sys_now(void)
 bool bridge_is_up(void) { return true; }
 const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len) { }
 const uint8_t *rtl_mac(void) { return mac; }
 uint8_t rtl_port_count(void) { return 6; }
 

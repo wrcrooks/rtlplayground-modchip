@@ -534,7 +534,8 @@ Below the topic prefix are `status` (`online`, or `offline` as the last will), `
 ## UniFi
 
 ```
-unifi inform http://<a.b.c.d>[:<port>]/inform     the controller, kept in flash (port 8080 usually)
+unifi inform http://<address or name>[:<port>]/inform   the controller, kept in flash (port 8080 usually)
+unifi inform auto                                 from DHCP option 43, else http://unifi:8080/inform
 unifi on|off
 unifi                                             status
 unifi forget                                      back to the default key, to be adopted again
@@ -544,6 +545,12 @@ With `unifi on`, the switch informs the controller every 10 s and shows up there
 claims to be a **USW Flex 2.5G 5** (USWED35) with five ports or fewer, otherwise a **USW Flex 2.5G 8**
 (USWED36), the copper ports first and the SFP+ ones as ports 9 and 10. The controller's own device list
 has both as microcontroller-based switches.
+
+- **Finding the controller.** With no URL set (`unifi inform auto`), it informs the controller DHCP
+  option 43 names (Ubiquiti's sub-option 1, an IPv4 address), else `http://unifi:8080/inform`, as UniFi
+  devices do. While UniFi is on, its DHCP requests carry the vendor class `ubnt`, which DHCP servers
+  set up for UniFi give option 43 to. Names are looked up with the switch's own DNS client (`dns`);
+  the URL it is adopted through is kept, and a controller's `set-adopt` URL replaces it.
 
 - **What the controller sets.** VLANs (tagged, untagged or excluded per port), port VLAN IDs, port
   names and fixed speeds. The controller sends its whole configuration as `system_cfg` lines; the
@@ -561,8 +568,8 @@ has both as microcontroller-based switches.
 - **Firmware upgrades** from the controller are refused and logged; the switch stays adopted.
 - **Not taken yet:** STP, storm control, isolation, port security, egress limits, LAG, mirroring,
   802.1X and the management VLAN. The controller doesn't send them, since the switch claims none of
-  those features. No SSH for the controller, no L2 discovery (it is adopted once it informs), and
-  only an IP address in the inform URL.
+  those features. No SSH for the controller, and no L2 discovery: that only lists a device in the
+  controller's scan, which then adopts it over SSH; one that informs is listed anyway.
 
 Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.
 
@@ -770,7 +777,7 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
 - **`test_usm`** checks SNMPv3's keys, authentication and encryption; `run_snmp.py` uses them with
   net-snmp.
 - **`test_safety`**, **`test_mcast`** and **`test_net6`**: rollback, restart and restore; IGMP and MLD
-  snooping; IPv6 addresses and neighbours.
+  snooping; IPv6 addresses and neighbours, and the DHCP options for UniFi (vendor class, option 43).
 - **`run_https.py`**, **`run_ssh.py`** and **`run_mqtt.py`** put OpenSSL's client, OpenSSH's client and a
   broker in Python against the firmware's own server and client code on lwIP.
 - **`test_update`** takes updates made by `sign_update.py`: good ones, and ones with a changed header,
@@ -784,7 +791,8 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
   (`ghcr.io/jamesbraid/unifi-network:sim`): adoption, the ports as the controller sees them, VLAN and
   port changes, locate, a refused upgrade, a restart, and a change that cuts the switch off.
 - **`run_unifi_fake.py`** (`make -C test unifi-fake`, also in `all`) runs the same against a scripted
-  controller, for what a real one rarely sends: informs held back until the ports can be read, a new
+  controller, for what a real one rarely sends: the controller found by name or DHCP option 43 when
+  no URL is set, and that URL kept on adoption; informs held back until the ports can be read, a new
   key once adopted, `set-adopt` naming the controller by a name, a configuration without a version,
   a damaged saved configuration, and a forget while a change is still being checked.
 - **`make -C test fuzz-unifi`** runs libFuzzer (clang, with ASan and UBSan) over what `unifi.c`

@@ -483,7 +483,7 @@ static bool parse_ssh(void)
 /*
  *   unifi                               status
  *   unifi on|off
- *   unifi inform <url>                  http://<a.b.c.d>[:<port>]/inform
+ *   unifi inform <url>|auto             http://<a.b.c.d or name>[:<port>]/inform; auto: DHCP's, else http://unifi:8080/inform
  *   unifi forget                        back to the default key
  */
 static bool parse_unifi(void)
@@ -497,7 +497,7 @@ static bool parse_unifi(void)
 		unifi_enable(cmd_compare(1, "on"));
 	} else if (cmd_words_len == 3 && cmd_compare(1, "inform")) {
 		if (!unifi_inform(ext_rest(2)))
-			ext_error("the URL must be http://<a.b.c.d>[:<port>]/inform\n");
+			ext_error("the URL must be http://<address or name>[:<port>]/inform, or auto\n");
 	} else if (cmd_words_len == 2 && cmd_compare(1, "forget")) {
 		unifi_forget();
 	} else {

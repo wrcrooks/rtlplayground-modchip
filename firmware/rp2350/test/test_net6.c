@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
-/* net.c's IPv6 on lwIP with the firmware's options: the addresses it takes, what it answers */
+/* net.c's IPv6 on lwIP with the firmware's options: the addresses it takes, what it answers;
+ * and its DHCP options for UniFi (vendor class, option 43) */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +84,56 @@ static void ns(const char *target)
 	ip6addr_ntoa_r(&d, s, sizeof(s));
 	in6("fe80::1", s, m, 32, 255);
 }
+static bool unifi_on;
+static uint8_t opt43[64];
+static int opt43_len = -1;
+bool unifi_enabled(void) { return unifi_on; }
+void unifi_dhcp_option43(const uint8_t *d, uint8_t n) { memcpy(opt43, d, n); opt43_len = n; }
+
+/* The options of the last DHCP DISCOVER sent, NULL: none */
+static const uint8_t *discover(uint32_t *xid)
+{
+	for (int i = n_tx - 1; i >= 0; i--) {
+		const uint8_t *f = tx[i];
+		if (f[12] == 8 && f[13] == 0 && f[23] == 17 && f[36] == 0 && f[37] == 67) {
+			*xid = f[46] << 24 | f[47] << 16 | f[48] << 8 | f[49];
+			return f + 14 + 20 + 8 + 240;
+		}
+	}
+	return NULL;
+}
+static const uint8_t *option(const uint8_t *o, int code)
+{
+	for (int i = 0; i < 300 && o[i] != 255; i += o[i] ? 2 + o[i + 1] : 1)
+		if (o[i] == code)
+			return o + i;
+	return NULL;
+}
+static void offer(uint32_t xid, const uint8_t *opts, int n)
+{
+	static uint8_t f[600];
+	memset(f, 0, sizeof(f));
+	memset(f, 0xff, 6);
+	memcpy(f + 6, peer_mac, 6);
+	f[12] = 8;
+	uint8_t *ip = f + 14, *udp = ip + 20, *b = udp + 8;
+	int blen = 240 + n, ulen = 8 + blen, tlen = 20 + ulen;
+	ip[0] = 0x45; ip[2] = tlen >> 8; ip[3] = tlen; ip[8] = 64; ip[9] = 17;
+	memcpy(ip + 12, "\x0a\0\0\1", 4); memset(ip + 16, 0xff, 4);
+	uint32_t c = 0;
+	for (int i = 0; i < 20; i += 2) c += ip[i] << 8 | ip[i + 1];
+	while (c >> 16) c = (c & 0xffff) + (c >> 16);
+	ip[10] = ~c >> 8; ip[11] = ~c;
+	udp[1] = 67; udp[3] = 68; udp[4] = ulen >> 8; udp[5] = ulen;
+	b[0] = 2; b[1] = 1; b[2] = 6;
+	b[4] = xid >> 24; b[5] = xid >> 16; b[6] = xid >> 8; b[7] = xid;
+	memcpy(b + 16, "\x0a\0\0\x32", 4);
+	memcpy(b + 28, mac, 6);
+	memcpy(b + 236, "\x63\x82\x53\x63", 4);
+	memcpy(b + 240, opts, n);
+	net_input(f, 14 + tlen);
+}
+
 static int icmp_type(int t) { int n = 0; for (int i = 0; i < n_tx; i++) n += tx[i][12] == 0x86 && tx[i][20] == 58 && tx[i][54] == t; return n; }
 
 int main(void)
@@ -177,6 +228,33 @@ int main(void)
 	n_tx = 0;
 	ns("2001:db8:2::5");
 	check(icmp_type(136) == 1, "on again");
+
+	/* DHCP: option 43 asked for; vendor class "ubnt" only while UniFi is on */
+	uint32_t xid = 0;
+	const uint8_t *o;
+	n_tx = 0;
+	plat_dhcp_start();
+	secs(3);
+	o = discover(&xid);
+	const uint8_t *prl = o ? option(o, 55) : NULL;
+	check(prl && memchr(prl + 2, 43, prl[1]) && memchr(prl + 2, 6, prl[1]), "DHCP asks for options 6 and 43");
+	check(o && !option(o, 60), "no vendor class while UniFi is off");
+	plat_dhcp_stop();
+	unifi_on = true;
+	n_tx = 0;
+	plat_dhcp_start();
+	secs(3);
+	o = discover(&xid);
+	const uint8_t *vc = o ? option(o, 60) : NULL;
+	check(vc && vc[1] == 4 && !memcmp(vc + 2, "ubnt", 4), "vendor class ubnt while it's on");
+	static const uint8_t opts[] = { 53, 1, 2, 54, 4, 10, 0, 0, 1, 51, 4, 0, 0, 14, 16, 1, 4, 255, 255, 255, 0,
+		43, 10, 2, 2, 0xaa, 0xbb, 1, 4, 10, 0, 0, 2, 255 };
+	offer(xid, opts, sizeof(opts));
+	secs(1);
+	check(opt43_len == 10 && !memcmp(opt43, opts + 23, 10), "option 43 of an offer reaches unifi.c (%d bytes)", opt43_len);
+	plat_dhcp_stop();
+	unifi_on = false;
+	n_tx = 0;
 	srand(1);
 	for (int i = 0; i < 200000; i++) {
 		static uint8_t f[300];

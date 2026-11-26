@@ -5,7 +5,10 @@
  * command the controller's configuration becomes ("RUN ..."), each event
  * ("EVENT ..."), "REBOOT" and "LED n". Lines on stdin are commands: "status",
  * "on", "off", "forget", "inform <url>", "link <port> <0|speed code>", "ports <n>"
- * (0: none read, as while the bridge is down; UNIFI_PORTS sets it at the start).
+ * (0: none read, as while the bridge is down; UNIFI_PORTS sets it at the start),
+ * "opt43 <hex>" (a DHCP option 43). UNIFI_NO_URL: no inform URL set at the start.
+ * Names: "unifi" is 127.0.0.1 after two tries ("RESOLVE unifi" for each), the rest
+ * aren't found.
  */
 #include <fcntl.h>
 #include <stdio.h>
@@ -40,6 +43,7 @@ uint32_t plat_uptime_s(void) { return (sys_now() - t0) / 1000; }	/* from 0, as a
 uint32_t plat_heap_free(void) { return 150000; }
 const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len) { }
 const uint8_t *rtl_mac(void) { return mac; }
 void plat_reboot(void) { printf("REBOOT\n"); exit(3); }
 void plat_sys_led(uint8_t state) { printf("LED %u\n", state); }
@@ -103,6 +107,19 @@ size_t rtl_run(char *line, char *out, size_t max, bool *ok)
 	return 0;
 }
 
+int rtl_resolve(const char *name, uint8_t ip[4])
+{
+	static int tries;
+
+	printf("RESOLVE %s\n", name);
+	if (strcmp(name, "unifi"))
+		return -1;
+	if (++tries % 3)
+		return 0;
+	memcpy(ip, (uint8_t[]){ 127, 0, 0, 1 }, 4);
+	return 1;
+}
+
 static void on_event(const struct event *e) { printf("EVENT %s\n", e->text); }
 
 int main(int argc, char **argv)
@@ -125,7 +142,7 @@ int main(int argc, char **argv)
 	lwip_init();
 	netif_set_default(netif_list);
 	relay_out(8080, atoi(argv[1]));
-	if (!store.unifi_url[0])
+	if (!store.unifi_url[0] && !getenv("UNIFI_NO_URL"))
 		unifi_inform("http://127.0.0.1:8080/inform");
 	unifi_enable(true);	/* as the replayed configuration does */
 	unifi_bridge_up();
@@ -152,6 +169,13 @@ int main(int argc, char **argv)
 				unifi_forget();
 			} else if (!strncmp(line, "inform ", 7)) {
 				printf("INFORM %d\n", unifi_inform(line + 7));
+			} else if (!strncmp(line, "opt43 ", 6)) {
+				uint8_t o[64];
+				unsigned n = 0, v;
+
+				for (const char *h = line + 6; n < sizeof(o) && sscanf(h, "%2x", &v) == 1; h += 2)
+					o[n++] = v;
+				unifi_dhcp_option43(o, n);
 			} else if (sscanf(line, "ports %u", &a) == 1 && a <= 6) {
 				nports = a;
 			} else if (sscanf(line, "link %u %u", &a, &b) == 2 && a >= 1 && a <= 6) {

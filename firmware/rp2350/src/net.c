@@ -23,6 +23,7 @@
 #include "events.h"
 #include "net.h"
 #include "plat.h"
+#include "unifi.h"
 
 /* DHCP_* of RTLPlayground's dhcp.h, which the command line prints */
 #define RTLP_DHCP_OFF		0
@@ -327,11 +328,30 @@ void plat_dhcp_stop(void)
 }
 
 
-/* Option 6 from a DHCP reply, see LWIP_HOOK_DHCP_PARSE_OPTION in lwipopts.h */
+/* Options 6 and 43 from a DHCP reply, see LWIP_HOOK_DHCP_PARSE_OPTION in lwipopts.h */
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset)
 {
-	if (option == 6 && len >= 4)
+	if (option == 6 && len >= 4) {
 		pbuf_copy_partial(p, dhcp_dns, 4, offset);
+	} else if (option == 43) {
+		uint8_t v[64];
+		uint8_t n = len < sizeof(v) ? len : sizeof(v);
+
+		if (pbuf_copy_partial(p, v, n, offset) == n)
+			unifi_dhcp_option43(v, n);
+	}
+}
+
+/* Vendor class "ubnt" while UniFi is on: DHCP servers give option 43 to those
+ * (see LWIP_HOOK_DHCP_APPEND_OPTIONS in lwipopts.h) */
+void net_dhcp_append(struct dhcp_msg *msg, uint8_t type, uint16_t *len)
+{
+	if (!unifi_enabled() || (type != DHCP_DISCOVER && type != DHCP_REQUEST) || *len + 6 + 1 > DHCP_OPTIONS_LEN)
+		return;
+	msg->options[(*len)++] = 60;	/* vendor class identifier */
+	msg->options[(*len)++] = 4;
+	memcpy(msg->options + *len, "ubnt", 4);
+	*len += 4;
 }
 
 

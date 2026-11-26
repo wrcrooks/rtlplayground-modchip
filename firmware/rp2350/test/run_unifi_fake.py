@@ -4,9 +4,11 @@ what a real controller rarely sends, or sends only after a while.
 
     python3 run_unifi_fake.py build/test_unifi_net unifi
 
+  - no URL set: http://unifi:8080/inform, then the controller DHCP option 43 names;
+    the URL adopted through is kept, "inform auto" goes back, a name not found
   - no inform while the switch's ports can't be read, as while the bridge is down
   - adoption; then a new key from the controller, also once adopted
-  - set-adopt with a name in its URL: kept as it was, informs go on
+  - set-adopt with a name in its URL: taken; one that can't be used: not
   - a configuration without a version: not applied
   - a damaged saved configuration: not used
   - forgotten while a change is being checked: no restart
@@ -159,6 +161,44 @@ class Switch:
         self.p.wait()
 
 
+def no_url(exe, cfg, store):
+    """With no URL set: the default name, DHCP option 43, the URL kept on adoption"""
+    macb = bytes([2, 0, 0x5e] + [random.randrange(256) for _ in range(3)])
+    c, A = Controller(macb), os.urandom(16)
+    sw = Switch(exe, c.port, ":".join("%02x" % b for b in macb), store, {"UNIFI_NO_URL": "1"})
+    try:
+        j, k = c.inform(15)
+        st = sw.status()
+        check(j and j.get("inform_url") == "http://unifi:8080/inform" and "RESOLVE unifi" in sw.lines
+              and "inform URL http://unifi:8080/inform (the default)" in st and "unifi is 127.0.0.1" in st,
+              "no URL set: http://unifi:8080/inform, the name looked up")
+        sw.send("opt43 0104c0a8c8c8")
+        check("inform URL http://192.168.200.200:8080/inform (from DHCP)" in sw.status(), "the longest address fits")
+        sw.send("opt43 0202aabb01047f000001")
+        st = sw.status()
+        check("inform URL http://127.0.0.1:8080/inform (from DHCP)" in st, "DHCP option 43 names the controller")
+        c.drain()
+        j, k = c.inform(15)
+        check(j and j.get("inform_url") == "http://127.0.0.1:8080/inform", "and is informed")
+        c.keys = [A, DEFAULT]
+        c.replies.put(({"_type": "setparam", "interval": 2, "mgmt_cfg": "authkey=%s\ncfgversion=v1\n" % A.hex(),
+                        "system_cfg": cfg["adopted"]}, DEFAULT))
+        got = sw.until(lambda l: "applied" in l, 20)
+        st = sw.status()
+        check(got and "inform URL http://127.0.0.1:8080/inform\n" in st + "\n", "adopted: that URL kept")
+        sw.send("inform auto")
+        check("(from DHCP)" in sw.status(), "inform auto: from DHCP again")
+        sw.send("inform http://nowhere.example:8080/inform")
+        got = sw.until(lambda l: l == "RESOLVE nowhere.example", 10)
+        time.sleep(0.5)
+        check(got is not None and "the controller's name not found" in sw.status(), "a name not found says so")
+    finally:
+        sw.stop()
+        for i in (0, 1, 2):
+            f = "%s.%d" % (store, i)
+            os.path.exists(f) and os.unlink(f)
+
+
 def main():
     exe, cfgdir = sys.argv[1], sys.argv[2]
     cfg = {n: open(os.path.join(cfgdir, n + ".cfg")).read() for n in ("adopted", "ports")}
@@ -168,6 +208,7 @@ def main():
     os.unlink(store)
     c = Controller(macb)
     A, B = os.urandom(16), os.urandom(16)
+    no_url(exe, cfg, store + "x")
     sw = Switch(exe, c.port, mac, store, {"UNIFI_PORTS": "0"})
     try:
         # no ports read yet: no inform, rather than one with no model
@@ -198,14 +239,19 @@ def main():
         j, k = c.inform(10)
         check(k == B, "and used")
 
-        # set-adopt with a name for the controller: no DNS here, so the URL stays
+        # set-adopt with a name for the controller: taken, and looked up
         c.replies.put(({"_type": "cmd", "cmd": "set-adopt", "key": B.hex(), "uri": "http://unifi:8080/inform"}, B))
-        got = sw.until(lambda l: "not usable" in l, 15)
-        check(got is not None, "set-adopt with a name: not usable")
-        check("inform URL http://127.0.0.1:8080/inform" in sw.status(), "the URL kept")
+        got = sw.until(lambda l: "adopted by" in l, 15)
+        check(got and "http://unifi:8080/inform" in got[-1], "set-adopt with a name: taken")
         c.drain()
-        j, k = c.inform(10)
-        check(k == B, "informs go on")
+        got = sw.until(lambda l: l == "RESOLVE unifi", 10)
+        j, k = c.inform(15)
+        check(got is not None and k == B, "the name looked up, informs go on")
+        # and one that can't be used: not
+        c.replies.put(({"_type": "cmd", "cmd": "set-adopt", "key": B.hex(), "uri": "https://unifi:8443/inform"}, B))
+        got = sw.until(lambda l: "not usable" in l, 15)
+        check(got is not None and "inform URL http://unifi:8080/inform\n" in sw.status() + "\n",
+              "set-adopt with an https URL: not usable, the URL kept")
 
         # a configuration with no version is not applied
         c.replies.put(({"_type": "setparam", "system_cfg": cfg["ports"]}, B))

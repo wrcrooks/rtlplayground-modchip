@@ -16,17 +16,24 @@
  *
  *   unifi                       status
  *   unifi on|off
- *   unifi inform <url>          http://<a.b.c.d>[:port]/inform, kept in flash
+ *   unifi inform <url>|auto     http://<a.b.c.d or name>[:port]/inform, kept in flash
  *   unifi forget                back to the default key, to be adopted again
+ *
+ * With no URL set (auto), it informs the controller DHCP option 43 names
+ * (Ubiquiti's sub-option 1), else http://unifi:8080/inform. The URL it is
+ * adopted through is kept, as a UniFi device keeps it.
  */
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 void unifi_boot(void);		/* after store_load() */
 void unifi_bridge_up(void);	/* after rtl_bridge_up(), which replays the configuration */
 void unifi_second(void);
 bool unifi_url_ok(const char *url);
+bool unifi_enabled(void);
+void unifi_dhcp_option43(const uint8_t *d, uint8_t len);	/* net.c, from a DHCP reply */
 /* the commands' side is in plat.h */
 
 #endif

@@ -32,6 +32,9 @@
 /* Our cfgversion until the controller's configuration is applied: none like it, so it sends that */
 #define NONE		"0000000000000000"
 #define VERSION		"1.1.0"		/* what we claim to run; the oldest these models take */
+/* Where a UniFi device informs when nothing else says: a name the network's DNS may have */
+#define DEFAULT_URL	"http://unifi:8080/inform"
+#define HOST_MAX	48		/* dns.c's DNS_NAME_LEN */
 
 #define LED_FAST	1		/* main.c's SYS_LED_* */
 #define LED_ON		3
@@ -57,6 +60,34 @@ static bool locating, upgrade_told, bad_told;
 static const char *state = "off";
 static uint32_t informs, replies;
 static int last_http;
+static char dhcp_url[sizeof("http://255.255.255.255:8080/inform")];	/* from DHCP option 43, "": none */
+static char resolved[HOST_MAX];		/* the name looked up last, "": none */
+static ip4_addr_t resolved_ip;
+
+
+/* The URL informed: the one set or the controller's, else from DHCP, else the default */
+static const char *url_now(const char **from)
+{
+	if (store.unifi_url[0]) {
+		*from = "";
+		return store.unifi_url;
+	}
+	if (dhcp_url[0]) {
+		*from = " (from DHCP)";
+		return dhcp_url;
+	}
+	*from = " (the default)";
+	return DEFAULT_URL;
+}
+
+/* Once adopted, the URL it was adopted through is kept, as UniFi devices do */
+static void keep_url(void)
+{
+	const char *from, *u = url_now(&from);
+
+	if (!store.unifi_url[0])
+		snprintf(store.unifi_url, sizeof(store.unifi_url), "%s", u);
+}
 
 
 /* ---- the configuration in flash ---- */
@@ -169,7 +200,8 @@ static size_t inform_json(char *b, size_t max)
 		"\"version\":\"" VERSION "\",\"ip\":\"%s\",\"hostname\":", macs, serial, model.code, model.name, ip4addr_ntoa(ip));
 	k = app_json_str(b, max, k, hostname);
 	k = app(b, max, k, ",\"inform_url\":");
-	k = app_json_str(b, max, k, store.unifi_url);
+	const char *from;
+	k = app_json_str(b, max, k, url_now(&from));
 	k = app(b, max, k, ",\"uptime\":%lu,\"cfgversion\":\"%s\",\"default\":%s,\"_default_key\":%s,\"state\":%d,"
 		"\"fw_caps\":0,\"isolated\":false,\"locating\":%s,\"selfrun_beacon\":false",
 		(unsigned long)plat_uptime_s(), cfgversion[0] || !store.unifi_adopted ? cfgversion : NONE, store.unifi_adopted ? "false" : "true",
@@ -261,6 +293,7 @@ static void handle(const char *j)
 
 				memcpy(store.unifi_key, k, 16);
 				store.unifi_adopted = 1;
+				keep_url();
 				store_save();
 				event(EV_CONFIG, 0, 0, was ? "UniFi: a new key from the controller" : "UniFi: adopted");
 			}
@@ -294,9 +327,10 @@ static void handle(const char *j)
 			if (unifi_json_str(j, "uri", s, sizeof(s)) && strcmp(s, store.unifi_url)) {
 				if (unifi_url_ok(s))
 					snprintf(store.unifi_url, sizeof(store.unifi_url), "%s", s);
-				else	/* a name: no DNS here yet */
-					event(EV_CONFIG, 0, 0, "UniFi: inform URL %.80s not usable, kept %.80s", s, store.unifi_url);
+				else
+					event(EV_CONFIG, 0, 0, "UniFi: inform URL %.80s not usable, kept the one before", s);
 			}
+			keep_url();
 			store_save();
 			use_key();
 			event(EV_CONFIG, 0, 0, "UniFi: adopted by %s", store.unifi_url);
@@ -398,10 +432,9 @@ static err_t connected_cb(void *arg, struct tcp_pcb *pcb, err_t err)
 	return ERR_OK;
 }
 
-/* "http://a.b.c.d[:port]/path" */
-static bool parse_url(const char *url, ip4_addr_t *ip, uint16_t *port, const char **path)
+/* "http://<a.b.c.d or a name>[:port]/path" */
+static bool parse_url(const char *url, char host[HOST_MAX], uint16_t *port, const char **path)
 {
-	char host[16];
 	const char *h = url + 7, *e;
 	size_t n;
 
@@ -409,12 +442,14 @@ static bool parse_url(const char *url, ip4_addr_t *ip, uint16_t *port, const cha
 		return false;
 	e = h + strcspn(h, ":/");
 	n = e - h;
-	if (!n || n >= sizeof(host))
+	if (!n || n >= HOST_MAX)
 		return false;
+	for (size_t i = 0; i < n; i++)
+		if (!(h[i] >= 'a' && h[i] <= 'z') && !(h[i] >= 'A' && h[i] <= 'Z') && !(h[i] >= '0' && h[i] <= '9')
+		    && h[i] != '-' && h[i] != '.')
+			return false;
 	memcpy(host, h, n);
 	host[n] = 0;
-	if (!ip4addr_aton(host, ip))
-		return false;
 	*port = 80;
 	if (*e == ':') {
 		char *end;
@@ -431,24 +466,65 @@ static bool parse_url(const char *url, ip4_addr_t *ip, uint16_t *port, const cha
 
 bool unifi_url_ok(const char *url)
 {
-	ip4_addr_t ip;
+	char host[HOST_MAX];
 	uint16_t port;
 	const char *path;
 
-	return strlen(url) < sizeof(store.unifi_url) && parse_url(url, &ip, &port, &path);
+	return strlen(url) < sizeof(store.unifi_url) && parse_url(url, host, &port, &path);
+}
+
+/* The controller's address, NULL: being looked up, or not found (state says) */
+static const ip4_addr_t *address(const char *host)
+{
+	static ip4_addr_t ip;
+	uint8_t a[4];
+
+	if (ip4addr_aton(host, &ip))
+		return &ip;
+	if (resolved[0] && !strcmp(resolved, host))
+		return &resolved_ip;
+	switch (rtl_resolve(host, a)) {
+	case 0:
+		state = "looking up the controller";
+		next_in = 1;	/* again in a second */
+		return NULL;
+	case 1:
+		IP4_ADDR(&resolved_ip, a[0], a[1], a[2], a[3]);
+		snprintf(resolved, sizeof(resolved), "%s", host);
+		return &resolved_ip;
+	default:
+		state = "the controller's name not found";
+		return NULL;
+	}
+}
+
+void unifi_dhcp_option43(const uint8_t *d, uint8_t len)
+{
+	/* sub-options: Ubiquiti's 1 is the controller's IPv4 address */
+	for (uint8_t i = 0; i + 2 <= len && i + 2 + d[i + 1] <= len; i += 2 + d[i + 1])
+		if (d[i] == 1 && d[i + 1] == 4) {
+			snprintf(dhcp_url, sizeof(dhcp_url), "http://%u.%u.%u.%u:8080/inform", d[i + 2], d[i + 3], d[i + 4], d[i + 5]);
+			return;
+		}
+}
+
+bool unifi_enabled(void)
+{
+	return on;
 }
 
 static void start(void)
 {
-	ip4_addr_t ip;
+	const ip4_addr_t *to4;
+	char host[HOST_MAX];
 	uint16_t port;
-	const char *path;
+	const char *path, *from;
 	char *json = NULL;
 	uint8_t iv[16];
 	long n;
 
 	memset(&x, 0, sizeof(x));
-	if (!parse_url(store.unifi_url, &ip, &port, &path)) {
+	if (!parse_url(url_now(&from), host, &port, &path)) {
 		state = "no inform URL";
 		return;
 	}
@@ -457,6 +533,8 @@ static void start(void)
 		state = "waiting for the switch's ports";
 		return;
 	}
+	if (!(to4 = address(host)))
+		return;
 	json = malloc(JSON_MAX);
 	x.req = malloc(JSON_MAX + 256);
 	x.reply = malloc(REPLY_MAX);
@@ -478,7 +556,7 @@ static void start(void)
 		goto fail;
 	char head[200];
 	int hl = snprintf(head, sizeof(head), "POST %s HTTP/1.0\r\nHost: %s:%u\r\nUser-Agent: AirControl Agent v1.0\r\n"
-			  "Content-Type: application/x-binary\r\nContent-Length: %ld\r\n\r\n", path, ip4addr_ntoa(&ip), port, n);
+			  "Content-Type: application/x-binary\r\nContent-Length: %ld\r\n\r\n", path, host, port, n);
 	if (hl < 0 || hl >= (int)sizeof(head))
 		goto fail;
 	memmove(x.req + hl, x.req + 200, n);
@@ -495,7 +573,7 @@ static void start(void)
 	x.left = TIMEOUT_S;
 	informs++;
 	ip_addr_t to;
-	ip_addr_copy_from_ip4(to, ip);
+	ip_addr_copy_from_ip4(to, *to4);
 	if (tcp_connect(x.pcb, &to, port, connected_cb) != ERR_OK) {
 		tcp_abort(x.pcb);
 		x.pcb = NULL;
@@ -573,8 +651,10 @@ void unifi_second(void)
 		if (!x.done) {
 			finish(true);
 			state = "controller not answering";
+			resolved[0] = 0;	/* it may have moved */
 		} else if (x.failed) {
 			state = "controller not reachable";
+			resolved[0] = 0;
 		} else {
 			reply_done();
 		}
@@ -673,7 +753,9 @@ void unifi_enable(bool enable)
 
 bool unifi_inform(const char *url)
 {
-	if (!unifi_url_ok(url))
+	if (!strcmp(url, "auto"))
+		url = "";	/* from DHCP, or the default */
+	else if (!unifi_url_ok(url))
 		return false;
 	if (strcmp(store.unifi_url, url)) {
 		snprintf(store.unifi_url, sizeof(store.unifi_url), "%s", url);
@@ -692,7 +774,11 @@ size_t unifi_status(char *buf, size_t max)
 {
 	size_t n = app(buf, max, 0, "UniFi %s: %s\n", on ? "on" : "off", on ? state : "not informing");
 
-	n = app(buf, max, n, "  inform URL %s\n", store.unifi_url[0] ? store.unifi_url : "(none)");
+	const char *from, *u = url_now(&from);
+
+	n = app(buf, max, n, "  inform URL %s%s\n", u, from);
+	if (resolved[0])
+		n = app(buf, max, n, "  %s is %s\n", resolved, ip4addr_ntoa(&resolved_ip));
 	if (model_set)
 		n = app(buf, max, n, "  claims to be a %s (%s), %u ports\n", model.name, model.code, model.ports);
 	n = app(buf, max, n, "  %s, %s, every %lu s; %lu informs, %lu replies, last HTTP %d\n",

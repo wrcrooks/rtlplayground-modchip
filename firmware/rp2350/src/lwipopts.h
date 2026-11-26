@@ -72,14 +72,19 @@ signed char net_tcp_in(struct tcp_pcb *pcb, const struct tcp_hdr *h);
 
 /*
  * DHCP: with LWIP_DNS off, lwIP neither asks for nor keeps the DNS servers.
- * Ask for option 6 anyway and take it through the parse hook, for dns.c.
+ * Ask for option 6 anyway and take it through the parse hook, for dns.c; and
+ * for 43, where a UniFi controller's address comes (unifi.c).
  */
 #define LWIP_DHCP_PROVIDE_DNS_SERVERS	0
-#define DHCP_ADD_EXTRA_REQUEST_OPTIONS	, 6
+#define DHCP_ADD_EXTRA_REQUEST_OPTIONS	, 6, 43
 struct pbuf;
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset);
 #define LWIP_HOOK_DHCP_PARSE_OPTION(netif, dhcp, state, msg, msg_type, option, len, pbuf, offset) \
 	net_dhcp_option(option, len, pbuf, offset)
+struct dhcp_msg;
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len);
+#define LWIP_HOOK_DHCP_APPEND_OPTIONS(netif, dhcp, state, msg, msg_type, options_len_ptr) \
+	net_dhcp_append(msg, msg_type, options_len_ptr)
 
 /* HTTPS: the web server runs on altcp, plain or through mbedTLS */
 #define LWIP_ALTCP			1

@@ -778,3 +778,31 @@ bool rtl_password_ok(const char *v)
 			return false;
 	}
 }
+
+
+/* See plat.h: dns.c's single lookup, shared as ntp.c shares it */
+int rtl_resolve(const char *name, uint8_t ip[4])
+{
+	static bool mine;	/* dns_state holds our lookup */
+
+	if (strlen(name) >= DNS_NAME_LEN)
+		return -1;
+	if (mine && !strncmp(dns_state.name, name, DNS_NAME_LEN)) {
+		if (dns_state.status == DNS_PENDING)
+			return 0;
+		mine = false;
+		if (dns_state.status != DNS_DONE)
+			return -1;
+		memcpy(ip, dns_state.addr, 4);
+		return 1;
+	}
+	mine = false;
+	if (dns_state.status == DNS_PENDING)
+		return 0;	/* someone else's: ours after it */
+	memset(dns_state.name, 0, DNS_NAME_LEN);
+	memcpy(dns_state.name, name, strlen(name));
+	dns_state.verbose = 0;
+	dns_lookup();
+	mine = true;
+	return 0;
+}

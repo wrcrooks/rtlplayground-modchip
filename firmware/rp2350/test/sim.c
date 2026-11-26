@@ -627,6 +627,46 @@ int main(void)
 		check(n > 4 && !memcmp(d, "<14>", 4), "syslog datagram: %.*s", n > 60 ? 60 : n, d);
 	}
 
+	/* rtl_resolve(): unifi.c's names, through dns.c's single lookup */
+	{
+		uint8_t a4[4] = { 0 }, *d, q[300];
+		int r1 = rtl_resolve("10.0.0.7", a4), r2 = rtl_resolve("10.0.0.7", a4);
+		check(r1 == 0 && r2 == 1 && a4[0] == 10 && a4[3] == 7, "rtl_resolve: an address is itself (%d %d)", r1, r2);
+		cmd("dns server 10.0.0.53");
+		check(rtl_resolve("ctl.lan", a4) == 0 && rtl_resolve("ctl.lan", a4) == 0, "a name: being looked up");
+		int dsock = -1;
+		for (int i = 0; i < RTL_UDP_CONNS; i++) {
+			rtl_udp_info(i, &info);
+			if (info.rport == 53 && info.ripaddr[3] == 53)
+				dsock = i;
+		}
+		uint16_t qn = dsock >= 0 ? rtl_udp_poll(dsock, &d) : 0;
+		check(qn > 12 && qn < sizeof(q) - 16 && memmem(d, qn, "\3ctl\3lan", 8), "a query to the server set (%u bytes)", qn);
+		if (qn > 12 && qn < sizeof(q) - 16) {
+			static const uint8_t ans[] = { 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 10, 0, 0, 99 };
+			memcpy(q, d, qn);
+			q[2] = 0x81; q[3] = 0x80; q[7] = 1;
+			memcpy(q + qn, ans, sizeof(ans));
+			rtl_udp_input(dsock, q, qn + sizeof(ans), &d);
+		}
+		int found = rtl_resolve("ctl.lan", a4);
+		check(found == 1 && a4[0] == 10 && a4[3] == 99, "found: %u.%u.%u.%u", a4[0], a4[1], a4[2], a4[3]);
+		check(rtl_resolve("none.lan", a4) == 0, "another name: looked up");
+		int sent = 0;
+		for (int t = 0; t < 15 * 20; t++) {	/* six tries, two seconds each, no answer; net.c polls */
+			ticks_run(10);
+			for (int i = 0; i < RTL_UDP_CONNS; i++) {
+				rtl_udp_info(i, &info);
+				if (info.rport == 53)
+					sent += rtl_udp_poll(i, &d) > 0;
+			}
+		}
+		int r3 = rtl_resolve("none.lan", a4);
+		check(r3 == -1 && sent == 6, "no answer: not found (%d, %d queries)", r3, sent);
+		check(rtl_resolve("a-name-much-too-long-for-dns-c-to-take-0123456789.lan", a4) == -1, "a name too long: not found");
+		cmd("dns server 0.0.0.0");
+	}
+
 	/* VLAN table walks: TBL_READ in blocks of 64, or entry by entry from an older bridge */
 	cmd("vlan 10 3 4t");
 	cmd("vlan 4000 5");

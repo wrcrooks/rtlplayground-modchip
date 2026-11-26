@@ -32,6 +32,7 @@ mbedtls_ms_time_t mbedtls_ms_time(void) { return sys_now(); }
 uint32_t plat_uptime_s(void) { return sys_now() / 1000; }
 const struct ip6_addr *net_ip6_gw(struct netif *n, const struct ip6_addr *d) { return NULL; }
 void net_dhcp_option(unsigned char option, unsigned char len, struct pbuf *p, unsigned short offset) { }
+void net_dhcp_append(struct dhcp_msg *msg, unsigned char type, unsigned short *len) { }
 bool tls_identity(struct tls_identity *id) { return false; }
 const uint8_t *rtl_mac(void) { return (const uint8_t *)"\x06\x0f\x00\xdd\x3b\x3e"; }
 size_t metrics_switch_json(char *buf, size_t max) { return snprintf(buf, max, "{\"temp\":45.5}"); }

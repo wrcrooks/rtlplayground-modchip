@@ -231,6 +231,9 @@ void rtl_http_cmd(char *body);			/* POST /cmd */
 bool rtl_password_ok(const char *urlencoded);
 bool rtl_password_plain_ok(const char *password);
 size_t rtl_run(char *line, char *out, size_t max, bool *ok);	/* a command line, its output */
+/* A name looked up with dns.c, one lookup at a time (NTP's as well): ask again until it says.
+ * 1: found, ip set; 0: being looked up; -1: not found, or too long */
+int rtl_resolve(const char *name, uint8_t ip[4]);
 uint16_t rtl_http_cont(uint8_t *dst, uint16_t max);	/* the rest after outbuf, cont_len */
 
 #endif
