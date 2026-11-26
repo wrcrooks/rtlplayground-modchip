@@ -40,6 +40,26 @@ make -f modchip/bridge/Makefile MACHINE=POE_2G040210GSM                         
 The PoE switch's controller image goes into that last build with `tools/add_pse_image.py`. The RP2350
 firmware for that board is `-DMODCHIP_BOARD=poe`.
 
+## Roadmap
+
+- **UniFi.** The switch as a UniFi switch: adopted by a UniFi Network controller, which sets its
+  VLANs, port VLAN IDs, names and speeds. The first part is in the firmware, tested against a
+  controller in Docker but not on a switch yet. Next: STP, storm control, isolation, port security
+  and egress limits from the controller, and client and LLDP neighbour tables for it.
+  See [firmware/rp2350/README.md](firmware/rp2350/README.md#unifi).
+- **Port LED daughter board.** A small board on the mod chip with one WS2812B LED per port, chained,
+  in the style of UniFi's Etherlighting. Each LED shows the colour of its port's VLAN, or the link
+  speed, and blinks to locate a port, from the command line or from the controller's own locate and
+  Etherlighting settings. Open questions:
+  - **Placement.** Behind the front panel, over each port, with light pipes where the case has no
+    window.
+  - **Power.** WS2812B wants 3.5 to 5.3 V and up to 60 mA per LED at full white: a 5 V supply from
+    the switch's input supply, or LEDs that run from 3.3 V, with brightness capped in firmware.
+  - **Signal.** One spare RP2350 pin, driven by a PIO state machine, with a level shifter if the
+    LEDs run at 5 V.
+  - **Connector.** The mod chip board has free GPIOs but no header for them yet: the next revision
+    needs one for the data line, power and ground.
+
 ## Rebuilding the hardware
 
 Needs the KiCad 10 flatpak and a checkout of kicad-agent-kit:
