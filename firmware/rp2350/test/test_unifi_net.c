@@ -4,7 +4,8 @@
  * Informs http://127.0.0.1:8080/inform, relayed to that port. Prints each
  * command the controller's configuration becomes ("RUN ..."), each event
  * ("EVENT ..."), "REBOOT" and "LED n". Lines on stdin are commands: "status",
- * "on", "off", "forget", "inform <url>", "link <port> <0|speed code>".
+ * "on", "off", "forget", "inform <url>", "link <port> <0|speed code>", "ports <n>"
+ * (0: none read, as while the bridge is down; UNIFI_PORTS sets it at the start).
  */
 #include <fcntl.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@ char hostname[24] = "testswitch";
 static uint8_t mac[6];
 static const char *store_path;
 static uint8_t links[6] = { 3, 0, 0, 6, 0, 0 };		/* port 1 at 1G, port 4 at 2.5G */
+static uint8_t nports = 6;
 
 u32_t sys_now(void)
 {
@@ -81,7 +83,7 @@ bool plat_sector_write(int id, const uint8_t *src, uint32_t len)
 /* A 4 + 2 switch like the MokerLink */
 uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
 {
-	for (uint8_t i = 0; i < 6 && i < max; i++) {
+	for (uint8_t i = 0; i < nports && i < max; i++) {
 		memset(&p[i], 0, sizeof(p[i]));
 		snprintf(p[i].name, sizeof(p[i].name), "Port %u", i + 1);
 		p[i].sfp = i >= 4;
@@ -91,7 +93,7 @@ uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
 		p[i].out_octets = 2000000ULL * (i + 1);
 		p[i].in_ucast = 1000 * (i + 1);
 	}
-	return 6;
+	return nports < max ? nports : max;
 }
 
 size_t rtl_run(char *line, char *out, size_t max, bool *ok)
@@ -115,12 +117,14 @@ int main(int argc, char **argv)
 	store_path = argv[3];
 	t0 = sys_now();
 	setvbuf(stdout, NULL, _IOLBF, 0);
+	if (getenv("UNIFI_PORTS"))
+		nports = atoi(getenv("UNIFI_PORTS"));
+	event_listen(on_event);
 	store_load();
 	unifi_boot();
 	lwip_init();
 	netif_set_default(netif_list);
 	relay_out(8080, atoi(argv[1]));
-	event_listen(on_event);
 	if (!store.unifi_url[0])
 		unifi_inform("http://127.0.0.1:8080/inform");
 	unifi_enable(true);	/* as the replayed configuration does */
@@ -148,6 +152,8 @@ int main(int argc, char **argv)
 				unifi_forget();
 			} else if (!strncmp(line, "inform ", 7)) {
 				printf("INFORM %d\n", unifi_inform(line + 7));
+			} else if (sscanf(line, "ports %u", &a) == 1 && a <= 6) {
+				nports = a;
 			} else if (sscanf(line, "link %u %u", &a, &b) == 2 && a >= 1 && a <= 6) {
 				links[a - 1] = b;
 			}

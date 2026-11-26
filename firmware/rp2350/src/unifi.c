@@ -134,6 +134,7 @@ static void forget(const char *why)
 	store_save();
 	use_key();
 	cfgversion[0] = 0;
+	watch = 0;		/* nothing of the controller's left to check */
 	event(EV_CONFIG, 0, 0, "UniFi: %s, back to the default key", why);
 }
 
@@ -162,8 +163,6 @@ static size_t inform_json(char *b, size_t max)
 	char macs[18], serial[13];
 	size_t k = 0;
 
-	if (!model_set)
-		pick_model();
 	snprintf(macs, sizeof(macs), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	snprintf(serial, sizeof(serial), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	k = app(b, max, k, "{\"mac\":\"%s\",\"serial\":\"%s\",\"model\":\"%s\",\"model_display\":\"%s\","
@@ -211,7 +210,13 @@ static void apply(const char *system_cfg, const char *version)
 
 	if (!sw)
 		return;
-	if (version[0] && !strcmp(version, store.unifi_bad)) {
+	if (!version[0]) {
+		/* nothing to report back as applied, nor to refuse if it cuts the switch off */
+		event(EV_CONFIG, 0, 0, "UniFi: configuration without a version not applied");
+		free(sw);
+		return;
+	}
+	if (!strcmp(version, store.unifi_bad)) {
 		if (!bad_told)
 			event(EV_CONFIG, 0, 0, "UniFi: configuration %s not applied: it cut the switch off before", version);
 		bad_told = true;
@@ -250,11 +255,14 @@ static void handle(const char *j)
 		if (mgmt && unifi_json_str(j, "mgmt_cfg", mgmt, 1024)) {
 			uint8_t k[16];
 
-			if (unifi_kv(mgmt, "authkey", s, sizeof(s)) && unifi_hex16(s, k) && !store.unifi_adopted) {
+			if (unifi_kv(mgmt, "authkey", s, sizeof(s)) && unifi_hex16(s, k)
+			    && (!store.unifi_adopted || memcmp(store.unifi_key, k, 16))) {
+				bool was = store.unifi_adopted;
+
 				memcpy(store.unifi_key, k, 16);
 				store.unifi_adopted = 1;
 				store_save();
-				event(EV_CONFIG, 0, 0, "UniFi: adopted");
+				event(EV_CONFIG, 0, 0, was ? "UniFi: a new key from the controller" : "UniFi: adopted");
 			}
 			if (unifi_kv(mgmt, "use_aes_gcm", s, sizeof(s)) && !strcmp(s, "true") && !store.unifi_gcm) {
 				store.unifi_gcm = 1;
@@ -283,8 +291,12 @@ static void handle(const char *j)
 				memcpy(store.unifi_key, k, 16);
 				store.unifi_adopted = 1;
 			}
-			if (unifi_json_str(j, "uri", s, sizeof(s)) && !strncmp(s, "http://", 7))
-				snprintf(store.unifi_url, sizeof(store.unifi_url), "%s", s);
+			if (unifi_json_str(j, "uri", s, sizeof(s)) && strcmp(s, store.unifi_url)) {
+				if (unifi_url_ok(s))
+					snprintf(store.unifi_url, sizeof(store.unifi_url), "%s", s);
+				else	/* a name: no DNS here yet */
+					event(EV_CONFIG, 0, 0, "UniFi: inform URL %.80s not usable, kept %.80s", s, store.unifi_url);
+			}
 			store_save();
 			use_key();
 			event(EV_CONFIG, 0, 0, "UniFi: adopted by %s", store.unifi_url);
@@ -312,19 +324,25 @@ static void handle(const char *j)
 
 /* ---- one exchange over HTTP ---- */
 
-static void finish(bool failed)
+/* true: the pcb was aborted, which a callback must return ERR_ABRT for */
+static bool finish(bool failed)
 {
+	bool aborted = false;
+
 	if (x.pcb) {
 		tcp_arg(x.pcb, NULL);
 		tcp_recv(x.pcb, NULL);
 		tcp_sent(x.pcb, NULL);
 		tcp_err(x.pcb, NULL);
-		if (tcp_close(x.pcb) != ERR_OK)
+		if (tcp_close(x.pcb) != ERR_OK) {
 			tcp_abort(x.pcb);
+			aborted = true;
+		}
 		x.pcb = NULL;
 	}
 	x.done = true;
 	x.failed = failed;
+	return aborted;
 }
 
 static void pump(void)
@@ -336,7 +354,8 @@ static void pump(void)
 			break;
 		if (n > x.req_len - x.sent)
 			n = x.req_len - x.sent;
-		if (tcp_write(x.pcb, x.req + x.sent, n, 0) != ERR_OK)
+		/* copied: x.req is freed when the exchange ends, maybe before lwIP is done with it */
+		if (tcp_write(x.pcb, x.req + x.sent, n, TCP_WRITE_FLAG_COPY) != ERR_OK)
 			break;
 		x.sent += n;
 	}
@@ -352,10 +371,8 @@ static err_t sent_cb(void *arg, struct tcp_pcb *pcb, u16_t len)
 
 static err_t recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 {
-	if (!p) {
-		finish(false);
-		return ERR_OK;
-	}
+	if (!p)
+		return finish(false) ? ERR_ABRT : ERR_OK;
 	for (struct pbuf *q = p; q; q = q->next) {
 		size_t n = q->len;
 
@@ -435,14 +452,25 @@ static void start(void)
 		state = "no inform URL";
 		return;
 	}
+	pick_model();
+	if (!model_set) {	/* the bridge isn't up yet */
+		state = "waiting for the switch's ports";
+		return;
+	}
 	json = malloc(JSON_MAX);
 	x.req = malloc(JSON_MAX + 256);
 	x.reply = malloc(REPLY_MAX);
 	if (!json || !x.req || !x.reply)
 		goto fail;
 	size_t jl = inform_json(json, JSON_MAX);
-	if (jl >= JSON_MAX - 1)
-		goto fail;
+	if (jl >= JSON_MAX - 1) {
+		free(json);
+		free(x.req);
+		free(x.reply);
+		memset(&x, 0, sizeof(x));
+		state = "inform too large";
+		return;
+	}
 	rng_get(NULL, iv, sizeof(iv));
 	/* the packet after room for the request line and headers */
 	n = unifi_seal(x.req + 200, JSON_MAX + 56, rtl_mac(), key, store.unifi_gcm, iv, json, jl);
@@ -573,6 +601,26 @@ void unifi_second(void)
 
 /* ---- the switch's own events ---- */
 
+/* A saved configuration as unifi_parse() makes them */
+static bool saved_ok(const struct saved *v)
+{
+	const struct unifi_sw *sw = &v->sw;
+
+	if (!memchr(v->cfgversion, 0, sizeof(v->cfgversion)) || !v->cfgversion[0] || sw->nvlans > UNIFI_VLANS)
+		return false;
+	for (int i = 0; i < sw->nvlans; i++) {
+		if (sw->vlan[i].mode > UNIFI_EXCLUDE)
+			return false;
+		for (int p = 0; p <= UNIFI_PORTS; p++)
+			if (sw->vlan[i].port[p] > UNIFI_EXCLUDE)
+				return false;
+	}
+	for (int p = 0; p <= UNIFI_PORTS; p++)
+		if (!memchr(sw->port[p].name, 0, sizeof(sw->port[p].name)) || sw->port[p].pvid > 4094)
+			return false;
+	return true;
+}
+
 void unifi_boot(void)
 {
 	struct saved *v = malloc(sizeof(*v));
@@ -580,10 +628,13 @@ void unifi_boot(void)
 	if (!v)
 		return;
 	plat_sector_read(SECTOR_UNIFI, (uint8_t *)v, sizeof(*v));
-	if (store.unifi_adopted && !memcmp(v->magic, "UNC1", 4) && (applied = malloc(sizeof(*applied)))) {
-		v->cfgversion[sizeof(v->cfgversion) - 1] = 0;
-		*applied = v->sw;
-		snprintf(cfgversion, sizeof(cfgversion), "%s", v->cfgversion);
+	if (store.unifi_adopted && !memcmp(v->magic, "UNC1", 4)) {
+		if (!saved_ok(v))
+			event(EV_CONFIG, 0, 0, "UniFi: the saved configuration is damaged, not used");
+		else if ((applied = malloc(sizeof(*applied)))) {
+			*applied = v->sw;
+			snprintf(cfgversion, sizeof(cfgversion), "%s", v->cfgversion);
+		}
 	}
 	free(v);
 }

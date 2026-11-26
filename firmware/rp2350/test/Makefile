@@ -23,7 +23,7 @@ SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_sh
 # and test_snmp lwIP's, from the same place
 MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
-SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_unifi $(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
+SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_unifi $(BUILD)/test_unifi_net $(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
 all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
@@ -41,6 +41,7 @@ all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_m
 	node check_conf_merge.js $(RTLP)/html/app.js $(BUILD)/system_https.html
 ifneq ($(PICO_SDK_PATH),)
 	python3 run_unifi.py $(BUILD)/test_unifi unifi
+	python3 run_unifi_fake.py $(BUILD)/test_unifi_net unifi
 	$(BUILD)/test_tls
 	$(BUILD)/test_usm
 	$(BUILD)/test_net6
@@ -191,6 +192,10 @@ $(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/unifi_pr
 unifi-controller: $(BUILD)/test_unifi_net
 	python3 run_unifi_controller.py $<
 
+# The same against a scripted controller, for what a real one rarely sends (also in all)
+unifi-fake: $(BUILD)/test_unifi_net
+	python3 run_unifi_fake.py $< unifi
+
 $(BUILD)/test_link: test_link.c ../src/link.c ../src/link.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -o $@ test_link.c ../src/link.c
@@ -219,4 +224,4 @@ $(BUILD)/sim-poe: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean dot1x-radius unifi-controller fuzz-unifi
+.PHONY: all clean dot1x-radius unifi-controller unifi-fake fuzz-unifi

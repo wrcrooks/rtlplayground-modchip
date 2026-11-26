@@ -488,7 +488,7 @@ static bool parse_ssh(void)
  */
 static bool parse_unifi(void)
 {
-	char st[400];
+	char st[640];
 
 	if (cmd_words_len == 1) {
 		unifi_status(st, sizeof(st));
