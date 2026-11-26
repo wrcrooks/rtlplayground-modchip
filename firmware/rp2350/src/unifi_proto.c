@@ -175,9 +175,16 @@ static const char *string(const char *p, char *out, size_t max, bool *fits)
 			case 'b': c = '\b'; break;
 			case 'f': c = '\f'; break;
 			case 'u':
-				if (sscanf(p, "%4x", &u) != 1)
-					return NULL;
-				p += 4;
+				/* four hex digits: sscanf's %4x takes fewer, and signs and spaces */
+				u = 0;
+				for (int i = 0; i < 4; i++, p++) {
+					if (*p >= '0' && *p <= '9')
+						u = u << 4 | (*p - '0');
+					else if ((*p | 0x20) >= 'a' && (*p | 0x20) <= 'f')
+						u = u << 4 | ((*p | 0x20) - 'a' + 10);
+					else
+						return NULL;
+				}
 				c = u < 0x80 ? u : '?';
 				break;
 			case '"': case '\\': case '/': break;

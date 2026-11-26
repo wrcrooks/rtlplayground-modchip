@@ -783,3 +783,7 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
 - **`make -C test unifi-controller`** runs `unifi.c` on lwIP against UniFi Network 10.6.109 in Docker
   (`ghcr.io/jamesbraid/unifi-network:sim`): adoption, the ports as the controller sees them, VLAN and
   port changes, locate, a refused upgrade, a restart, and a change that cuts the switch off.
+- **`make -C test fuzz-unifi`** runs libFuzzer (clang, with ASan and UBSan) over what `unifi.c`
+  reads from the network: packets, packet contents sealed with the default key (anyone who can
+  answer an inform before adoption can send these), zlib streams, replies' JSON, and `system_cfg`
+  into commands. `FUZZ_TIME` is in seconds (300 by default). Crashes land in `test/build/`.

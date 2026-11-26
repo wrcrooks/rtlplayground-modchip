@@ -62,6 +62,18 @@ static void json_checks(void)
 	CHECK(!unifi_json_str(j, "x", s, sizeof(s)), "nested members are not top-level");
 	CHECK(!unifi_json_str(j, "interval", s, sizeof(s)), "a number is no string");
 	CHECK(!unifi_json_str(j, "_type", s, 4), "too long for out");
+	CHECK(unifi_json_str("{\"a\":\"\\u004a\\u004B\"}", "a", s, sizeof(s)) && !strcmp(s, "JK"), "\\u in either case");
+	CHECK(!unifi_json_str("{\"a\":\"\\u+041\"}", "a", s, sizeof(s)) && !unifi_json_str("{\"a\":\"\\u 041\"}", "a", s, sizeof(s)),
+	      "\\u takes only hex digits");
+	{
+		/* found by fuzz_unifi: a short \u at the end read past it */
+		static const char t[] = "{\"_\":\"\\u0";
+		char *h = malloc(sizeof(t));
+
+		memcpy(h, t, sizeof(t));
+		CHECK(!unifi_json_str(h, "x", s, sizeof(s)), "a short \\u at the end");
+		free(h);
+	}
 	CHECK(unifi_json_str(j, "mgmt_cfg", s, sizeof(s)), "mgmt_cfg");
 	CHECK(unifi_kv(s, "authkey", v, sizeof(v)) && unifi_hex16(v, k) && k[15] == 0xff, "authkey %s", v);
 	CHECK(unifi_kv(s, "use_aes_gcm", v, sizeof(v)) && !strcmp(v, "true"), "use_aes_gcm");

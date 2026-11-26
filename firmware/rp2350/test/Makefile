@@ -167,6 +167,20 @@ $(BUILD)/test_unifi: test_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../s
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -fsanitize=address,undefined $(MBED_INC) -o $@ test_unifi.c ../src/unifi_proto.c ../src/inflate.c $(BUILD)/libmbed.a
 
+# libFuzzer over what unifi.c reads from the network (clang): make fuzz-unifi FUZZ_TIME=600
+FUZZ_TIME ?= 300
+FUZZ_CC ?= clang
+$(BUILD)/fuzz_unifi: fuzz_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h $(BUILD)/libmbed.a
+	@mkdir -p $(BUILD)
+	$(FUZZ_CC) -std=gnu11 -O1 -g -I../src -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined $(MBED_INC) \
+		-o $@ fuzz_unifi.c ../src/unifi_proto.c ../src/inflate.c $(BUILD)/libmbed.a
+
+fuzz-unifi: $(BUILD)/fuzz_unifi
+	python3 fuzz_seeds.py $(BUILD)/fuzz_unifi_seeds
+	mkdir -p $(BUILD)/fuzz_unifi_corpus
+	$< -max_total_time=$(FUZZ_TIME) -max_len=16384 -print_final_stats=1 -artifact_prefix=$(BUILD)/ \
+		$(BUILD)/fuzz_unifi_corpus $(BUILD)/fuzz_unifi_seeds
+
 # unifi.c against a UniFi Network controller in Docker: make unifi-controller
 $(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
 	@mkdir -p $(BUILD)
@@ -205,4 +219,4 @@ $(BUILD)/sim-poe: $(SIM_SRC) $(BUILD)/rtl_sfr.o $(BUILD)/version.h ../src/*.h
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean dot1x-radius unifi-controller
+.PHONY: all clean dot1x-radius unifi-controller fuzz-unifi
