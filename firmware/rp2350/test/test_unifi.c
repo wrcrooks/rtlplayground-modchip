@@ -225,6 +225,17 @@ int main(int argc, char **argv)
 	CHECK(unifi_commands(&sw, &before, &m, out, 20) < 0, "out too small");
 	n = unifi_commands(&before, &sw, &m, out, sizeof(out));
 	printf("C back\n%s", out);
+	if (argc > 3) {
+		/* STP, isolation, storm control, egress limits: from adopted.cfg, and back */
+		static struct unifi_sw f;
+		char *c3 = slurp(argv[3]);
+		CHECK(unifi_parse(c3, &f), "features.cfg");
+		free(c3);
+		unifi_commands(&f, &before, &m, out, sizeof(out));
+		printf("C features\n%s", out);
+		unifi_commands(&before, &f, &m, out, sizeof(out));
+		printf("C unfeatures\n%s", out);
+	}
 	CHECK(!unifi_parse("switch.vlan.1.id=1\n", &sw) || sw.nvlans == 1, "one VLAN");
 	CHECK(!unifi_parse("nothing=here\n", &sw), "no switch lines");
 	printf("C end\n%d checks, %d failed\n", checks, fails);

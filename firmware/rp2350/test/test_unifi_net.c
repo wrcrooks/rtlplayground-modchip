@@ -109,10 +109,13 @@ size_t rtl_run(char *line, char *out, size_t max, bool *ok)
 		/* as port_l2_learned() prints it: blank lines for entries not valid; the switch's own MAC, the CPU, a LAG */
 		printf("L2 READ\n");
 		*ok = true;
-		return snprintf(out, max, "\n\tMAC\t\tVLAN\ttype\tport\n\naa:bb:cc:00:00:01\t1\tlearned\t1\n"
-				"aa:bb:cc:00:00:02\t10\tstatic\t1\n\naa:bb:cc:00:00:04\t1\tlearned\t4\n"
-				"%02x:%02x:%02x:%02x:%02x:%02x\t1\tlearned\tCPU\naa:bb:cc:00:00:05\t1\tlearned\tLAG1\n"
-				"aa:bb:cc:00:00:06\t20\tlearned\t6\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+		/* the clients: aa:<the last three bytes of the switch's MAC>:00:0n, new for each switch */
+		char c[12];
+		snprintf(c, sizeof(c), "aa:%02x:%02x:%02x", mac[3], mac[4], mac[5]);
+		return snprintf(out, max, "\n\tMAC\t\tVLAN\ttype\tport\n\n%s:00:01\t1\tlearned\t1\n"
+				"%s:00:02\t10\tstatic\t1\n\n%s:00:04\t1\tlearned\t4\n"
+				"%02x:%02x:%02x:%02x:%02x:%02x\t1\tlearned\tCPU\n%s:00:05\t1\tlearned\tLAG1\n"
+				"%s:00:06\t20\tlearned\t6\n", c, c, c, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], c, c);
 	}
 	printf("RUN %s\n", line);
 	*ok = true;

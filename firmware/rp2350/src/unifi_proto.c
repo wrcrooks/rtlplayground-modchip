@@ -361,6 +361,10 @@ bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 	bool any = false;
 
 	memset(sw, 0, sizeof(*sw));
+	sw->stp.on = sw->stp.rstp = -1;
+	sw->stp.prio = -1;
+	for (int b = 0; b <= UNIFI_PORTS; b++)
+		sw->port[b].stp = sw->port[b].edge = sw->port[b].guard = -1;
 	for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++)
 		map[i] = -1;
 	/* two passes: VLAN slots may be named before their id */
@@ -390,7 +394,16 @@ bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 				}
 				continue;
 			}
-			if (sscanf(key, "switch.vlan.%d.mode%n", &a, &n) == 1 && !key[n]) {
+			if (!strcmp(key, "switch.stp.status")) {
+				sw->stp.on = !strcmp(val, "enabled");
+				any = true;
+			} else if (!strcmp(key, "switch.stp.version")) {
+				sw->stp.rstp = !strcmp(val, "stp") ? 0 : 1;
+			} else if (!strcmp(key, "switch.stp.priority")) {
+				long v = strtol(val, NULL, 10);
+				if (v >= 0 && v <= 61440)
+					sw->stp.prio = v;
+			} else if (sscanf(key, "switch.vlan.%d.mode%n", &a, &n) == 1 && !key[n]) {
 				if (a >= 0 && a < (int)(sizeof(map) / sizeof(map[0])) && map[a] >= 0)
 					sw->vlan[map[a]].mode = !strcmp(val, "untagged") ? UNIFI_UNTAGGED : UNIFI_TAGGED;
 			} else if (sscanf(key, "switch.vlan.%d.port.%d.mode%n", &a, &b, &n) == 2 && !key[n]) {
@@ -409,15 +422,36 @@ bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 					sw->port[b].full = !strcmp(val, "enabled");
 				else if (!strcmp(f, "name"))
 					snprintf(sw->port[b].name, sizeof(sw->port[b].name), "%.23s", val);
+				else if (!strcmp(f, "stp.port_mode"))
+					sw->port[b].stp = !strcmp(val, "enabled");
+				else if (!strcmp(f, "stp.edge"))
+					sw->port[b].edge = !strcmp(val, "auto") ? 2 : !strcmp(val, "enabled");
+				else if (!strcmp(f, "stp.bpdu_guard"))
+					sw->port[b].guard = !strcmp(val, "enabled");
+				else if (!strcmp(f, "isolation"))
+					sw->port[b].isolated = !strcmp(val, "enabled");
+				else if (!strcmp(f, "stormctrl.bcast"))
+					sw->port[b].storm[UNIFI_STORM_B] = strtoul(val, NULL, 10);
+				else if (!strcmp(f, "stormctrl.mcast"))
+					sw->port[b].storm[UNIFI_STORM_M] = strtoul(val, NULL, 10);
+				else if (!strcmp(f, "stormctrl.ucast"))
+					sw->port[b].storm[UNIFI_STORM_U] = strtoul(val, NULL, 10);
+				else if (!strcmp(f, "egress_rate_limit_kbps"))
+					sw->port[b].egress_kbps = strtoul(val, NULL, 10);
 			}
 		}
-	/* a speed counts only with autoneg off */
+	/* a speed counts only with autoneg off; storm limits only with storm control on, as rates */
 	for (int b = 1; b <= UNIFI_PORTS; b++) {
-		char k[40], v[16];
+		char k[48], v[16];
 
 		snprintf(k, sizeof(k), "switch.port.%d.autoneg", b);
 		if (!unifi_kv(cfg, k, v, sizeof(v)) || strcmp(v, "disabled"))
 			sw->port[b].speed = 0;
+		snprintf(k, sizeof(k), "switch.port.%d.stormctrl.status", b);
+		bool storm = unifi_kv(cfg, k, v, sizeof(v)) && !strcmp(v, "enabled");
+		snprintf(k, sizeof(k), "switch.port.%d.stormctrl.type", b);
+		if (!storm || (unifi_kv(cfg, k, v, sizeof(v)) && strcmp(v, "rate")))
+			memset(sw->port[b].storm, 0, sizeof(sw->port[b].storm));
 	}
 	return any;
 }
@@ -520,6 +554,68 @@ long unifi_commands(const struct unifi_sw *sw, const struct unifi_sw *before, co
 		} else if (before && before->port[p].speed) {
 			APP("port %u auto\n", m->front[p]);
 		}
+	}
+
+	/* STP: what's given, when it changed */
+#define CHANGED(f) (sw->f >= 0 && (!before || before->f != sw->f))
+	if (CHANGED(stp.rstp))
+		APP("stp version %s\n", sw->stp.rstp ? "rstp" : "stp");
+	if (CHANGED(stp.prio))
+		APP("stp prio %ld\n", (long)(sw->stp.prio / 4096));
+	if (CHANGED(stp.on))
+		APP("stp %s\n", sw->stp.on ? "on" : "off");
+	for (int p = 1; p <= m->ports; p++) {
+		if (!m->front[p])
+			continue;
+		if (CHANGED(port[p].stp))
+			APP("stp port %u %s\n", m->front[p], sw->port[p].stp ? "on" : "off");
+		if (CHANGED(port[p].edge))
+			APP("stp port %u edge %s\n", m->front[p], sw->port[p].edge == 2 ? "auto" : sw->port[p].edge ? "on" : "off");
+		if (CHANGED(port[p].guard))
+			APP("stp port %u guard %s\n", m->front[p], sw->port[p].guard ? "bpdu" : "none");
+	}
+#undef CHANGED
+
+	/* Isolation: an isolated port forwards to the ports that aren't, and the CPU (0) */
+	bool iso_changed = false, any_iso = false;
+	for (int p = 1; p <= m->ports; p++) {
+		any_iso |= m->front[p] && sw->port[p].isolated;
+		iso_changed |= m->front[p] && (before ? before->port[p].isolated != sw->port[p].isolated : sw->port[p].isolated);
+	}
+	if (iso_changed)
+		for (int p = 1; p <= m->ports; p++) {
+			if (!m->front[p])
+				continue;
+			if (!sw->port[p].isolated) {
+				if (any_iso || before)
+					APP("isolate %u off\n", m->front[p]);
+				continue;
+			}
+			APP("isolate %u", m->front[p]);
+			for (int q = 1; q <= m->ports; q++)
+				if (m->front[q] && q != p && !sw->port[q].isolated)
+					APP(" %u", m->front[q]);
+			APP(" 0\n");
+		}
+
+	/* Storm control and egress limits: set, changed, or no longer there */
+	static const char *const storm[3] = { "bcast", "mcast", "ucast" };
+	for (int p = 1; p <= m->ports; p++) {
+		if (!m->front[p])
+			continue;
+		for (int t = 0; t < 3; t++) {
+			uint32_t now = sw->port[p].storm[t], was = before ? before->port[p].storm[t] : 0;
+
+			if (now && now != was)
+				APP("storm %u %s %lu pps\n", m->front[p], storm[t], (unsigned long)now);
+			else if (!now && was)
+				APP("storm %u %s off\n", m->front[p], storm[t]);
+		}
+		uint32_t now = sw->port[p].egress_kbps, was = before ? before->port[p].egress_kbps : 0;
+		if (now && now != was)
+			APP("bw out %u %08lx\n", m->front[p], (unsigned long)now);
+		else if (!now && was)
+			APP("bw out %u off\n", m->front[p]);
 	}
 	return n;
 }

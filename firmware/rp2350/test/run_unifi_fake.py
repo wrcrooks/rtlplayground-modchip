@@ -244,12 +244,13 @@ def main():
         check(k == A and j and j.get("cfgversion") == "v1", "informs with the key given, as v1")
 
         # what's behind each port: the MAC table (read with "l2"), LLDP neighbours
+        cm = "aa:" + mac[9:]	# the harness's clients
         pt = {p["port_idx"]: p for p in (j or {}).get("port_table", [])}
         mt = {i: [(m["mac"], m["vlan"], m["static"]) for m in pt.get(i, {}).get("mac_table", [])] for i in pt}
-        check(mt.get(1) == [("aa:bb:cc:00:00:01", 1, False), ("aa:bb:cc:00:00:02", 10, True)]
-              and mt.get(4) == [("aa:bb:cc:00:00:04", 1, False)] and mt.get(10) == [("aa:bb:cc:00:00:06", 20, False)]
+        check(mt.get(1) == [(cm + ":00:01", 1, False), (cm + ":00:02", 10, True)]
+              and mt.get(4) == [(cm + ":00:04", 1, False)] and mt.get(10) == [(cm + ":00:06", 20, False)]
               and not mt.get(2) and not mt.get(9), "the MAC table by UniFi port (SFP+ front port 6 is 10): %s" % mt)
-        check(not any(mac in str(mt) for mac in (mac, "aa:bb:cc:00:00:05")), "not the switch's own, nor a LAG's")
+        check(not any(m in str(mt) for m in (mac, cm + ":00:05")), "not the switch's own, nor a LAG's")
         sw.send("lldp 2 " + lldpdu(bytes.fromhex("0a0b0c0d0e0f"), b"ge-0/0/7", 120, b"core-sw", bytes([10, 0, 0, 2])))
         c.drain()
         j, k = c.inform(10)
@@ -292,11 +293,12 @@ def main():
         got = sw.until(lambda l: "without a version" in l, 15)
         check(got is not None and not any(l.startswith("RUN ") for l in got), "a configuration without a version is not applied")
 
-        # a damaged saved configuration is not used (struct saved: magic, cfgversion[24], then nvlans)
+        # a damaged saved configuration is not used (struct saved: magic, cfgversion[24], then
+        # struct unifi_sw: stp {int8 on, int8 rstp, int32 prio} = 8 bytes, then nvlans at 36)
         sw.stop()
         with open(store + ".2", "r+b") as f:
-            check(f.read(4) == b"UNC1", "the configuration was saved")
-            f.seek(28)
+            check(f.read(4) == b"UNC2", "the configuration was saved")
+            f.seek(36)
             f.write(bytes([200]))
         sw = Switch(exe, c.port, mac, store)
         got = sw._gather(3)

@@ -185,7 +185,7 @@ fuzz-unifi: $(BUILD)/fuzz_unifi
 # unifi.c against a UniFi Network controller in Docker: make unifi-controller
 $(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
 	@mkdir -p $(BUILD)
-	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DWATCH_S=20 -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include \
+	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DWATCH_S=20 -DUNIFI_TRACE -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include \
 		-I$(LWIP)/src/apps/altcp_tls $(MBED_INC) -o $@ test_unifi_net.c \
 		../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
 

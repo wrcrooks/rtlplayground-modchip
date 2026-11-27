@@ -149,9 +149,12 @@ def main():
         lt = (d or {}).get("lldp_table", [])
         check(lt and lt[0].get("local_port_idx") == 2 and lt[0].get("chassis_id") == "0a:0b:0c:0d:0e:0f"
               and lt[0].get("port_id") == "ge-0/0/7", "the controller has the LLDP neighbour: %s" % lt)
-        sta = {x["mac"]: x.get("sw_port") for x in c.call("/api/s/default/stat/sta").get("data", [])
-               if x.get("mac", "").startswith("aa:bb:cc") and x.get("sw_mac") == mac}
-        check(sta == {"aa:bb:cc:00:00:01": 1, "aa:bb:cc:00:00:02": 1, "aa:bb:cc:00:00:04": 4, "aa:bb:cc:00:00:06": 10},
+        cm = "aa:" + mac[9:]	# the harness's clients, new for each switch
+        want_sta = {cm + ":00:01": 1, cm + ":00:02": 1, cm + ":00:04": 4, cm + ":00:06": 10}
+        clients = lambda: {x["mac"]: x.get("sw_port") for x in c.call("/api/s/default/stat/sta").get("data", [])
+                           if x.get("mac", "").startswith(cm) and x.get("sw_mac") == mac}
+        sta = wait(lambda: (lambda s: s if s == want_sta else None)(clients()), 40) or clients()
+        check(sta == want_sta,
               "the MAC table's addresses are wired clients on their ports: %s" % sta)
 
         (v10, made10), (v20, made20) = c.net("UT10", 10), c.net("UT20", 20)
@@ -169,6 +172,13 @@ def main():
         r = runs(got)
         check("pvid 2 10" in r and "port 2 name Camera" in r and "port 4 100m full" in r, "port settings: %s" % r)
         check(any(x.split()[:2] == ["vlan", "1"] and "2" not in x.split()[2:] for x in r), "port 2 left out of VLAN 1")
+        # isolation, storm control, an egress limit (the switch claims them in switch_caps)
+        c.call("/api/s/default/rest/device/" + d["_id"], {"port_overrides": c.dev(mac)["port_overrides"] + [
+            {"port_idx": 1, "isolation": True, "stormctrl_bcast_enabled": True, "stormctrl_bcast_rate": 100},
+            {"port_idx": 3, "isolation": True, "egress_rate_limit_kbps_enabled": True, "egress_rate_limit_kbps": 5000}]}, "PUT")
+        r = runs(sw.until(lambda l: "applied" in l, 60))
+        check("isolate 1 2 4 5 6 0" in r and "isolate 3 2 4 5 6 0" in r and "storm 1 bcast 100 pps" in r
+              and "bw out 3 00001388" in r, "isolation, storm control, egress limit: %s" % [x for x in r if x.split()[0] in ("isolate", "storm", "bw")])
 
         c.call("/api/s/default/cmd/devmgr", {"cmd": "set-locate", "mac": mac})
         check(sw.until(lambda l: l == "LED 1", 40) is not None, "locate flashes the system LED")
@@ -193,7 +203,9 @@ def main():
             print(json.dumps({k: c.dev(mac).get(k) for k in ("state", "cfgversion", "adopted", "x_aes_gcm")}))
 
         # cut off after a change: back to the saved configuration, and that one is refused
-        ov = c.dev(mac)["port_overrides"] + [{"port_idx": 3, "name": "Printer"}]
+        ov = [dict(o, name="Printer") if o["port_idx"] == 3 else o for o in c.dev(mac)["port_overrides"]]
+        if not any(o["port_idx"] == 3 for o in ov):
+            ov.append({"port_idx": 3, "name": "Printer"})
         c.call("/api/s/default/rest/device/" + d["_id"], {"port_overrides": ov}, "PUT")
         got = sw.until(lambda l: "applied" in l, 60)
         bad = [l for l in got or [] if "applied" in l][0].split()[3] if got else "?"

@@ -554,9 +554,12 @@ has both as microcontroller-based switches.
   the URL it is adopted through is kept, and a controller's `set-adopt` URL replaces it.
 
 - **What the controller sets.** VLANs (tagged, untagged or excluded per port), port VLAN IDs, port
-  names and fixed speeds. The controller sends its whole configuration as `system_cfg` lines; the
-  switch turns them into its own commands (`vlan`, `pvid`, `port`), names and speeds only when they
-  change.
+  names and fixed speeds; STP (on or off, RSTP or STP, bridge priority, and per port: in STP or not,
+  edge, BPDU guard); port isolation; storm control (broadcast, multicast and unknown unicast, in
+  packets/s); and egress rate limits. The controller sends its whole configuration as `system_cfg`
+  lines; the switch turns them into its own commands (`vlan`, `pvid`, `port`, `stp`, `isolate`,
+  `storm`, `bw out`), each setting only when it changes. Note that UniFi has STP (RSTP) on by
+  default, so adoption turns it on unless the site's settings say otherwise.
 - **What it sees.** Link, speed and counters per port, memory, uptime; the addresses learned on each
   port (the `l2` table, read at most once a minute), which the controller lists as wired clients on
   their ports; and the LLDP neighbour on each port, heard while `lldp on` (`neighbors` lists them too).
@@ -569,9 +572,9 @@ has both as microcontroller-based switches.
   the switch restarts with the configuration of before and refuses that configuration version
   afterwards. `unifi` shows which.
 - **Firmware upgrades** from the controller are refused and logged; the switch stays adopted.
-- **Not taken yet:** STP, storm control, isolation, port security, egress limits, LAG, mirroring,
-  802.1X and the management VLAN. The controller doesn't send them, since the switch claims none of
-  those features. No SSH for the controller, and no L2 discovery: that only lists a device in the
+- **Not taken yet:** port security, LAG, mirroring, IGMP snooping, 802.1X, jumbo frames and the
+  management VLAN. The controller doesn't send them, since the switch doesn't claim those features
+  (`switch_caps`); for USW Flex 2.5G models it refuses mirroring and LAG anyway. No SSH for the controller, and no L2 discovery: that only lists a device in the
   controller's scan, which then adopts it over SSH; one that informs is listed anyway.
 
 Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.

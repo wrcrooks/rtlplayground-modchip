@@ -39,6 +39,11 @@
 /* Where a UniFi device informs when nothing else says: a name the network's DNS may have */
 #define DEFAULT_URL	"http://unifi:8080/inform"
 #define HOST_MAX	48		/* dns.c's DNS_NAME_LEN */
+/* What the controller may set (UNIFI_SWITCH_CAP_*): the keys it sends depend on them */
+#ifndef FEATURE_CAPS
+#define FEATURE_CAPS	(4 | 8 | 32 | 64)	/* port isolation, storm control, egress rate limit, STP */
+#endif
+#define STP_CAPS	(1 | 2 | 8)		/* BPDU guard, auto edge, port cost */
 
 #define LED_FAST	1		/* main.c's SYS_LED_* */
 #define LED_ON		3
@@ -119,7 +124,7 @@ static void save(void)
 	if (!v)
 		return;
 	if (applied) {
-		memcpy(v->magic, "UNC1", 4);
+		memcpy(v->magic, "UNC2", 4);	/* 2: with STP, isolation, storm and egress */
 		snprintf(v->cfgversion, sizeof(v->cfgversion), "%s", cfgversion);
 		v->sw = *applied;
 	}
@@ -252,9 +257,11 @@ static size_t inform_json(char *b, size_t max)
 	const char *from;
 	k = app_json_str(b, max, k, url_now(&from));
 	k = app(b, max, k, ",\"uptime\":%lu,\"cfgversion\":\"%s\",\"default\":%s,\"_default_key\":%s,\"state\":%d,"
-		"\"fw_caps\":0,\"isolated\":false,\"locating\":%s,\"selfrun_beacon\":false",
+		"\"fw_caps\":0,\"isolated\":false,\"locating\":%s,\"selfrun_beacon\":false,"
+		"\"switch_caps\":{\"feature_caps\":%lu,\"vlan_caps\":7,\"stp_caps\":%u,\"storm_control_caps\":0}",
 		(unsigned long)plat_uptime_s(), cfgversion[0] || !store.unifi_adopted ? cfgversion : NONE, store.unifi_adopted ? "false" : "true",
-		store.unifi_adopted ? "false" : "true", store.unifi_adopted ? 4 : 1, locating ? "true" : "false");
+		store.unifi_adopted ? "false" : "true", store.unifi_adopted ? 4 : 1, locating ? "true" : "false",
+		(unsigned long)FEATURE_CAPS, STP_CAPS);
 	if (!store.unifi_adopted)
 		return app(b, max, k, "}");
 	k = app(b, max, k, ",\"sys_stats\":{\"cpu\":\"0\",\"mem_total\":%u,\"mem_used\":%u,\"mem_buffer\":0}",
@@ -341,6 +348,12 @@ static void apply(const char *system_cfg, const char *version)
 		free(sw);
 		return;
 	}
+#ifdef UNIFI_TRACE
+	for (const char *l = system_cfg, *e; *l; l = e ? e + 1 : l + strlen(l)) {
+		e = strchr(l, '\n');
+		printf("CFG %.*s\n", e ? (int)(e - l) : (int)strlen(l), l);
+	}
+#endif
 	if (!unifi_parse(system_cfg, sw)) {
 		event(EV_CONFIG, 0, 0, "UniFi: configuration not understood");
 		free(sw);
@@ -780,6 +793,8 @@ static bool saved_ok(const struct saved *v)
 
 	if (!memchr(v->cfgversion, 0, sizeof(v->cfgversion)) || !v->cfgversion[0] || sw->nvlans > UNIFI_VLANS)
 		return false;
+	if (sw->stp.on < -1 || sw->stp.on > 1 || sw->stp.rstp < -1 || sw->stp.rstp > 1 || sw->stp.prio < -1 || sw->stp.prio > 61440)
+		return false;
 	for (int i = 0; i < sw->nvlans; i++) {
 		if (sw->vlan[i].mode > UNIFI_EXCLUDE)
 			return false;
@@ -788,7 +803,9 @@ static bool saved_ok(const struct saved *v)
 				return false;
 	}
 	for (int p = 0; p <= UNIFI_PORTS; p++)
-		if (!memchr(sw->port[p].name, 0, sizeof(sw->port[p].name)) || sw->port[p].pvid > 4094)
+		if (!memchr(sw->port[p].name, 0, sizeof(sw->port[p].name)) || sw->port[p].pvid > 4094
+		    || sw->port[p].stp < -1 || sw->port[p].stp > 1 || sw->port[p].edge < -1 || sw->port[p].edge > 2
+		    || sw->port[p].guard < -1 || sw->port[p].guard > 1)
 			return false;
 	return true;
 }
@@ -800,7 +817,7 @@ void unifi_boot(void)
 	if (!v)
 		return;
 	plat_sector_read(SECTOR_UNIFI, (uint8_t *)v, sizeof(*v));
-	if (store.unifi_adopted && !memcmp(v->magic, "UNC1", 4)) {
+	if (store.unifi_adopted && !memcmp(v->magic, "UNC2", 4)) {
 		if (!saved_ok(v))
 			event(EV_CONFIG, 0, 0, "UniFi: the saved configuration is damaged, not used");
 		else if ((applied = malloc(sizeof(*applied)))) {

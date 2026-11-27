@@ -46,8 +46,14 @@ void unifi_model_pick(uint8_t copper, uint8_t sfp, struct unifi_model *m);
 
 enum { UNIFI_DEFAULT, UNIFI_UNTAGGED, UNIFI_TAGGED, UNIFI_EXCLUDE };
 
-/* What of system_cfg is applied */
+enum { UNIFI_STORM_B, UNIFI_STORM_M, UNIFI_STORM_U };
+
+/* What of system_cfg is applied; -1: not given */
 struct unifi_sw {
+	struct {
+		int8_t on, rstp;
+		int32_t prio;				/* 0..61440 */
+	} stp;
 	uint8_t nvlans;
 	struct {
 		uint16_t id;
@@ -59,6 +65,12 @@ struct unifi_sw {
 		uint16_t speed;				/* Mbit/s when autoneg is off, 0: autoneg */
 		bool full;
 		char name[24];
+		int8_t stp;				/* the port in STP: 0, 1 */
+		int8_t edge;				/* 0 off, 1 on, 2 auto */
+		int8_t guard;				/* BPDU guard: 0, 1 */
+		bool isolated;				/* not to other isolated ports */
+		uint32_t storm[3];			/* UNIFI_STORM_*, packets/s; 0: no limit */
+		uint32_t egress_kbps;			/* 0: no limit */
 	} port[UNIFI_PORTS + 1];
 };
 
