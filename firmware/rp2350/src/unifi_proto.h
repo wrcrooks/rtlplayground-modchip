@@ -20,6 +20,8 @@
 #define UNIFI_DEFAULT_KEY	"ba86f2bbe107c7c57eb5f2690775c712"	/* MD5("ubnt") */
 #define UNIFI_PORTS		10	/* the most a model below has */
 #define UNIFI_VLANS		32
+#define UNIFI_EL_SPEEDS		6	/* as portled.h's */
+#define UNIFI_EL_COLOURS	16
 
 /* Where json may already be in out, so that it is sealed with no copy (len < 65536) */
 #define UNIFI_SEAL_AT		(UNIFI_HDR + 7)
@@ -77,6 +79,19 @@ struct unifi_sw {
 		uint32_t storm[3];			/* UNIFI_STORM_*, packets/s; 0: no limit */
 		uint32_t egress_kbps;			/* 0: no limit */
 	} port[UNIFI_PORTS + 1];
+	/* Etherlighting, for the port LED board; only sent while the switch claims it */
+	struct {
+		int8_t mode;				/* -1 not given, 0 by network (VLAN), 1 by speed */
+		int8_t brightness;			/* -1, 0..100 */
+		int8_t breathe;				/* -1, 0, 1 */
+		uint8_t speed_set;			/* bit i: speed[i] given (10M, FE, GbE, 2.5GbE, 5GbE, 10GbE) */
+		uint8_t speed[UNIFI_EL_SPEEDS][3];
+		uint8_t ncolours;
+		struct {
+			uint16_t vid;
+			uint8_t rgb[3];
+		} colour[UNIFI_EL_COLOURS];		/* networks' colours, by VLAN */
+	} el;
 };
 
 /* system_cfg's switch lines into sw; false: none, or more VLANs than UNIFI_VLANS */

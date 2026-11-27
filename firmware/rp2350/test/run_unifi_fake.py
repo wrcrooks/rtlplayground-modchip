@@ -307,7 +307,7 @@ def main():
         # struct unifi_sw: stp {int8 on, int8 rstp, int32 prio} = 8 bytes, then nvlans at 36)
         sw.stop()
         with open(store + ".2", "r+b") as f:
-            check(f.read(4) == b"UNC2", "the configuration was saved")
+            check(f.read(4) == b"UNC3", "the configuration was saved")
             f.seek(36)
             f.write(bytes([200]))
         sw = Switch(exe, c.port, mac, store)

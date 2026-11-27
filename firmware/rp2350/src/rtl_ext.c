@@ -38,6 +38,8 @@
 #include "rtl_ext.h"
 #include "safety.h"
 #include "lldp_nbr.h"
+#include "portled.h"
+#include "portled_ctl.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -495,6 +497,84 @@ static bool parse_neighbors(void)
 
 
 /*
+ *   portled                             status: the port LED board
+ *   portled on|off
+ *   portled pin <gpio>|none             the data line
+ *   portled mode vlan|speed             each LED in its port's VLAN's colour, or its link speed's
+ *   portled brightness <1-100>          %
+ *   portled budget <20-2000>            mA, the most they draw together
+ *   portled colour <vid> <rrggbb>|auto  a VLAN's own colour, or back to one from its ID
+ *   portled speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto   a link speed's colour, or back to the default
+ *   portled breathe on|off              brightness rising and falling
+ *   portled locate <port> [<s>]|off     flash a port's LED white, 60 s at first
+ */
+static bool parse_portled(void)
+{
+	char st[900], w[12];
+	unsigned v = 0, p = 0;
+	bool ok = true;
+
+	if (cmd_words_len == 1) {
+		portled_status(st, sizeof(st));
+		print_string_x(st);
+	} else if (cmd_words_len == 2 && (cmd_compare(1, "on") || cmd_compare(1, "off"))) {
+		portled_enable(cmd_compare(1, "on"));
+	} else if (cmd_words_len == 3 && cmd_compare(1, "pin")) {
+		ok = cmd_compare(2, "none") ? portled_set_pin(0xff) : ext_word_num(2, 0, 47, &v) && portled_set_pin(v);
+		if (!ok) {
+			ext_error("that GPIO isn't free on this board\n");
+			return true;
+		}
+	} else if (cmd_words_len == 3 && cmd_compare(1, "mode") && (cmd_compare(2, "vlan") || cmd_compare(2, "speed"))) {
+		portled_set_mode(cmd_compare(2, "speed") ? PORTLED_SPEED : PORTLED_VLAN);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "brightness")) {
+		ok = ext_word_num(2, 1, 100, &v) && portled_set_brightness(v);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "budget")) {
+		ok = ext_word_num(2, 20, 2000, &v) && portled_set_budget(v);
+	} else if (cmd_words_len == 3 && cmd_compare(1, "breathe") && (cmd_compare(2, "on") || cmd_compare(2, "off"))) {
+		portled_set_breathe(cmd_compare(2, "on"));
+	} else if (cmd_words_len == 4 && (cmd_compare(1, "colour") || cmd_compare(1, "color") || cmd_compare(1, "speed"))) {
+		uint8_t rgb[3];
+		unsigned x = 0;
+		int n = 0, speed = -1;
+		bool vlan = !cmd_compare(1, "speed");
+
+		if (vlan)
+			ok = ext_word_num(2, 1, 4094, &v);
+		else
+			ok = ext_word(2, w, sizeof(w)) && (speed = portled_speed_word(w)) >= 0;
+		if (ok && cmd_compare(3, "auto")) {
+			ok = vlan ? portled_set_vlan_colour(v, NULL) : portled_set_speed_colour(speed, NULL);
+		} else if (ok) {
+			ok = ext_word(3, w, sizeof(w)) && strlen(w) == 6 && sscanf(w, "%6x%n", &x, &n) == 1 && n == 6;
+			rgb[0] = x >> 16, rgb[1] = x >> 8, rgb[2] = x;
+			if (ok && !vlan)
+				portled_set_speed_colour(speed, rgb);
+			else if (ok && !portled_set_vlan_colour(v, rgb)) {
+				ext_error("16 VLANs have colours already: drop one with auto\n");
+				return true;
+			}
+		}
+	} else if ((cmd_words_len == 3 || cmd_words_len == 4) && cmd_compare(1, "locate") && ext_word_num(2, 1, PORTLED_MAX, &p)) {
+		if (cmd_words_len == 4 && cmd_compare(3, "off"))
+			v = 0;
+		else if (cmd_words_len == 3)
+			v = 60;
+		else
+			ok = ext_word_num(3, 1, 3600, &v);
+		if (ok)
+			portled_locate_port(p, v);
+	} else {
+		ok = false;
+	}
+	if (!ok)
+		ext_error("portled [on|off|pin <gpio>|none|mode vlan|speed|brightness <1-100>|budget <20-2000>|breathe on|off|\n"
+			  "  colour <vid> <rrggbb>|auto|speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto|locate <port> [<s>|off]]\n");
+	return true;
+}
+
+
+/*
  *   unifi                               status
  *   unifi on|off
  *   unifi inform <url>|auto             http://<a.b.c.d or name>[:<port>]/inform; auto: DHCP's, else http://unifi:8080/inform
@@ -849,6 +929,8 @@ bool rtl_cmd_ext(void)
 		return parse_ssh();
 	if (cmd_compare(0, "unifi"))
 		return parse_unifi();
+	if (cmd_compare(0, "portled"))
+		return parse_portled();
 	if (cmd_compare(0, "neighbors") && cmd_words_len == 1)
 		return parse_neighbors();
 	if (cmd_compare(0, "prometheus"))
@@ -901,6 +983,13 @@ uint8_t rtl_port_count(void)
 	return machine.max_port - machine.min_port + 1;
 }
 
+
+uint16_t rtl_port_pvid(uint8_t phys)
+{
+	if (phys < 1 || phys > rtl_port_count())
+		return 0;
+	return port_pvid_get(machine.phys_to_log_port[phys - 1]);
+}
 
 /* One port; the SNMP agent and the dashboard read them all with rtl_ports_read() */
 bool rtl_port_read(uint8_t phys, struct rtl_port *p)

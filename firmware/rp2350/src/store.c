@@ -22,6 +22,10 @@ void store_load(void)
 		memset(store.unifi_magic, 0, sizeof(store) - offsetof(struct store, unifi_magic));
 		memcpy(store.unifi_magic, "UNF1", 4);
 	}
+	if (memcmp(store.portled_magic, "PLD1", 4)) {
+		portled_defaults(&store.portled);
+		memcpy(store.portled_magic, "PLD1", 4);
+	}
 	store.unifi_url[sizeof(store.unifi_url) - 1] = 0;
 	store.unifi_bad[sizeof(store.unifi_bad) - 1] = 0;
 }

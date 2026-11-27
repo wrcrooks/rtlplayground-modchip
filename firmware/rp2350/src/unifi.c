@@ -16,6 +16,7 @@
 #include "events.h"
 #include "lldp_nbr.h"
 #include "plat.h"
+#include "portled_ctl.h"
 #include "rng.h"
 #include "store.h"
 #include "unifi.h"
@@ -45,6 +46,13 @@
 #define FEATURE_CAPS	(4 | 8 | 32 | 64)	/* port isolation, storm control, egress rate limit, STP */
 #endif
 #define STP_CAPS	(1 | 2 | 8)		/* BPDU guard, auto edge, port cost */
+#define ETHERLIGHTING	4194304			/* etherlight_caps: speed mode 1, network mode 2, port locate 4 */
+
+/* Etherlighting too, once the port LED board has a data pin */
+static unsigned long feature_caps(void)
+{
+	return FEATURE_CAPS | (store.portled.pin != 0xff ? ETHERLIGHTING : 0);
+}
 
 #define LED_FAST	1		/* main.c's SYS_LED_* */
 #define LED_ON		3
@@ -125,7 +133,7 @@ static void save(void)
 	if (!v)
 		return;
 	if (applied) {
-		memcpy(v->magic, "UNC2", 4);	/* 2: with STP, isolation, storm and egress */
+		memcpy(v->magic, "UNC3", 4);	/* 2: with STP, isolation, storm and egress; 3: Etherlighting */
 		snprintf(v->cfgversion, sizeof(v->cfgversion), "%s", cfgversion);
 		v->sw = *applied;
 	}
@@ -184,6 +192,11 @@ static void forget(const char *why)
 	use_key();
 	cfgversion[0] = 0;
 	watch = 0;		/* nothing of the controller's left to check */
+	if (locating) {		/* nor its locate */
+		locating = false;
+		plat_sys_led(LED_ON);
+		portled_unifi_locate(false);
+	}
 	event(EV_CONFIG, 0, 0, "UniFi: %s, back to the default key", why);
 }
 
@@ -259,10 +272,10 @@ static size_t inform_json(char *b, size_t max)
 	k = app_json_str(b, max, k, url_now(&from));
 	k = app(b, max, k, ",\"uptime\":%lu,\"cfgversion\":\"%s\",\"default\":%s,\"_default_key\":%s,\"state\":%d,"
 		"\"fw_caps\":0,\"isolated\":false,\"locating\":%s,\"selfrun_beacon\":false,"
-		"\"switch_caps\":{\"feature_caps\":%lu,\"vlan_caps\":7,\"stp_caps\":%u,\"storm_control_caps\":0}",
+		"\"switch_caps\":{\"feature_caps\":%lu,\"vlan_caps\":7,\"stp_caps\":%u,\"storm_control_caps\":0%s}",
 		(unsigned long)plat_uptime_s(), cfgversion[0] || !store.unifi_adopted ? cfgversion : NONE, store.unifi_adopted ? "false" : "true",
 		store.unifi_adopted ? "false" : "true", store.unifi_adopted ? 4 : 1, locating ? "true" : "false",
-		(unsigned long)FEATURE_CAPS, STP_CAPS);
+		(unsigned long)feature_caps(), STP_CAPS, feature_caps() & ETHERLIGHTING ? ",\"etherlight_caps\":3" : "");
 	if (!store.unifi_adopted)
 		return app(b, max, k, "}");
 	k = app(b, max, k, ",\"sys_stats\":{\"cpu\":\"0\",\"mem_total\":%u,\"mem_used\":%u,\"mem_buffer\":0}",
@@ -442,6 +455,7 @@ static void handle(char *j)
 		} else if (!strcmp(cmd, "set-locate") || !strcmp(cmd, "unset-locate")) {
 			locating = cmd[0] == 's';
 			plat_sys_led(locating ? LED_FAST : LED_ON);
+			portled_unifi_locate(locating);
 		}
 	} else if (!strcmp(type, "upgrade")) {
 		if (!upgrade_told)
@@ -795,6 +809,12 @@ static bool saved_ok(const struct saved *v)
 		return false;
 	if (sw->stp.on < -1 || sw->stp.on > 1 || sw->stp.rstp < -1 || sw->stp.rstp > 1 || sw->stp.prio < -1 || sw->stp.prio > 61440)
 		return false;
+	if (sw->el.mode < -1 || sw->el.mode > 1 || sw->el.brightness < -1 || sw->el.brightness > 100 || sw->el.breathe < -1
+	    || sw->el.breathe > 1 || sw->el.ncolours > UNIFI_EL_COLOURS)
+		return false;
+	for (int i = 0; i < sw->el.ncolours; i++)
+		if (sw->el.colour[i].vid < 1 || sw->el.colour[i].vid > 4094)
+			return false;
 	for (int i = 0; i < sw->nvlans; i++) {
 		if (sw->vlan[i].mode > UNIFI_EXCLUDE)
 			return false;
@@ -817,7 +837,7 @@ void unifi_boot(void)
 	if (!v)
 		return;
 	plat_sector_read(SECTOR_UNIFI, (uint8_t *)v, sizeof(*v));
-	if (store.unifi_adopted && !memcmp(v->magic, "UNC2", 4)) {
+	if (store.unifi_adopted && !memcmp(v->magic, "UNC3", 4)) {
 		if (!saved_ok(v))
 			event(EV_CONFIG, 0, 0, "UniFi: the saved configuration is damaged, not used");
 		else if ((applied = malloc(sizeof(*applied)))) {
@@ -856,6 +876,7 @@ void unifi_enable(bool enable)
 		if (locating) {
 			locating = false;
 			plat_sys_led(LED_ON);
+			portled_unifi_locate(false);
 		}
 	}
 }

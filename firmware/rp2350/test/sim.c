@@ -23,6 +23,8 @@ extern uint8_t stp_pflags[];
 extern uint8_t cmd_buffer[];
 #define cmd_buffer_test cmd_buffer
 #include "plat.h"
+#include "portled_ctl.h"
+#include "store.h"
 #include "rtl837x_acl.h"
 
 struct bridge_hello bridge_hello;
@@ -407,6 +409,12 @@ void unifi_enable(bool on) { sprintf(mqtt_last, "unifi %d", on); }
 bool unifi_inform(const char *u) { sprintf(mqtt_last, "inform %s", u); return !strncmp(u, "http://", 7); }
 void unifi_forget(void) { strcpy(mqtt_last, "forget"); }
 size_t unifi_status(char *buf, size_t max) { return snprintf(buf, max, "UniFi\n"); }
+/* the port LEDs' data line: GPIO 0 and 1 are taken, the last frame kept */
+static uint8_t led_pin = 0xff, led_frame[30], led_n;
+static int led_sends;
+bool portled_hw_pin_ok(uint8_t pin) { return pin > 1 && pin < 30; }
+bool portled_hw_pin(uint8_t pin) { led_pin = pin; return true; }
+void portled_hw_send(const uint8_t *grb, uint8_t n) { memcpy(led_frame, grb, 3 * n); led_n = n; led_sends++; }
 bool plat_ip6_enable(bool on) { sprintf(ip6_last, "on %d", on); rtl_ip6(on); return true; }
 bool plat_ip6_addr(const char *a) { sprintf(ip6_last, "addr %s", a ? a : "-"); return true; }
 bool plat_ip6_gw(const char *a) { sprintf(ip6_last, "gw %s", a ? a : "-"); return true; }
@@ -498,6 +506,7 @@ int main(void)
 {
 	alarm(20);	/* a module stuck polling a register would hang here */
 	memset(config, 0xff, sizeof(config));
+	store_load();		/* as main.c: a blank sector, so the defaults */
 	regs[0x0000] = 0x83720000;	/* RTL837X_REG_CHIP_ID */
 
 	bridge_hello.version = 1;
@@ -626,6 +635,62 @@ int main(void)
 		check(strstr((char *)outbuf, want) != NULL, "and the tagged one: %s", want);
 		if (!strstr((char *)outbuf, want))
 			printf("%s\n", (char *)outbuf);
+	}
+	/* the port LED board's commands */
+	{
+		const char *out = (const char *)outbuf;
+
+		cmd("portled");
+		outbuf[slen] = 0;
+		check(strstr(out, "Port LEDs off, no data pin set") && strstr(out, "by VLAN, brightness 30 %, at most 300 mA"),
+		      "portled: off at first");
+		cmd("portled pin 1");
+		outbuf[slen] = 0;
+		check(strstr(out, "isn't free") && store.portled.pin == 0xff, "portled pin: not one the board uses");
+		cmd("portled pin 8");
+		cmd("portled on");
+		cmd("portled colour 10 ff8000");
+		cmd("portled brightness 50");
+		cmd("portled");
+		outbuf[slen] = 0;
+		check(strstr(out, "Port LEDs on, data on GPIO 8") && strstr(out, "VLAN 10: ff8000") && strstr(out, "brightness 50 %")
+		      && led_pin == 8, "portled: on, GPIO 8, a VLAN's colour, half bright");
+		for (const char *bad[] = { "portled colour 10 ff80", "portled colour 0 ff8000", "portled brightness 0", "portled budget 5",
+					   "portled mode disco", "portled locate 11", "portled pin 99", NULL }, **b = bad; *b; b++) {
+			cmd(*b);
+			outbuf[slen] = 0;
+			check(strstr(out, "rror") || strstr(out, "portled ["), "%s: refused", *b);
+		}
+		/* locate port 1: white, at half */
+		cmd("portled locate 1 5");
+		portled_second();
+		led_sends = 0;
+		uptime += 2;
+		portled_poll();
+		check(led_sends == 1 && led_n == rtl_port_count() && led_frame[0] == 127 && led_frame[1] == 127 && led_frame[2] == 127,
+		      "portled locate: port 1 white at half, %d LEDs: %u %u %u", led_n, led_frame[0], led_frame[1], led_frame[2]);
+		cmd("portled");
+		outbuf[slen] = 0;
+		check(strstr(out, "locating port 1, 3 s left") != NULL, "and the status says so");
+		cmd("portled locate 1 off");
+		uptime += 2;
+		portled_poll();
+		check(led_frame[0] != 127, "portled locate off");
+		cmd("portled off");
+		check(led_pin == 0xff && store.portled.on == 0 && store.portled.pin == 8, "portled off: the line let go, the pin kept");
+		cmd("portled colour 10 auto");
+		check(store.portled.colour[0].vid == 0, "portled colour auto: VLAN 10's own colour dropped");
+		cmd("portled speed 2g5 0515ff");
+		cmd("portled breathe on");
+		cmd("portled");
+		outbuf[slen] = 0;
+		check(strstr(out, "2g5: 0515ff") && strstr(out, "breathing") && (store.portled.speed_set & 8), "portled speed, breathe");
+		cmd("portled speed 2.5g 0515ff");
+		outbuf[slen] = 0;
+		check(strstr(out, "portled [") != NULL, "portled speed: only its words");
+		cmd("portled speed 2g5 auto");
+		cmd("portled breathe off");
+		check(!store.portled.speed_set && !store.portled.breathe, "and back");
 	}
 	cmd("stp on");
 	n_tx = 0;

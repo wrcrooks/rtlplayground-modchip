@@ -1,0 +1,20 @@
+; WS2812B data, 800 kHz: each bit is a 10-cycle period, high for 3 cycles
+; (a 0) or 7 (a 1). As pico-examples' ws2812.pio (BSD-3-Clause, Raspberry Pi).
+; 24 bits per LED from the top of each word, green first.
+
+.program ws2812
+.side_set 1
+
+.define public T1 3
+.define public T2 4
+.define public T3 3
+
+.wrap_target
+bitloop:
+    out x, 1        side 0 [T3 - 1]	; low for the end of the last bit
+    jmp !x do_zero  side 1 [T1 - 1]	; high for every bit
+do_one:
+    jmp bitloop     side 1 [T2 - 1]	; a 1 stays high
+do_zero:
+    nop             side 0 [T2 - 1]	; a 0 goes low
+.wrap

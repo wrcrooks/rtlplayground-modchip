@@ -175,6 +175,7 @@ struct rtl_port {
 };
 uint8_t rtl_port_count(void);
 bool rtl_port_read(uint8_t phys, struct rtl_port *p);	/* phys from 1 */
+uint16_t rtl_port_pvid(uint8_t phys);			/* its port VLAN ID */
 
 /* ---- for the dashboard and the SNMP agent (rtl_metrics.c) ---- */
 

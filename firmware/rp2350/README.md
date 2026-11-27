@@ -82,6 +82,7 @@ Around them:
 | `src/telemetry.c`, `src/tls_client.c` | MQTT, and TLS as a client: servers are known by their certificate's fingerprint |
 | `src/unifi.c`, `src/unifi_proto.c`, `src/inflate.c` | UniFi: the inform client; packets, the controller's JSON and its configuration as commands; zlib |
 | `src/lldp_nbr.c` | LLDP neighbours by port, from the frames trapped while `lldp on`; the `neighbors` command |
+| `src/portled.c`, `src/portled_ctl.c`, `src/portled_pio.c`, `src/ws2812.pio` | The port LED board: colours (plain C), settings and the `portled` command, the WS2812B driver |
 | `src/ssh.c`, `src/ssh_lwip.c` | The SSH server: the protocol on mbedTLS, and its connections |
 | `src/update.c`, `src/update_flash.c` | Firmware updates of the mod chip: the checks, and the RP2350's A/B slots |
 | `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json`, `/history.bin` and Prometheus's `/metrics` |
@@ -564,7 +565,10 @@ has both as microcontroller-based switches. The Features page has the same: on o
 - **What it sees.** Link, speed and counters per port, memory, uptime; the addresses learned on each
   port (the `l2` table, read at most once a minute), which the controller lists as wired clients on
   their ports; and the LLDP neighbour on each port, heard while `lldp on` (`neighbors` lists them too).
-  It can locate the switch: the system LED flashes.
+  It can locate the switch: the system LED flashes, and the port LEDs if there's a port LED board.
+- **Etherlighting.** With a port LED board (`portled pin` set), the switch claims Etherlighting, and
+  the controller's settings for it (by network or by speed, brightness, breathing or steady, and the
+  colours of each network and speed) become `portled` commands.
 - **Its configuration stays the switch's.** Nothing the controller sets is saved in the switch's own
   configuration. The controller's configuration is kept in a flash sector of its own, and applied
   again on top of the switch's after every restart of the bridge, so a restart doesn't need the
@@ -580,6 +584,29 @@ has both as microcontroller-based switches. The Features page has the same: on o
 
 Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.
 `test/run_unifi_hw.py` is the same against a real switch (see Tests).
+
+## Port LED board
+
+```
+portled                                  status
+portled on|off
+portled pin <gpio>|none                  the WS2812B chain's data line
+portled mode vlan|speed                  each port in its VLAN's colour (its port VLAN ID), or its speed's
+portled brightness <1-100>               %, 30 at first
+portled budget <20-2000>                 mA the LEDs draw at most together, 300 at first
+portled breathe on|off                   brightness rising and falling, every 3 s
+portled colour <vid> <rrggbb>|auto       a VLAN's own colour (16 at most); else one from its ID
+portled speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto
+portled locate <port> [<s>|off]          flash a port's LED white, 60 s at first
+```
+
+One WS2812B per front-panel port, chained in port order, on a GPIO the board leaves free (the firmware
+refuses the ones it uses), driven by a PIO state machine. A port with no link is dark. Without its own
+colour, a VLAN gets one from its ID: VLAN 1 blue, and neighbouring IDs far apart. By speed: 10 and
+100M amber, 1G green, 2.5G teal, 5G cyan, 10G blue. The brightness is applied first, then the whole
+frame is scaled down to the current budget (20 mA per colour at full). UniFi's locate flashes all of
+them. The settings are kept in flash, written only when they change. Nothing is known yet about the
+board itself: see the roadmap in the top README.
 
 ## SSH
 
@@ -792,12 +819,16 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
   signature or image, another key, board or size, cut short, or on failing flash. After none of these
   can the slot boot. It also runs through a trial that succeeds, and ones that don't.
 - **`check_extras.js`** runs the Features page's script and checks the command behind every control.
+- **`test_portled`** checks the port LEDs' colours: VLAN colours (neighbouring IDs far apart, a
+  VLAN's own), speeds, brightness, breathing, the current budget, and locating across the uptime's wrap.
+  The sim checks the `portled` commands.
 - **`test_unifi`** checks zlib against Python's (every block type, damaged streams), packets both
   ways against Python's AES-CBC and AES-GCM, the JSON reader, and the commands for configurations
   captured from a controller (`test/unifi/`).
 - **`make -C test unifi-controller`** runs `unifi.c` on lwIP against UniFi Network 10.6.109 in Docker
   (`ghcr.io/jamesbraid/unifi-network:sim`): adoption, the ports as the controller sees them, VLAN and
-  port changes, locate, a refused upgrade, a restart, and a change that cuts the switch off.
+  port changes, STP, isolation, storm control and egress limits, Etherlighting, locate, a refused
+  upgrade, a restart, and a change that cuts the switch off.
 - **`run_unifi_hw.py`** does those checks on a real switch:
   `python3 test/run_unifi_hw.py <switch> --key <update.pem>`. It builds the firmware with that key,
   signs it and sends it to the switch, waits for it and keeps it (`--no-flash` skips that). Then it

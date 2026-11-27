@@ -29,6 +29,7 @@
 #include "store.h"
 #include "telemetry.h"
 #include "unifi.h"
+#include "portled_ctl.h"
 #include "update.h"
 #include "net.h"
 #include "metrics.h"
@@ -446,6 +447,7 @@ int main(void)
 	rtl_boot();
 	store_load();
 	unifi_boot();
+	portled_boot();
 	update_boot();
 	safety_boot();
 	event(EV_SYSTEM, 0, 0, "Mod chip started%s, firmware " MODCHIP_VERSION, watchdog_reset ? " by the watchdog" : "");
@@ -503,6 +505,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			snmp_second();
 			telemetry_second();
 			unifi_second();
+			portled_second();
 			radsec_second();
 			ssh_conn_second();
 			read_rp_temp();
@@ -512,6 +515,7 @@ void __attribute__((noreturn, noinline, used)) main_loop(void)
 			work = true;
 		}
 		led_update();
+		portled_poll();
 		/* The share of time spent on passes that had something to do */
 		if (work)
 			busy_us += time_us_64() - pass_start;

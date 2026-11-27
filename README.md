@@ -43,14 +43,17 @@ firmware for that board is `-DMODCHIP_BOARD=poe`.
 ## Roadmap
 
 - **UniFi.** The switch as a UniFi switch: adopted by a UniFi Network controller, which sets its
-  VLANs, port VLAN IDs, names and speeds. The first part is in the firmware, tested against a
-  controller in Docker but not on a switch yet. Next: STP, storm control, isolation, port security
-  and egress limits from the controller, and client and LLDP neighbour tables for it.
+  VLANs, port VLAN IDs, names and speeds, STP, isolation, storm control, egress limits and
+  Etherlighting, and sees its clients and LLDP neighbours. In the firmware, tested against a
+  controller in Docker but not on a switch yet (`test/run_unifi_hw.py` is ready for that). Next:
+  port security, LAG and mirroring, which the controller refuses for the models the switch claims.
   See [firmware/rp2350/README.md](firmware/rp2350/README.md#unifi).
 - **Port LED daughter board.** A small board on the mod chip with one WS2812B LED per port, chained,
   in the style of UniFi's Etherlighting. Each LED shows the colour of its port's VLAN, or the link
   speed, and blinks to locate a port, from the command line or from the controller's own locate and
-  Etherlighting settings. Open questions:
+  Etherlighting settings. The firmware side is done (`portled` commands, a PIO driver, colours tested
+  on the host; see [firmware/rp2350/README.md](firmware/rp2350/README.md#port-led-board)), with no
+  board to drive yet. Open questions:
   - **Placement.** Behind the front panel, over each port, with light pipes where the case has no
     window.
   - **Power.** WS2812B wants 3.5 to 5.3 V and up to 60 mA per LED at full white: a 5 V supply from

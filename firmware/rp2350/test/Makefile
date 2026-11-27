@@ -11,7 +11,7 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c rtl837x_acl.c rtl837x_acl_cmd.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/rtl_mcast.c ../src/mcast.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c ../src/lldp_nbr.c \
+	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/rtl_mcast.c ../src/mcast.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/portled.c ../src/portled_ctl.c ../src/safety.c ../src/lldp_nbr.c \
 	$(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext -DRTLP_ACL \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
@@ -25,7 +25,8 @@ MBEDTLS = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/mbedtls)
 LWIP = $(if $(PICO_SDK_PATH),$(PICO_SDK_PATH)/lib/lwip)
 SDK_TESTS = $(if $(PICO_SDK_PATH),$(BUILD)/test_unifi $(BUILD)/test_unifi_net $(BUILD)/test_net6 $(BUILD)/test_usm $(BUILD)/test_update $(BUILD)/test_ssh $(BUILD)/test_mqtt $(BUILD)/test_tls $(BUILD)/test_snmp $(BUILD)/test_httpd $(BUILD)/test_httpd_tls)
 
-all: $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+all: $(BUILD)/test_portled $(BUILD)/test_link $(BUILD)/test_dot1x $(BUILD)/test_safety $(BUILD)/test_mcast $(BUILD)/sim $(BUILD)/sim-poe $(BUILD)/test_metrics $(BUILD)/test_upload $(SDK_TESTS)
+	$(BUILD)/test_portled
 	$(BUILD)/test_link ../../micropython/bridge_vectors.txt
 	$(BUILD)/test_dot1x
 	$(BUILD)/test_safety
@@ -75,7 +76,7 @@ LWIP_SRC = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c
 $(BUILD)/test_snmp: test_snmp.c $(BUILD)/libmbed.a ../src/usm.c ../src/usm.h ../src/snmp.c ../src/snmp_mib.c ../src/snmp_modchip.h ../src/plat.h ../src/lwipopts.h lwip_host/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -Ilwip_host -I../src -I$(LWIP)/src/include -I$(RTLP)/modchip/bridge \
-		$(MBED_INC) '-DMODCHIP_VERSION="sim"' -o $@ test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/usm.c ../src/events.c ../src/store.c \
+		$(MBED_INC) '-DMODCHIP_VERSION="sim"' -o $@ test_snmp.c ../src/snmp.c ../src/snmp_mib.c ../src/usm.c ../src/events.c ../src/store.c ../src/portled.c \
 		$(LWIP_SRC) $(BUILD)/libmbed.a
 
 $(BUILD)/test_metrics: test_metrics.c ../src/metrics.c ../src/metrics.h ../src/plat.h ../src/bridge.h
@@ -90,9 +91,9 @@ $(BUILD)/key.pem $(BUILD)/key2.pem:
 	@mkdir -p $(BUILD)
 	python3 ../tools/sign_update.py keygen $@
 
-$(BUILD)/test_update: test_update.c ../src/update.c ../src/update.h ../src/store.c ../src/events.c $(BUILD)/libmbed.a $(BUILD)/key.pem $(BUILD)/key2.pem
+$(BUILD)/test_update: test_update.c ../src/update.c ../src/update.h ../src/store.c ../src/portled.c ../src/events.c $(BUILD)/libmbed.a $(BUILD)/key.pem $(BUILD)/key2.pem
 	python3 ../tools/sign_update.py header $(BUILD)/key.pem $(BUILD)/update_key.h
-	$(CC) $(CFLAGS) -fsanitize=address,undefined -I$(BUILD) $(MBED_INC) -o $@ test_update.c ../src/update.c ../src/store.c ../src/events.c $(BUILD)/libmbed.a
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -I$(BUILD) $(MBED_INC) -o $@ test_update.c ../src/update.c ../src/store.c ../src/portled.c ../src/events.c $(BUILD)/libmbed.a
 
 ALTCP_TLS = $(LWIP)/src/apps/altcp_tls/altcp_tls_mbedtls_mem.c $(PICO_SDK_PATH)/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c
 
@@ -102,14 +103,14 @@ $(BUILD)/test_mqtt: test_mqtt.c relay.h ../src/telemetry.c ../src/tls_client.c .
 		-I$(RTLP)/modchip/bridge -o $@ test_mqtt.c ../src/telemetry.c ../src/tls_client.c ../src/rng.c ../src/events.c \
 		$(LWIP)/src/apps/mqtt/mqtt.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
 
-$(BUILD)/test_ssh: test_ssh.c relay.h ../src/ssh.c ../src/ssh.h ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
+$(BUILD)/test_ssh: test_ssh.c relay.h ../src/ssh.c ../src/ssh.h ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c ../src/portled.c $(BUILD)/libmbed.a ../src/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -Ilwip_httpd -I../src -I$(LWIP)/src/include $(MBED_INC) -o $@ test_ssh.c \
-		../src/ssh.c ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(BUILD)/libmbed.a
+		../src/ssh.c ../src/ssh_lwip.c ../src/rng.c ../src/events.c ../src/store.c ../src/portled.c $(LWIP_CORE) $(BUILD)/libmbed.a
 
-$(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
+$(BUILD)/test_safety: test_safety.c ../src/events.c ../src/store.c ../src/portled.c ../src/safety.c ../src/events.h ../src/store.h ../src/safety.h
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_safety.c ../src/events.c ../src/store.c ../src/safety.c
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -o $@ test_safety.c ../src/events.c ../src/store.c ../src/portled.c ../src/safety.c
 
 $(BUILD)/test_mcast: test_mcast.c ../src/mcast.c ../src/mcast.h ../src/events.c
 	@mkdir -p $(BUILD)
@@ -121,7 +122,7 @@ $(BUILD)/test_upload: test_upload.c ../src/upload.c ../src/upload.h ../src/link.
 
 LWIP_CORE = $(wildcard $(LWIP)/src/core/*.c) $(wildcard $(LWIP)/src/core/ipv4/*.c) $(wildcard $(LWIP)/src/core/ipv6/*.c) $(LWIP)/src/netif/ethernet.c ../src/tcp_reuse.c
 
-HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/safety.c ../src/extras.c ../src/update.c
+HTTPD_SRC = ../src/upload.c ../src/link.c ../src/events.c ../src/store.c ../src/portled.c ../src/safety.c ../src/extras.c ../src/update.c
 
 $(BUILD)/test_httpd: test_httpd.c $(HTTPD_SRC) ../src/httpd.c ../src/upload.c ../src/upload.h ../src/lwipopts.h lwip_httpd/lwipopts.h $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
@@ -168,6 +169,10 @@ $(BUILD)/test_unifi: test_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../s
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -fsanitize=address,undefined $(MBED_INC) -o $@ test_unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/lldp_nbr.c $(BUILD)/libmbed.a
 
+$(BUILD)/test_portled: test_portled.c ../src/portled.c ../src/portled.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -I../src -o $@ test_portled.c ../src/portled.c
+
 # libFuzzer over what unifi.c reads from the network (clang): make fuzz-unifi FUZZ_TIME=600
 FUZZ_TIME ?= 300
 FUZZ_CC ?= clang
@@ -183,11 +188,11 @@ fuzz-unifi: $(BUILD)/fuzz_unifi
 		$(BUILD)/fuzz_unifi_corpus $(BUILD)/fuzz_unifi_seeds
 
 # unifi.c against a UniFi Network controller in Docker: make unifi-controller
-$(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
+$(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c ../src/portled.c $(BUILD)/libmbed.a ../src/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DWATCH_S=20 -DUNIFI_TRACE -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include \
 		-I$(LWIP)/src/apps/altcp_tls $(MBED_INC) -o $@ test_unifi_net.c \
-		../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
+		../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c ../src/portled.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
 
 unifi-controller: $(BUILD)/test_unifi_net
 	python3 run_unifi_controller.py $<

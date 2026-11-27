@@ -158,6 +158,9 @@ add_executable(modchip
     src/telemetry.c
     src/unifi.c
     src/lldp_nbr.c
+    src/portled.c
+    src/portled_ctl.c
+    src/portled_pio.c
     src/unifi_proto.c
     src/inflate.c
     src/ssh.c
@@ -217,6 +220,7 @@ target_link_libraries(modchip
     pico_rand
     hardware_adc
     hardware_dma
+    hardware_pio
     hardware_flash
     hardware_i2c
     hardware_uart
@@ -237,4 +241,5 @@ else()
     pico_enable_stdio_rtt(modchip 1)
 endif()
 pico_set_program_name(modchip "RTLPlayground mod chip")
+pico_generate_pio_header(modchip ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 pico_add_extra_outputs(modchip)

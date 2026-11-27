@@ -70,7 +70,7 @@ class Switch:
     """test_unifi_net, with its output in a queue"""
     def __init__(self, exe, mac, store):
         self.p = subprocess.Popen([exe, str(INFORM), mac, store], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  text=True, bufsize=1)
+                                  text=True, bufsize=1, env=dict(os.environ, UNIFI_PORTLED="1"))
         self.q = queue.Queue()
         self.lines = []
         threading.Thread(target=self.read, daemon=True).start()
@@ -179,6 +179,11 @@ def main():
         r = runs(sw.until(lambda l: "applied" in l, 60))
         check("isolate 1 2 4 5 6 0" in r and "isolate 3 2 4 5 6 0" in r and "storm 1 bcast 100 pps" in r
               and "bw out 3 00001388" in r, "isolation, storm control, egress limit: %s" % [x for x in r if x.split()[0] in ("isolate", "storm", "bw")])
+        # Etherlighting (claimed, as the harness has a port LED board): the board's settings
+        c.call("/api/s/default/rest/device/" + d["_id"], {"ether_lighting": {"mode": "network", "brightness": 40, "behavior": "steady"}}, "PUT")
+        r = runs(sw.until(lambda l: "applied" in l, 60))
+        check("portled mode vlan" in r and "portled brightness 40" in r and "portled breathe off" in r,
+              "Etherlighting: %s" % [x for x in r if x.startswith("portled")])
 
         c.call("/api/s/default/cmd/devmgr", {"cmd": "set-locate", "mac": mac})
         check(sw.until(lambda l: l == "LED 1", 40) is not None, "locate flashes the system LED")

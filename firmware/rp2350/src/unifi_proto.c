@@ -363,10 +363,17 @@ void unifi_model_pick(uint8_t copper, uint8_t sfp, struct unifi_model *m)
 bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 {
 	int map[UNIFI_VLANS * 4];		/* system_cfg's VLAN slot -> sw->vlan[] */
+	int el_net[UNIFI_EL_COLOURS * 2];	/* etherlight network colour slot -> sw->el.colour[] */
+	int el_speed[16];			/* etherlight speed colour slot -> speed */
 	bool any = false;
 
 	memset(sw, 0, sizeof(*sw));
 	sw->stp.on = sw->stp.rstp = -1;
+	sw->el.mode = sw->el.brightness = sw->el.breathe = -1;
+	for (unsigned i = 0; i < sizeof(el_net) / sizeof(el_net[0]); i++)
+		el_net[i] = -1;
+	for (unsigned i = 0; i < sizeof(el_speed) / sizeof(el_speed[0]); i++)
+		el_speed[i] = -1;
 	sw->stp.prio = -1;
 	for (int b = 0; b <= UNIFI_PORTS; b++)
 		sw->port[b].stp = sw->port[b].edge = sw->port[b].guard = -1;
@@ -388,6 +395,23 @@ bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 			memcpy(val, e + 1, end - e - 1);
 			val[end - e - 1] = 0;
 			if (pass == 0) {
+				if (sscanf(key, "switch.etherlight.mode.2.color.%d.id%n", &a, &n) == 1 && !key[n]) {
+					long vid = strtol(val, NULL, 10);
+					if (a >= 0 && a < (int)(sizeof(el_net) / sizeof(el_net[0])) && el_net[a] < 0
+					    && vid >= 1 && vid <= 4094 && sw->el.ncolours < UNIFI_EL_COLOURS) {
+						el_net[a] = sw->el.ncolours;
+						sw->el.colour[sw->el.ncolours++].vid = vid;
+					}
+					continue;
+				}
+				if (sscanf(key, "switch.etherlight.mode.1.color.%d.type%n", &a, &n) == 1 && !key[n]) {
+					static const char *const types[UNIFI_EL_SPEEDS] = { "10M", "FE", "GbE", "2.5GbE", "5GbE", "10GbE" };
+					if (a >= 0 && a < (int)(sizeof(el_speed) / sizeof(el_speed[0])))
+						for (int t = 0; t < UNIFI_EL_SPEEDS; t++)
+							if (!strcmp(val, types[t]))
+								el_speed[a] = t;
+					continue;
+				}
 				if (sscanf(key, "switch.vlan.%d.id%n", &a, &n) == 1 && !key[n]) {
 					if (a < 0 || a >= (int)(sizeof(map) / sizeof(map[0])) || map[a] >= 0)
 						continue;
@@ -399,7 +423,28 @@ bool unifi_parse(const char *cfg, struct unifi_sw *sw)
 				}
 				continue;
 			}
-			if (!strcmp(key, "switch.stp.status")) {
+			if (!strcmp(key, "switch.etherlight.mode")) {
+				sw->el.mode = !strcmp(val, "speed") ? 1 : !strcmp(val, "network") ? 0 : -1;
+			} else if (!strcmp(key, "switch.etherlight.brightness")) {
+				long v = strtol(val, NULL, 10);
+				if (v >= 0 && v <= 100)
+					sw->el.brightness = v;
+			} else if (!strcmp(key, "switch.etherlight.behavior")) {
+				sw->el.breathe = !strcmp(val, "breath") ? 1 : !strcmp(val, "steady") ? 0 : -1;
+			} else if (sscanf(key, "switch.etherlight.mode.%d.color.%d.code%n", &a, &b, &n) == 2 && !key[n]) {
+				unsigned x;
+				int m = 0;
+				uint8_t *rgb = NULL;
+
+				if (a == 2 && b >= 0 && b < (int)(sizeof(el_net) / sizeof(el_net[0])) && el_net[b] >= 0)
+					rgb = sw->el.colour[el_net[b]].rgb;
+				else if (a == 1 && b >= 0 && b < (int)(sizeof(el_speed) / sizeof(el_speed[0])) && el_speed[b] >= 0) {
+					rgb = sw->el.speed[el_speed[b]];
+					sw->el.speed_set |= 1 << el_speed[b];
+				}
+				if (rgb && strlen(val) == 6 && sscanf(val, "%6x%n", &x, &m) == 1 && m == 6)
+					rgb[0] = x >> 16, rgb[1] = x >> 8, rgb[2] = x;
+			} else if (!strcmp(key, "switch.stp.status")) {
 				sw->stp.on = !strcmp(val, "enabled");
 				any = true;
 			} else if (!strcmp(key, "switch.stp.version")) {
@@ -602,6 +647,40 @@ long unifi_commands(const struct unifi_sw *sw, const struct unifi_sw *before, co
 					APP(" %u", m->front[q]);
 			APP(" 0\n");
 		}
+
+	/* Etherlighting: the port LED board's settings, as they change */
+	static const char *const speeds[UNIFI_EL_SPEEDS] = { "10m", "100m", "1g", "2g5", "5g", "10g" };
+	if (sw->el.mode >= 0 && (!before || before->el.mode != sw->el.mode))
+		APP("portled mode %s\n", sw->el.mode ? "speed" : "vlan");
+	if (sw->el.brightness >= 0 && (!before || before->el.brightness != sw->el.brightness))
+		APP("portled brightness %d\n", sw->el.brightness ? sw->el.brightness : 1);
+	if (sw->el.breathe >= 0 && (!before || before->el.breathe != sw->el.breathe))
+		APP("portled breathe %s\n", sw->el.breathe ? "on" : "off");
+	for (int i = 0; i < UNIFI_EL_SPEEDS; i++) {
+		bool now = sw->el.speed_set >> i & 1, was = before && (before->el.speed_set >> i & 1);
+
+		if (now && (!was || memcmp(before->el.speed[i], sw->el.speed[i], 3)))
+			APP("portled speed %s %02x%02x%02x\n", speeds[i], sw->el.speed[i][0], sw->el.speed[i][1], sw->el.speed[i][2]);
+		else if (!now && was)
+			APP("portled speed %s auto\n", speeds[i]);
+	}
+	for (int i = 0; before && i < before->el.ncolours && i < UNIFI_EL_COLOURS; i++) {
+		bool kept = false;
+
+		for (int k = 0; k < sw->el.ncolours && k < UNIFI_EL_COLOURS; k++)
+			kept |= sw->el.colour[k].vid == before->el.colour[i].vid;
+		if (!kept)
+			APP("portled colour %u auto\n", before->el.colour[i].vid);
+	}
+	for (int k = 0; k < sw->el.ncolours && k < UNIFI_EL_COLOURS; k++) {
+		bool same = false;
+
+		for (int i = 0; before && i < before->el.ncolours && i < UNIFI_EL_COLOURS; i++)
+			same |= before->el.colour[i].vid == sw->el.colour[k].vid && !memcmp(before->el.colour[i].rgb, sw->el.colour[k].rgb, 3);
+		if (!same)
+			APP("portled colour %u %02x%02x%02x\n", sw->el.colour[k].vid, sw->el.colour[k].rgb[0], sw->el.colour[k].rgb[1],
+			    sw->el.colour[k].rgb[2]);
+	}
 
 	/* Storm control and egress limits: set, changed, or no longer there */
 	static const char *const storm[3] = { "bcast", "mcast", "ucast" };

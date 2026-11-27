@@ -7,7 +7,8 @@
  * "on", "off", "forget", "inform <url>", "link <port> <0|speed code>", "ports <n>"
  * (0: none read, as while the bridge is down; UNIFI_PORTS sets it at the start),
  * "opt43 <hex>" (a DHCP option 43), "lldp <port> <hex>" (an LLDPDU's TLVs on that port).
- * UNIFI_NO_URL: no inform URL set at the start. "l2" answers as the switch's command, a
+ * UNIFI_NO_URL: no inform URL set at the start. UNIFI_PORTLED: a port LED board's pin set, so
+ * Etherlighting is claimed. "l2" answers as the switch's command, a
  * few addresses ("L2 READ" for each).
  * Names: "unifi" is 127.0.0.1 after two tries ("RESOLVE unifi" for each), the rest
  * aren't found.
@@ -31,6 +32,7 @@
 #include "relay.h"
 
 char hostname[24] = "testswitch";
+void portled_unifi_locate(bool on) { printf("PORTLED locate %d\n", on); }
 
 /* -Wl,--wrap=malloc,... */
 static size_t heap_live, heap_peak;
@@ -176,6 +178,8 @@ int main(int argc, char **argv)
 		nports = atoi(getenv("UNIFI_PORTS"));
 	event_listen(on_event);
 	store_load();
+	if (getenv("UNIFI_PORTLED"))		/* a port LED board: the switch claims Etherlighting */
+		store.portled.pin = 5;
 	unifi_boot();
 	lwip_init();
 	netif_set_default(netif_list);

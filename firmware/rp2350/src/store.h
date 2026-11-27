@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "portled.h"
+
 struct store {
 	char magic[8];
 	uint32_t snmp_boots;		/* SNMPv3 snmpEngineBoots */
@@ -27,6 +29,9 @@ struct store {
 	uint16_t pad3;
 	char unifi_url[96];		/* where to inform */
 	char unifi_bad[24];		/* a cfgversion that cut us off from the controller */
+	/* the port LED board (portled_ctl.c), valid with portled_magic */
+	char portled_magic[4];
+	struct portled_cfg portled;
 };
 
 /* PENDING: the snapshot goes back at the next start. RESTORED: the next start is
