@@ -6,6 +6,7 @@ what a real controller rarely sends, or sends only after a while.
 
   - no URL set: http://unifi:8080/inform, then the controller DHCP option 43 names;
     the URL adopted through is kept, "inform auto" goes back, a name not found
+  - the MAC table and LLDP neighbours in the inform, by UniFi port
   - no inform while the switch's ports can't be read, as while the bridge is down
   - adoption; then a new key from the controller, also once adopted
   - set-adopt with a name in its URL: taken; one that can't be used: not
@@ -26,6 +27,18 @@ def check(ok, what):
     global fails
     print(("PASS  " if ok else "FAIL  ") + what, flush=True)
     fails += not ok
+
+
+def lldpdu(chassis_mac, port_id, ttl, name=None, ip=None):
+    """An LLDPDU's TLVs, as hex for test_unifi_net's "lldp" command"""
+    def tlv(t, v):
+        return struct.pack(">H", t << 9 | len(v)) + v
+    d = tlv(1, b"\x04" + chassis_mac) + tlv(2, b"\x05" + port_id) + tlv(3, struct.pack(">H", ttl))
+    if name:
+        d += tlv(5, name)
+    if ip:
+        d += tlv(8, bytes([5, 1]) + ip + bytes([2, 0, 0, 0, 1, 0]))
+    return (d + tlv(0, b"")).hex()
 
 
 def unseal(pkt, keys):
@@ -229,6 +242,27 @@ def main():
         c.drain()
         j, k = c.inform(10)
         check(k == A and j and j.get("cfgversion") == "v1", "informs with the key given, as v1")
+
+        # what's behind each port: the MAC table (read with "l2"), LLDP neighbours
+        pt = {p["port_idx"]: p for p in (j or {}).get("port_table", [])}
+        mt = {i: [(m["mac"], m["vlan"], m["static"]) for m in pt.get(i, {}).get("mac_table", [])] for i in pt}
+        check(mt.get(1) == [("aa:bb:cc:00:00:01", 1, False), ("aa:bb:cc:00:00:02", 10, True)]
+              and mt.get(4) == [("aa:bb:cc:00:00:04", 1, False)] and mt.get(10) == [("aa:bb:cc:00:00:06", 20, False)]
+              and not mt.get(2) and not mt.get(9), "the MAC table by UniFi port (SFP+ front port 6 is 10): %s" % mt)
+        check(not any(mac in str(mt) for mac in (mac, "aa:bb:cc:00:00:05")), "not the switch's own, nor a LAG's")
+        sw.send("lldp 2 " + lldpdu(bytes.fromhex("0a0b0c0d0e0f"), b"ge-0/0/7", 120, b"core-sw", bytes([10, 0, 0, 2])))
+        c.drain()
+        j, k = c.inform(10)
+        lt = (j or {}).get("lldp_table", [])
+        check(lt == [{"local_port_idx": 2, "local_port_name": "Port 2", "is_wired": True, "chassis_id": "0a:0b:0c:0d:0e:0f",
+                      "port_id": "ge-0/0/7", "system_name": "core-sw"}], "an LLDP neighbour on port 2: %s" % lt)
+        sw.status()	# reads what's come so far
+        check(sw.lines.count("L2 READ") == 1, "the MAC table read once a minute at most, not each inform: %d"
+              % sw.lines.count("L2 READ"))
+        sw.send("lldp 2 " + lldpdu(bytes.fromhex("0a0b0c0d0e0f"), b"ge-0/0/7", 0))
+        c.drain()
+        j, k = c.inform(10)
+        check(j is not None and j.get("lldp_table") == [], "and gone when it says so (TTL 0)")
 
         # a new key, once adopted
         c.keys = [B, A, DEFAULT]

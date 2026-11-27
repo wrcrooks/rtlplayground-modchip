@@ -12,7 +12,7 @@ for f in [root / "rtlplayground/cmd_parser.c"] + sorted((root / "src").glob("rtl
     known |= set(re.findall(r'cmd_compare\(0, "([a-z0-9-]+)"\)', f.read_text()))
 # These show, act or debug; none is ever saved
 ACTIONS = {"acltbl", "bridge", "flash", "history", "phyget", "physet", "reboot", "regget", "regset", "reset", "rnd",
-           "rollback", "sds", "sdsget", "sdsset", "stat", "temp", "version", "watchdog", "health", "update"}
+           "rollback", "sds", "sdsget", "sdsset", "stat", "temp", "version", "watchdog", "health", "update", "neighbors"}
 out = subprocess.run([sys.argv[1]] + sorted(known), capture_output=True, text=True).stdout
 bad = 0
 for line in out.splitlines():

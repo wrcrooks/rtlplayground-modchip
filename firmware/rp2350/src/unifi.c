@@ -14,16 +14,20 @@
 #include "lwip/tcp.h"
 
 #include "events.h"
+#include "lldp_nbr.h"
 #include "plat.h"
 #include "rng.h"
 #include "store.h"
 #include "unifi.h"
 #include "unifi_proto.h"
 
-#define JSON_MAX	6144
+#define JSON_MAX	8192		/* with the MAC and LLDP tables */
 #define REPLY_MAX	12288		/* what the controller sends, compressed */
 #define TEXT_MAX	16384		/* and unpacked */
 #define CMDS_MAX	2048
+#define MACS_MAX	48		/* addresses reported */
+#define MACS_EVERY_S	60		/* the table read again, at most */
+#define L2_OUT		3072		/* "l2" output read */
 #define TIMEOUT_S	10
 #define INTERVAL_S	10
 #ifndef WATCH_S
@@ -62,6 +66,14 @@ static uint32_t informs, replies;
 static int last_http;
 static char dhcp_url[sizeof("http://255.255.255.255:8080/inform")];	/* from DHCP option 43, "": none */
 static char resolved[HOST_MAX];		/* the name looked up last, "": none */
+static struct {
+	uint8_t mac[6];
+	uint16_t vlan;
+	uint8_t front;			/* front-panel port */
+	bool fixed;			/* a static entry */
+} l2tab[MACS_MAX];
+static uint8_t nmacs;
+static uint32_t macs_at;		/* uptime of the last read, 0: never */
 static ip4_addr_t resolved_ip;
 
 
@@ -172,6 +184,43 @@ static void forget(const char *why)
 
 /* ---- the inform ---- */
 
+/* The switch's MAC table, from the "l2" command: "aa:bb:cc:dd:ee:ff<TAB>vlan<TAB>learned|static<TAB>port" */
+static void read_macs(void)
+{
+	char *out = malloc(L2_OUT), line[8] = "l2";
+	const uint8_t *own = rtl_mac();
+	bool ok;
+
+	if (!out)
+		return;
+	rtl_run(line, out, L2_OUT, &ok);
+	out[L2_OUT - 1] = 0;
+	nmacs = 0;
+	for (char *l = out, *e; l && *l && nmacs < MACS_MAX; l = e ? e + 1 : NULL) {
+		unsigned m[6], vlan;
+		char type[12], port[8];
+
+		e = strchr(l, '\n');
+		if (e)
+			*e = 0;
+		if (sscanf(l, "%2x:%2x:%2x:%2x:%2x:%2x %u %11s %7s", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &vlan, type, port) != 9)
+			continue;
+		/* print_phys_port() writes port 10 as ':' */
+		unsigned front = port[1] ? 0 : port[0] == ':' ? 10 : port[0] >= '1' && port[0] <= '9' ? port[0] - '0' : 0;
+		if (!front || vlan > 4094)
+			continue;	/* the CPU, a LAG */
+		for (int i = 0; i < 6; i++)
+			l2tab[nmacs].mac[i] = m[i];
+		if (!memcmp(l2tab[nmacs].mac, own, 6))
+			continue;
+		l2tab[nmacs].vlan = vlan;
+		l2tab[nmacs].front = front;
+		l2tab[nmacs].fixed = !strcmp(type, "static");
+		nmacs++;
+	}
+	free(out);
+}
+
 static void pick_model(void)
 {
 	static struct rtl_port ports[RTL_MAX_PORTS];
@@ -228,6 +277,43 @@ static size_t inform_json(char *b, size_t max)
 			r ? (unsigned long long)(r->out_ucast + r->out_mcast + r->out_bcast) : 0ULL,
 			r ? (unsigned long)r->in_errors : 0UL, r ? (unsigned long)r->out_errors : 0UL,
 			r ? (unsigned long)r->in_discards : 0UL, r ? (unsigned long)r->out_discards : 0UL);
+		/* the addresses learned on it, as room allows: the rest of the inform has its 1.5 KB */
+		if (k && b[k - 1] == '}')
+			k--;	/* back over the port's "}" */
+		k = app(b, max, k, ",\"mac_table\":[");
+		bool first = true;
+		for (uint8_t i = 0; i < nmacs && k + 1600 < max; i++) {
+			if (!model.front[p] || l2tab[i].front != model.front[p])
+				continue;
+			const uint8_t *m = l2tab[i].mac;
+			k = app(b, max, k, "%s{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"vlan\":%u,\"age\":0,\"static\":%s}",
+				first ? "" : ",", m[0], m[1], m[2], m[3], m[4], m[5], l2tab[i].vlan, l2tab[i].fixed ? "true" : "false");
+			first = false;
+		}
+		k = app(b, max, k, "]}");
+	}
+	k = app(b, max, k, "],\"lldp_table\":[");
+	bool first = true;
+	for (uint8_t p = 1; p <= model.ports; p++) {
+		const struct lldp_nbr *nb = model.front[p] ? lldp_nbr_get(model.front[p], plat_uptime_s()) : NULL;
+
+		if (!nb || k + 800 >= max)
+			continue;
+		k = app(b, max, k, "%s{\"local_port_idx\":%u,\"local_port_name\":\"Port %u\",\"is_wired\":true,\"chassis_id\":",
+			first ? "" : ",", p, p);
+		k = app_json_str(b, max, k, nb->chassis);
+		k = app(b, max, k, ",\"port_id\":");
+		k = app_json_str(b, max, k, nb->port);
+		if (nb->name[0]) {
+			k = app(b, max, k, ",\"system_name\":");
+			k = app_json_str(b, max, k, nb->name);
+		}
+		if (nb->port_desc[0]) {
+			k = app(b, max, k, ",\"port_descr\":");
+			k = app_json_str(b, max, k, nb->port_desc);
+		}
+		k = app(b, max, k, "}");
+		first = false;
 	}
 	return app(b, max, k, "]}");
 }
@@ -535,6 +621,12 @@ static void start(void)
 	}
 	if (!(to4 = address(host)))
 		return;
+	if (store.unifi_adopted && (!macs_at || plat_uptime_s() - macs_at >= MACS_EVERY_S)) {
+		read_macs();
+		macs_at = plat_uptime_s();
+		if (!macs_at)
+			macs_at = 1;
+	}
 	json = malloc(JSON_MAX);
 	x.req = malloc(JSON_MAX + 256);
 	x.reply = malloc(REPLY_MAX);

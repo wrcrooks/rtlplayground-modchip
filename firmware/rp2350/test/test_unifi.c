@@ -13,6 +13,7 @@
 
 #include "inflate.h"
 #include "unifi_proto.h"
+#include "lldp_nbr.h"
 
 static int fails, checks;
 
@@ -97,10 +98,73 @@ static void model_checks(void)
 	CHECK(!strcmp(m.code, "USWED36") && m.front[8] == 8 && m.front[9] == 9 && !m.front[10], "8 + 1");
 }
 
+/* An LLDPDU's TLVs into d: type, length, value ...; returns the length */
+static uint16_t tlv(uint8_t *d, uint16_t n, uint8_t type, const void *v, uint16_t len)
+{
+	d[n] = type << 1 | len >> 8;
+	d[n + 1] = len;
+	memcpy(d + n + 2, v, len);
+	return n + 2 + len;
+}
+
+static void lldp(void)
+{
+	uint8_t d[400];
+	uint16_t n = 0;
+	const struct lldp_nbr *x;
+	char s[600];
+
+	lldp_nbr_clear();
+	n = tlv(d, n, 1, "\x04\x0a\x0b\x0c\x0d\x0e\x0f", 7);
+	n = tlv(d, n, 2, "\x05ge-0/0/7", 9);
+	n = tlv(d, n, 3, "\x00\x78", 2);
+	n = tlv(d, n, 4, "uplink", 6);
+	n = tlv(d, n, 5, "core\x01sw", 7);
+	n = tlv(d, n, 8, "\x05\x01\x0a\x00\x00\x02\x02\x00\x00\x00\x01\x00", 12);
+	n = tlv(d, n, 0, "", 0);
+	lldp_nbr_rx(3, d, n, 1000);
+	x = lldp_nbr_get(3, 1000);
+	CHECK(x && x->chassis_mac && !strcmp(x->chassis, "0a:0b:0c:0d:0e:0f") && !strcmp(x->port, "ge-0/0/7")
+	      && !strcmp(x->port_desc, "uplink") && !strcmp(x->name, "core?sw") && x->ip[0] == 10 && x->ip[3] == 2,
+	      "LLDP: a neighbour, unprintable bytes as ?");
+	CHECK(lldp_nbr_get(3, 1119) && !lldp_nbr_get(3, 1120) && !lldp_nbr_get(3, 1000), "its TTL, then gone");
+	lldp_nbr_rx(0, d, n, 1000);
+	lldp_nbr_rx(11, d, n, 1000);
+	CHECK(!lldp_nbr_get(0, 1000) && !lldp_nbr_get(11, 1000), "ports outside 1..10 ignored");
+	lldp_nbr_rx(1, d, n - 3, 1000);	/* cut in the management address */
+	CHECK(!lldp_nbr_get(1, 1000), "a TLV running past the frame: ignored");
+	n = 0;
+	n = tlv(d, n, 1, "\x07sw1", 4);
+	n = tlv(d, n, 2, "\x03\x01\x02\x03\x04\x05\x06", 7);
+	lldp_nbr_rx(2, d, n, 1000);
+	CHECK(!lldp_nbr_get(2, 1000), "no TTL: ignored");
+	n = tlv(d, n, 3, "\x00\x10", 2);
+	static const char longname[] = "a-system-name-much-longer-than-thirty-one-characters";
+	n = tlv(d, n, 5, longname, sizeof(longname) - 1);
+	lldp_nbr_rx(2, d, n, 1000);
+	x = lldp_nbr_get(2, 1000);
+	CHECK(x && !x->chassis_mac && !strcmp(x->chassis, "sw1") && !strcmp(x->port, "01:02:03:04:05:06")
+	      && strlen(x->name) == 31 && !memcmp(x->name, longname, 31), "a local chassis ID, a MAC port ID, a long name cut");
+	lldp_nbr_show(s, sizeof(s), 1000);
+	CHECK(strstr(s, "port 2: a-system-name") && strstr(s, ", 16 s left\n"), "shown: %s", s);
+	n = 0;
+	n = tlv(d, n, 1, "\x07sw1", 4);
+	n = tlv(d, n, 2, "\x07p1", 3);
+	n = tlv(d, n, 3, "\x00\x00", 2);
+	lldp_nbr_rx(2, d, n, 1001);
+	CHECK(!lldp_nbr_get(2, 1001), "TTL 0: forgotten");
+	lldp_nbr_show(s, 20, 1000);
+	CHECK(strlen(s) < 20, "show stays in its buffer");
+	lldp_nbr_clear();
+	lldp_nbr_show(s, sizeof(s), 1000);
+	CHECK(strstr(s, "no LLDP neighbours"), "none: says so");
+}
+
 int main(int argc, char **argv)
 {
 	(void)argc;
 	setvbuf(stdout, NULL, _IOLBF, 0);
+	lldp();
 	static uint8_t a[70000], b[70000];
 	static char line[300000], out[70000];
 	struct unifi_model m;

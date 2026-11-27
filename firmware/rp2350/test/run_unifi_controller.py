@@ -7,7 +7,7 @@ names one already running. Its inform port is published on 127.0.0.1:UNIFI_INFOR
 
     python3 run_unifi_controller.py build/test_unifi_net
 """
-import http.cookiejar, json, os, queue, random, ssl, subprocess, sys, tempfile, threading, time, urllib.request
+import http.cookiejar, json, os, queue, random, ssl, struct, subprocess, sys, tempfile, threading, time, urllib.request
 
 IMAGE = "ghcr.io/jamesbraid/unifi-network:sim"
 NAME = "unifi-test-controller"
@@ -140,6 +140,19 @@ def main():
         check(pt.get(1, {}).get("up") and pt[1].get("speed") == 1000 and pt.get(4, {}).get("speed") == 2500
               and not pt.get(2, {}).get("up"), "port links as the switch has them")
         check(pt.get(9, {}).get("media") == "SFP+" and pt.get(1, {}).get("rx_bytes") == 1000000, "SFP+ ports and counters")
+
+        # an LLDP neighbour on port 2 and the MAC table: kept by the controller
+        tlv = lambda t, v: struct.pack(">H", t << 9 | len(v)) + v
+        sw.send("lldp 2 " + (tlv(1, b"\x04\x0a\x0b\x0c\x0d\x0e\x0f") + tlv(2, b"\x05ge-0/0/7") + tlv(3, b"\x00\x78")
+                             + tlv(5, b"core-sw") + tlv(0, b"")).hex())
+        d = wait(lambda: (lambda d: d if d and d.get("lldp_table") else None)(c.dev(mac)), 40)
+        lt = (d or {}).get("lldp_table", [])
+        check(lt and lt[0].get("local_port_idx") == 2 and lt[0].get("chassis_id") == "0a:0b:0c:0d:0e:0f"
+              and lt[0].get("port_id") == "ge-0/0/7", "the controller has the LLDP neighbour: %s" % lt)
+        sta = {x["mac"]: x.get("sw_port") for x in c.call("/api/s/default/stat/sta").get("data", [])
+               if x.get("mac", "").startswith("aa:bb:cc") and x.get("sw_mac") == mac}
+        check(sta == {"aa:bb:cc:00:00:01": 1, "aa:bb:cc:00:00:02": 1, "aa:bb:cc:00:00:04": 4, "aa:bb:cc:00:00:06": 10},
+              "the MAC table's addresses are wired clients on their ports: %s" % sta)
 
         (v10, made10), (v20, made20) = c.net("UT10", 10), c.net("UT20", 20)
         others = [n["_id"] for n in c.call("/api/s/default/rest/networkconf")["data"]

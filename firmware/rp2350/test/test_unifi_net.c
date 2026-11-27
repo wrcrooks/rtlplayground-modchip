@@ -6,7 +6,9 @@
  * ("EVENT ..."), "REBOOT" and "LED n". Lines on stdin are commands: "status",
  * "on", "off", "forget", "inform <url>", "link <port> <0|speed code>", "ports <n>"
  * (0: none read, as while the bridge is down; UNIFI_PORTS sets it at the start),
- * "opt43 <hex>" (a DHCP option 43). UNIFI_NO_URL: no inform URL set at the start.
+ * "opt43 <hex>" (a DHCP option 43), "lldp <port> <hex>" (an LLDPDU's TLVs on that port).
+ * UNIFI_NO_URL: no inform URL set at the start. "l2" answers as the switch's command, a
+ * few addresses ("L2 READ" for each).
  * Names: "unifi" is 127.0.0.1 after two tries ("RESOLVE unifi" for each), the rest
  * aren't found.
  */
@@ -22,6 +24,7 @@
 #include "plat.h"
 #include "store.h"
 #include "unifi.h"
+#include "lldp_nbr.h"
 #include "relay.h"
 
 char hostname[24] = "testswitch";
@@ -102,6 +105,15 @@ uint8_t rtl_ports_read(struct rtl_port *p, uint8_t max)
 
 size_t rtl_run(char *line, char *out, size_t max, bool *ok)
 {
+	if (!strcmp(line, "l2")) {
+		/* as port_l2_learned() prints it: blank lines for entries not valid; the switch's own MAC, the CPU, a LAG */
+		printf("L2 READ\n");
+		*ok = true;
+		return snprintf(out, max, "\n\tMAC\t\tVLAN\ttype\tport\n\naa:bb:cc:00:00:01\t1\tlearned\t1\n"
+				"aa:bb:cc:00:00:02\t10\tstatic\t1\n\naa:bb:cc:00:00:04\t1\tlearned\t4\n"
+				"%02x:%02x:%02x:%02x:%02x:%02x\t1\tlearned\tCPU\naa:bb:cc:00:00:05\t1\tlearned\tLAG1\n"
+				"aa:bb:cc:00:00:06\t20\tlearned\t6\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+	}
 	printf("RUN %s\n", line);
 	*ok = true;
 	return 0;
@@ -169,6 +181,14 @@ int main(int argc, char **argv)
 				unifi_forget();
 			} else if (!strncmp(line, "inform ", 7)) {
 				printf("INFORM %d\n", unifi_inform(line + 7));
+			} else if (sscanf(line, "lldp %u", &a) == 1) {
+				uint8_t o[300];
+				unsigned n = 0, v;
+				const char *h = strchr(line + 5, ' ');
+
+				for (h = h ? h + 1 : ""; n < sizeof(o) && sscanf(h, "%2x", &v) == 1; h += 2)
+					o[n++] = v;
+				lldp_nbr_rx(a, o, n, plat_uptime_s());
 			} else if (!strncmp(line, "opt43 ", 6)) {
 				uint8_t o[64];
 				unsigned n = 0, v;

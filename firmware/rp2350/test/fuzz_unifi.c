@@ -11,6 +11,7 @@
  *   3  a reply's JSON, read as unifi.c's handle() reads it
  *   4  two system_cfg texts (before NUL after), into commands, with the copper
  *      and SFP port counts and the output size from the next three bytes
+ *   5  an LLDPDU's TLVs, on the port the next byte says; then the neighbours shown
  */
 #include <stdint.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@
 
 #include "inflate.h"
 #include "unifi_proto.h"
+#include "lldp_nbr.h"
 
 #define TEXT_MAX	16384		/* unifi.c's sizes */
 #define CMDS_MAX	2048
@@ -165,16 +167,28 @@ static void config(const uint8_t *d, size_t n)
 	free(t);
 }
 
+static void lldp(const uint8_t *d, size_t n)
+{
+	char s[700];
+
+	if (!n)
+		return;
+	lldp_nbr_rx(d[0] % 12, d + 1, n - 1 > 0xffff ? 0xffff : n - 1, 1000);
+	lldp_nbr_show(s, d[0] / 12 + 1, 1000);
+	lldp_nbr_show(s, sizeof(s), 1000);
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 {
 	if (!n)
 		return 0;
-	switch (d[0] % 5) {
+	switch (d[0] % 6) {
 	case 0: open_packet(d + 1, n - 1); break;
 	case 1: sealed(d + 1, n - 1); break;
 	case 2: inflate(d + 1, n - 1); break;
 	case 3: reply(d + 1, n - 1); break;
 	case 4: config(d + 1, n - 1); break;
+	case 5: lldp(d + 1, n - 1); break;
 	}
 	return 0;
 }

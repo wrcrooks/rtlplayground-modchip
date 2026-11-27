@@ -16,5 +16,8 @@ for c in cfgs:
               b"\x04\x04\x02\xff" + cfgs[0] + b"\0" + c]
 seeds.append(b"\x03" + json.dumps({"_type": "cmd", "cmd": "set-adopt", "key": "00" * 16,
                                    "uri": "http://10.0.0.1:8080/inform"}).encode())
+lldp = bytes.fromhex("020704" + "0a0b0c0d0e0f" + "0409" + "05" + b"ge-0/0/7".hex() + "06020078" + "0a07" + b"core-sw".hex()
+                     + "100c0501" + "0a000002" + "020000000100" + "0000")
+seeds.append(b"\x05\x03" + lldp)
 for i, s in enumerate(seeds):
     open(os.path.join(out, "seed%02d" % i), "wb").write(s)

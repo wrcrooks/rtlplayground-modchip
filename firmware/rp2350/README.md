@@ -81,6 +81,7 @@ Around them:
 | `src/usm.c` | SNMPv3's authentication and encryption |
 | `src/telemetry.c`, `src/tls_client.c` | MQTT, and TLS as a client: servers are known by their certificate's fingerprint |
 | `src/unifi.c`, `src/unifi_proto.c`, `src/inflate.c` | UniFi: the inform client; packets, the controller's JSON and its configuration as commands; zlib |
+| `src/lldp_nbr.c` | LLDP neighbours by port, from the frames trapped while `lldp on`; the `neighbors` command |
 | `src/ssh.c`, `src/ssh_lwip.c` | The SSH server: the protocol on mbedTLS, and its connections |
 | `src/update.c`, `src/update_flash.c` | Firmware updates of the mod chip: the checks, and the RP2350's A/B slots |
 | `src/metrics.c` | The dashboard's sampler, its hour of history, `/metrics.json`, `/history.bin` and Prometheus's `/metrics` |
@@ -556,8 +557,10 @@ has both as microcontroller-based switches.
   names and fixed speeds. The controller sends its whole configuration as `system_cfg` lines; the
   switch turns them into its own commands (`vlan`, `pvid`, `port`), names and speeds only when they
   change.
-- **What it sees.** Link, speed and counters per port, memory, uptime. It can locate the switch: the
-  system LED flashes.
+- **What it sees.** Link, speed and counters per port, memory, uptime; the addresses learned on each
+  port (the `l2` table, read at most once a minute), which the controller lists as wired clients on
+  their ports; and the LLDP neighbour on each port, heard while `lldp on` (`neighbors` lists them too).
+  It can locate the switch: the system LED flashes.
 - **Its configuration stays the switch's.** Nothing the controller sets is saved in the switch's own
   configuration. The controller's configuration is kept in a flash sector of its own, and applied
   again on top of the switch's after every restart of the bridge, so a restart doesn't need the

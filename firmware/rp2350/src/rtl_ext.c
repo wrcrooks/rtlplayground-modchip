@@ -37,6 +37,7 @@
 #include "rtl837x_acl.h"
 #include "rtl_ext.h"
 #include "safety.h"
+#include "lldp_nbr.h"
 
 extern __code const struct machine machine;
 extern __xdata uint8_t sfr_data[4];
@@ -481,6 +482,19 @@ static bool parse_ssh(void)
 
 
 /*
+ *   neighbors                           LLDP neighbours by port, heard while "lldp on" (lldp_nbr.c)
+ */
+static bool parse_neighbors(void)
+{
+	char st[640];
+
+	lldp_nbr_show(st, sizeof(st), plat_uptime_s());
+	print_string_x(st);
+	return true;
+}
+
+
+/*
  *   unifi                               status
  *   unifi on|off
  *   unifi inform <url>|auto             http://<a.b.c.d or name>[:<port>]/inform; auto: DHCP's, else http://unifi:8080/inform
@@ -835,6 +849,8 @@ bool rtl_cmd_ext(void)
 		return parse_ssh();
 	if (cmd_compare(0, "unifi"))
 		return parse_unifi();
+	if (cmd_compare(0, "neighbors") && cmd_words_len == 1)
+		return parse_neighbors();
 	if (cmd_compare(0, "prometheus"))
 		return parse_prometheus();
 	if (cmd_compare(0, "ip6"))

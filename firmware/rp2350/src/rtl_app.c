@@ -35,6 +35,7 @@
 #include "rtl837x_acl.h"
 #include "events.h"
 #include "rtl_guard.h"
+#include "lldp_nbr.h"
 #include "mcast.h"
 
 void rtl_mcast_links(uint32_t sts);	/* rtl_mcast.c */
@@ -500,6 +501,17 @@ uint16_t rtl_rx_frame(uint8_t *frame, uint16_t len, uint16_t *vlan)
 	memcpy(uip_buf, frame, len);
 	uip_len = len;
 	*vlan = ((uip_buf[22] << 8) | uip_buf[23]) & 0x0fff;
+
+	/* LLDP, trapped while "lldp on": the neighbour on that port (lldp_nbr.c) */
+	if (frame[0] == 0x01 && frame[1] == 0x80 && frame[2] == 0xc2 && frame[3] == 0x00 && frame[4] == 0x00
+	    && frame[5] == 0x0e) {
+		uint8_t port = frame[19] & 0x0f;
+		uint8_t off = frame[20] == 0x81 && frame[21] == 0x00 ? ETH_TYPE_OFFSET : ETH_TYPE_OFFSET - 4;
+
+		if (port < CPU_PORT && len > off + 2 && frame[off] == 0x88 && frame[off + 1] == 0xcc)
+			lldp_nbr_rx(machine.log_to_phys_port[port], frame + off + 2, len - off - 2, plat_uptime_s());
+		return 0;
+	}
 
 	if ((stp_enabled || lacpEnabled) && uip_buf[0] == 0x01 && uip_buf[1] == 0x80
 	    && uip_buf[2] == 0xc2 && uip_buf[3] == 0x00 && uip_buf[4] == 0x00) {

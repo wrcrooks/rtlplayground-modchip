@@ -11,7 +11,7 @@ RTLP_SRC = cmd_parser.c cmd_editor.c httpd/page_impl.c httpd/page_poe.c rtl837x_
 	rtl837x_cabletest.c rtl837x_phy.c rtl837x_leds.c rtl837x_leds_dump.c rtl837x_pins.c \
 	rtl837x_trap.c rtl837x_acl.c rtl837x_acl_cmd.c sfp.c dns.c dns_cli.c ntp.c ntp_cli.c syslog.c machine/$(MACHINE).c
 SIM_SRC = $(addprefix $(RTLP)/,$(RTLP_SRC)) ../src/rtl_env.c ../src/rtl_app.c ../src/rtl_udp.c ../src/rtl_ext.c ../src/rtl_metrics.c ../src/t3_route.c \
-	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/rtl_mcast.c ../src/mcast.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c \
+	../src/rtl_poe.c ../src/dot1x_plat.c ../src/rtl_guard.c ../src/rtl_mcast.c ../src/mcast.c ../src/dot1x.c ../src/md5.c ../src/events.c ../src/store.c ../src/safety.c ../src/lldp_nbr.c \
 	$(BUILD)/web_assets.c sim.c
 SIM_FLAGS = -std=gnu11 -O1 -g -fno-strict-aliasing -include $(RTLP)/test/sdcc_shim.h -include ../stub/rtlp_ext.h -DCMD_PARSER_EXT=rtl_cmd_ext -DRTLP_ACL \
 	-I../src -I../stub -I$(BUILD) -I$(RTLP) -I$(RTLP)/uip -I$(RTLP)/httpd -I$(RTLP)/modchip/bridge \
@@ -164,17 +164,17 @@ dot1x-radius: $(BUILD)/test_dot1x_radius $(BUILD)/test_radsec
 	sh run_dot1x_radius.sh - $(BUILD)/test_radsec
 	TLS_MAX=1.2 sh run_dot1x_radius.sh - $(BUILD)/test_radsec
 
-$(BUILD)/test_unifi: test_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h $(BUILD)/libmbed.a
+$(BUILD)/test_unifi: test_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h ../src/lldp_nbr.c $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) -fsanitize=address,undefined $(MBED_INC) -o $@ test_unifi.c ../src/unifi_proto.c ../src/inflate.c $(BUILD)/libmbed.a
+	$(CC) $(CFLAGS) -fsanitize=address,undefined $(MBED_INC) -o $@ test_unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/lldp_nbr.c $(BUILD)/libmbed.a
 
 # libFuzzer over what unifi.c reads from the network (clang): make fuzz-unifi FUZZ_TIME=600
 FUZZ_TIME ?= 300
 FUZZ_CC ?= clang
-$(BUILD)/fuzz_unifi: fuzz_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h $(BUILD)/libmbed.a
+$(BUILD)/fuzz_unifi: fuzz_unifi.c ../src/unifi_proto.c ../src/unifi_proto.h ../src/inflate.c ../src/inflate.h ../src/lldp_nbr.c $(BUILD)/libmbed.a
 	@mkdir -p $(BUILD)
 	$(FUZZ_CC) -std=gnu11 -O1 -g -I../src -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined $(MBED_INC) \
-		-o $@ fuzz_unifi.c ../src/unifi_proto.c ../src/inflate.c $(BUILD)/libmbed.a
+		-o $@ fuzz_unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/lldp_nbr.c $(BUILD)/libmbed.a
 
 fuzz-unifi: $(BUILD)/fuzz_unifi
 	python3 fuzz_seeds.py $(BUILD)/fuzz_unifi_seeds
@@ -183,11 +183,11 @@ fuzz-unifi: $(BUILD)/fuzz_unifi
 		$(BUILD)/fuzz_unifi_corpus $(BUILD)/fuzz_unifi_seeds
 
 # unifi.c against a UniFi Network controller in Docker: make unifi-controller
-$(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
+$(BUILD)/test_unifi_net: test_unifi_net.c relay.h ../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(BUILD)/libmbed.a ../src/lwipopts.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=gnu11 -O1 -g -w -fsanitize=address -DWATCH_S=20 -Ilwip_httpd_tls -Ilwip_httpd -I../src -I$(LWIP)/src/include \
 		-I$(LWIP)/src/apps/altcp_tls $(MBED_INC) -o $@ test_unifi_net.c \
-		../src/unifi.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
+		../src/unifi.c ../src/lldp_nbr.c ../src/unifi_proto.c ../src/inflate.c ../src/rng.c ../src/events.c ../src/store.c $(LWIP_CORE) $(ALTCP_TLS) $(BUILD)/libmbed.a
 
 unifi-controller: $(BUILD)/test_unifi_net
 	python3 run_unifi_controller.py $<

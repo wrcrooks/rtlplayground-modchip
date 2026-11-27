@@ -590,6 +590,43 @@ int main(void)
 
 	/* LLDP and STP go out CPU-tagged, never with a management VLAN tag */
 	cmd("lldp on");
+	{
+		/* LLDP heard: untagged from chip port 4 (front 1), with an 802.1Q tag from chip port 3 (front 6);
+		 * chip port 2 is no front port here */
+		uint8_t lf[80] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x0e, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+				   0x88, 0x99, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04,	/* CPU tag, port 4 */
+				   0x88, 0xcc,
+				   0x02, 0x07, 0x04, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,	/* chassis: MAC */
+				   0x04, 0x03, 0x05, 'p', '7',				/* port: ifname */
+				   0x06, 0x02, 0x00, 0x78,				/* TTL 120 */
+				   0x0a, 0x07, 'c', 'o', 'r', 'e', '-', 's', 'w',	/* system name */
+				   0x00, 0x00 };
+		uint8_t lt[84];
+		uint16_t lv;
+		char want[48];
+
+		lf[19] = 2;
+		rtl_rx_frame(lf, sizeof(lf), &lv);
+		cmd("neighbors");
+		outbuf[slen] = 0;
+		check(strstr((char *)outbuf, "no LLDP neighbours") != NULL, "LLDP from a chip port with no front port: ignored");
+		lf[19] = 4;
+		check(rtl_rx_frame(lf, sizeof(lf), &lv) == 0, "LLDP: not for lwIP");
+		memcpy(lt, lf, 20);
+		lt[19] = 3;
+		memcpy(lt + 20, "\x81\x00\x00\x01", 4);
+		memcpy(lt + 24, lf + 20, 60);
+		lt[39] = '8';	/* port p8 */
+		rtl_rx_frame(lt, sizeof(lt), &lv);
+		cmd("neighbors");
+		outbuf[slen] = 0;
+		snprintf(want, sizeof(want), "port %u: core-sw, port p7,", machine.log_to_phys_port[4]);
+		check(strstr((char *)outbuf, want) != NULL, "neighbors: %s", want);
+		snprintf(want, sizeof(want), "port %u: core-sw, port p8,", machine.log_to_phys_port[3]);
+		check(strstr((char *)outbuf, want) != NULL, "and the tagged one: %s", want);
+		if (!strstr((char *)outbuf, want))
+			printf("%s\n", (char *)outbuf);
+	}
 	cmd("stp on");
 	n_tx = 0;
 	ticks_run(200 * 35);
