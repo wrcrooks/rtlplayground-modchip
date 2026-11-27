@@ -8,6 +8,8 @@
 #include "plat.h"
 #include "rtl_guard.h"
 #include "safety.h"
+#include "store.h"
+#include "unifi.h"
 #include "update.h"
 
 /* A status text, and whether the service is on: the text starts "<name> off" if not */
@@ -32,7 +34,7 @@ static size_t services(char *buf, size_t max, size_t n)
 	static const struct { const char *name; size_t (*status)(char *, size_t); } s[] = {
 		{ "ip6", plat_ip6_status }, { "mqtt", plat_mqtt_status }, { "prom", plat_prometheus_status }, { "ssh", plat_ssh_status },
 	};
-	char t[600];
+	char t[800];		/* unifi_status() with every line: ~600 */
 
 	plat_snmp_status(t, sizeof(t));
 	n = service(buf, max, n, "snmp", t, plat_snmp_get(PLAT_SNMP_ENABLED) != NULL);
@@ -41,7 +43,13 @@ static size_t services(char *buf, size_t max, size_t n)
 		n = app(buf, max, n, ",");
 		n = service(buf, max, n, s[i].name, t, says_on(t));
 	}
-	return n;
+	/* UniFi: the inform URL as set (empty: auto), and whether a controller has it */
+	unifi_status(t, sizeof(t));
+	n = app(buf, max, n, ",\"unifi\":{\"on\":%d,\"adopted\":%d,\"url\":", unifi_enabled(), store.unifi_adopted ? 1 : 0);
+	n = app_json_str(buf, max, n, store.unifi_url);
+	n = app(buf, max, n, ",\"text\":");
+	n = app_json_str(buf, max, n, t);
+	return app(buf, max, n, "}");
 }
 
 

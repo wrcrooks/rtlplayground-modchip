@@ -137,8 +137,8 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 - **SNMP writes.** The agent is read-only.
 - **The Features page in other languages.** It is in English only; RTLPlayground's own pages aren't.
-- **UniFi on a switch.** Only tested against a controller in Docker so far. Also: a Features page card
-  for it, and the settings it doesn't take yet (see UniFi).
+- **UniFi on a switch.** Only tested against a controller in Docker so far. Also: the settings it
+  doesn't take yet (see UniFi).
 - **Hardware tests.** A whole EAP login (a server's first challenge arrived), the auth-fail VLAN, a
   multicast member on a second port, and SNMP, SSH and so on with the mod chip board itself.
 
@@ -545,7 +545,8 @@ unifi forget                                      back to the default key, to be
 With `unifi on`, the switch informs the controller every 10 s and shows up there to be adopted. It
 claims to be a **USW Flex 2.5G 5** (USWED35) with five ports or fewer, otherwise a **USW Flex 2.5G 8**
 (USWED36), the copper ports first and the SFP+ ones as ports 9 and 10. The controller's own device list
-has both as microcontroller-based switches.
+has both as microcontroller-based switches. The Features page has the same: on or off, the inform URL
+(empty for `auto`), the status, and Forget once adopted.
 
 - **Finding the controller.** With no URL set (`unifi inform auto`), it informs the controller DHCP
   option 43 names (Ubiquiti's sub-option 1, an IPv4 address), else `http://unifi:8080/inform`, as UniFi

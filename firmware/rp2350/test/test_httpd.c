@@ -60,6 +60,8 @@ size_t plat_ip6_status(char *b, size_t max) { return say(b, max, "IPv6 on\nfe80:
 size_t plat_mqtt_status(char *b, size_t max) { return say(b, max, "MQTT off, topic a off \"x\", every 30 s\n"); }
 size_t plat_ssh_status(char *b, size_t max) { return say(b, max, "SSH off, host key none yet\n"); }
 size_t plat_snmp_status(char *b, size_t max) { return say(b, max, "SNMPv2c off\n"); }
+size_t unifi_status(char *b, size_t max) { return say(b, max, "UniFi on: informing\n  inform URL http://unifi:8080/inform (the default)\n"); }
+bool unifi_enabled(void) { return true; }
 const char *plat_snmp_get(int what) { return "1"; }
 static bool slots_ab;
 const char *const update_board = "modchip TEST", *const update_version = "v-test";
@@ -419,7 +421,7 @@ int main(int argc, char **argv)
 	check(strstr(r, "200 OK") && strstr(r, "{"), "/features.json");
 	check(strstr(r, "\"snmp\":{\"on\":1,\"text\":\"SNMPv2c off\\u000a\"}") && strstr(r, "\"ip6\":{\"on\":1,")
 	      && strstr(r, "\"mqtt\":{\"on\":0,\"text\":\"MQTT off, topic a off \\\"x\\\"") && strstr(r, "\"prom\":{\"on\":1,")
-	      && strstr(r, "\"ssh\":{\"on\":0,") && strstr(r, "\"update\":{\"version\":\"v-test\""), "  with the services' states");
+	      && strstr(r, "\"ssh\":{\"on\":0,") && strstr(r, "\"unifi\":{\"on\":1,\"adopted\":0,\"url\":\"\",\"text\":\"UniFi on") && strstr(r, "\"update\":{\"version\":\"v-test\""), "  with the services' states");
 	plat_config_write((const uint8_t *)"ip 10.0.0.2\nvlan 5 1 2", 23);
 	k = sprintf(rq, "GET /backup HTTP/1.1\r\nCookie: %s\r\n\r\n", cookie);
 	r = request((const uint8_t *)rq, k);

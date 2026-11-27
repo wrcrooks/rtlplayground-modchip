@@ -45,7 +45,8 @@ const features = {
   mcast: { on: 1, querier: 0, interval: 125, restrict: 1, routers: [2], vlans: [], total: 3, groups: [{ vlan: 1, group: "239.1.1.1", ports: [1, 2] }] },
   update: { version: "v1", board: "b <i>", slot: "A", trial: 1, key: 1, size: 1, seq: 5 },
   services: { ip6: { on: 1, text: "IPv6 on\n" }, snmp: { on: 1, text: "SNMPv2c on\n" }, mqtt: { on: 0, text: "MQTT off, every 30 s\n" },
-    prom: { on: 0, text: "off" }, ssh: { on: 1, text: "SSH on" } },
+    prom: { on: 0, text: "off" }, ssh: { on: 1, text: "SSH on" },
+    unifi: { on: 1, adopted: 1, url: "http://10.0.0.2:8080/inform", text: "UniFi on: <b>informing</b>\n  adopted\n" } },
 };
 const dot1x = { radsec: 1, radius_vlan: 1, ports: [{ port: 1, guest: 30, authfail: 0, vlan: 30 }, { port: 2, guest: 0, authfail: 0, vlan: 0 }] };
 const events = [{ seq: 1, t: 900, type: "link", port: 2, text: "<b>up</b>" }];
@@ -79,6 +80,8 @@ async function click(run, fields, want) {
   check(byId["ed-bpduguard"].checked && !byId["ed-l2-limit"].checked && byId["ds-on"].checked && byId["mc-on"].checked
     && byId["mc-unk"].value === "router" && byId["ed-rec"].value == 300 && byId["mq-int"].value === "30", "the settings as the switch has them");
   check(byId["ssh-on"].checked && !byId["mq-on"].checked && byId["sn-v2c"].checked, "the services too");
+  check(byId["uf-on"].checked && byId["uf-url"].value === "http://10.0.0.2:8080/inform" && !byId["uf-forget"].hidden
+    && byId["t-unifi"].textContent.includes("<b>informing</b>"), "UniFi: on, its URL, adopted, the status as text");
   check(/v1, b <i>\nSlot A, on trial/.test(byId["up-state"].textContent) && !byId["up-keep"].hidden, "the firmware, on trial");
   check(/5 min/.test(byId["rb-state"].textContent) && !byId["rb-ok"].hidden && byId["re-off"].hidden, "the rollback pending");
   check(byId.events.textContent.includes("<b>up</b>"), "events, as text");
@@ -101,7 +104,7 @@ async function click(run, fields, want) {
   await act(fail, { value: "" }, "dot1x port 2 auth-fail-vlan off");
   for (const [id, want] of Object.entries({ "ed-bpduguard": "errdisable cause bpduguard on", "ds-ra": "dhcp-snoop ra on", "mc-q": "mcsnoop querier on",
     "dx-vlan": "dot1x radius-vlan on", "i6-on": "ip6 on", "sn-on": "snmp on", "sn-v2c": "snmp v2c on", "mq-on": "mqtt on", "pr-on": "prometheus on",
-    "ssh-on": "ssh on", "ed-l2-limit": "errdisable cause l2-limit on", "ed-link-flap": "errdisable cause link-flap on", "ds-on": "dhcp-snoop on", "mc-on": "mcsnoop on" }))
+    "ssh-on": "ssh on", "uf-on": "unifi on", "ed-l2-limit": "errdisable cause l2-limit on", "ed-link-flap": "errdisable cause link-flap on", "ds-on": "dhcp-snoop on", "mc-on": "mcsnoop on" }))
     await act(byId[id], { checked: true }, want);
   await click("recovery", { "ed-rec": "600" }, "errdisable recovery 600");
   await click("recovery", { "ed-rec": "" }, "errdisable recovery off");
@@ -132,6 +135,9 @@ async function click(run, fields, want) {
   await click("mqint", { "mq-int": "60" }, "mqtt interval 60");
   await click("prtok", { "pr-tok": "" }, "prometheus token off");
   await click("newkey", {}, "ssh newkey");
+  await click("ufurl", { "uf-url": "http://unifi.lan:8080/inform" }, "unifi inform http://unifi.lan:8080/inform");
+  await click("ufurl", { "uf-url": " " }, "unifi inform auto");
+  await click("ufforget", {}, "unifi forget");
   await click("update", {}, "");
   check(!sends.length, "  no file: nothing sent");
   byId["up-file"].files = [{ name: "a.mcu" }];

@@ -169,6 +169,14 @@ td.txt{overflow-wrap:anywhere}
     <div class="f"><label><input type="checkbox" id="ssh-on"> On</label><button data-run="newkey">New host key</button></div>
   </section>
 
+  <section class="card">
+    <h2>UniFi</h2>
+    <pre id="t-unifi"></pre>
+    <div class="f"><label><input type="checkbox" id="uf-on"> On</label><button data-run="ufforget" id="uf-forget">Forget the controller</button></div>
+    <div class="f"><input id="uf-url" class="grow" placeholder="Inform URL (empty: from DHCP, else http://unifi:8080/inform)"><button data-run="ufurl">Set</button></div>
+    <p>The switch shows up in the controller as a USW Flex to adopt. Adopted, the controller sets its VLANs, port names and speeds, STP, isolation, storm control and egress limits.</p>
+  </section>
+
   <section class="card wide">
     <h2>Events</h2>
     <div id="log" class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Port</th><th></th></tr></thead><tbody id="events"></tbody></table></div>
@@ -252,7 +260,8 @@ var checks={
   "sn-v2c":function(v){return"snmp v2c "+v},
   "mq-on":function(v){return"mqtt "+v},
   "pr-on":function(v){return"prometheus "+v},
-  "ssh-on":function(v){return"ssh "+v}
+  "ssh-on":function(v){return"ssh "+v},
+  "uf-on":function(v){return"unifi "+v}
 };
 Object.keys(checks).forEach(function(id){$(id).addEventListener("change",function(){run(checks[id](onOff(id)))})});
 $("mc-int").addEventListener("change",function(){run("mcsnoop interval "+this.value)});
@@ -293,7 +302,9 @@ var actions={
   mqtopic:function(){return run("mqtt topic "+(word("mq-topic")||"off"))},
   mqint:function(){return run("mqtt interval "+need("mq-int"))},
   prtok:function(){return run("prometheus token "+(word("pr-tok")||"off"))},
-  newkey:function(){if(confirm("Make a new host key? SSH clients will warn that it changed."))return run("ssh newkey")}
+  newkey:function(){if(confirm("Make a new host key? SSH clients will warn that it changed."))return run("ssh newkey")},
+  ufurl:function(){return run("unifi inform "+(word("uf-url")||"auto"))},
+  ufforget:function(){if(confirm("Forget the controller? The switch goes back to the default key and asks to be adopted again; its settings stay."))return run("unifi forget")}
 };
 document.querySelectorAll("[data-run]").forEach(function(b){
   b.addEventListener("click",function(){
@@ -396,6 +407,7 @@ function draw(f,dx){
   $("i6-on").checked=!!s.ip6.on;$("sn-on").checked=!!s.snmp.on;$("sn-v2c").checked=/^SNMPv2c on/m.test(s.snmp.text);
   $("mq-on").checked=!!s.mqtt.on;$("pr-on").checked=!!s.prom.on;$("ssh-on").checked=!!s.ssh.on;
   var m=s.mqtt.text.match(/every (\d+) s/);if(m)put("mq-int",m[1]);
+  if(s.unifi){$("t-unifi").textContent=s.unifi.text.trim();$("uf-on").checked=!!s.unifi.on;put("uf-url",s.unifi.url);$("uf-forget").hidden=!s.unifi.adopted}
 }
 function load(){
   return getJSON("features.json").then(function(f){
