@@ -502,7 +502,7 @@ static bool parse_neighbors(void)
  *   portled pin <gpio>|none             the data line
  *   portled mode vlan|speed             each LED in its port's VLAN's colour, or its link speed's
  *   portled brightness <1-100>          %
- *   portled budget <20-2000>            mA, the most they draw together
+ *   portled budget <20-500>            mA, the most they draw together
  *   portled colour <vid> <rrggbb>|auto  a VLAN's own colour, or back to one from its ID
  *   portled speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto   a link speed's colour, or back to the default
  *   portled breathe on|off              brightness rising and falling
@@ -530,7 +530,7 @@ static bool parse_portled(void)
 	} else if (cmd_words_len == 3 && cmd_compare(1, "brightness")) {
 		ok = ext_word_num(2, 1, 100, &v) && portled_set_brightness(v);
 	} else if (cmd_words_len == 3 && cmd_compare(1, "budget")) {
-		ok = ext_word_num(2, 20, 2000, &v) && portled_set_budget(v);
+		ok = ext_word_num(2, 20, 500, &v) && portled_set_budget(v);
 	} else if (cmd_words_len == 3 && cmd_compare(1, "breathe") && (cmd_compare(2, "on") || cmd_compare(2, "off"))) {
 		portled_set_breathe(cmd_compare(2, "on"));
 	} else if (cmd_words_len == 4 && (cmd_compare(1, "colour") || cmd_compare(1, "color") || cmd_compare(1, "speed"))) {
@@ -568,7 +568,7 @@ static bool parse_portled(void)
 		ok = false;
 	}
 	if (!ok)
-		ext_error("portled [on|off|pin <gpio>|none|mode vlan|speed|brightness <1-100>|budget <20-2000>|breathe on|off|\n"
+		ext_error("portled [on|off|pin <gpio>|none|mode vlan|speed|brightness <1-100>|budget <20-500>|breathe on|off|\n"
 			  "  colour <vid> <rrggbb>|auto|speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto|locate <port> [<s>|off]]\n");
 	return true;
 }

@@ -20,6 +20,7 @@
 #define PORTLED_SPEEDS		6	/* 10M, 100M, 1G, 2.5G, 5G, 10G */
 #define PORTLED_BREATHE_MS	3000	/* dim, bright, dim */
 #define PORTLED_LOCATE_MS	250	/* on, then off */
+#define PORTLED_BUDGET_MAX	500	/* mA at 5 V: the board's MT3608 boost takes about 1 A from 3.3 V for it */
 
 enum portled_mode { PORTLED_VLAN, PORTLED_SPEED };
 

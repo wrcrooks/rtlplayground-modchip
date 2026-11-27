@@ -655,7 +655,7 @@ int main(void)
 		outbuf[slen] = 0;
 		check(strstr(out, "Port LEDs on, data on GPIO 8") && strstr(out, "VLAN 10: ff8000") && strstr(out, "brightness 50 %")
 		      && led_pin == 8, "portled: on, GPIO 8, a VLAN's colour, half bright");
-		for (const char *bad[] = { "portled colour 10 ff80", "portled colour 0 ff8000", "portled brightness 0", "portled budget 5",
+		for (const char *bad[] = { "portled colour 10 ff80", "portled colour 0 ff8000", "portled brightness 0", "portled budget 5", "portled budget 600",
 					   "portled mode disco", "portled locate 11", "portled pin 99", NULL }, **b = bad; *b; b++) {
 			cmd(*b);
 			outbuf[slen] = 0;

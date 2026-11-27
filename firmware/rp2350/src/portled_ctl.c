@@ -132,7 +132,7 @@ bool portled_set_brightness(uint8_t pct)
 
 bool portled_set_budget(uint16_t ma)
 {
-	if (ma < 20 || ma > 2000)
+	if (ma < 20 || ma > PORTLED_BUDGET_MAX)
 		return false;
 	SET(budget_ma, ma);
 }

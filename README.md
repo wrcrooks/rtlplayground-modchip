@@ -56,10 +56,17 @@ firmware for that board is `-DMODCHIP_BOARD=poe`.
   board to drive yet. Open questions:
   - **Placement.** Behind the front panel, over each port, with light pipes where the case has no
     window.
-  - **Power.** WS2812B wants 3.5 to 5.3 V and up to 60 mA per LED at full white: a 5 V supply from
-    the switch's input supply, or LEDs that run from 3.3 V, with brightness capped in firmware.
-  - **Signal.** One spare RP2350 pin, driven by a PIO state machine, with a level shifter if the
-    LEDs run at 5 V.
+  - **Power (decided).** WS2812B LEDs from an MT3608 boost (JLCPCB basic part C84817) on the mod
+    chip's 3.3 V, set to about 4.7 V (R1 68k, R2 10k; Vref 0.6 V). With an SS34 Schottky, a 10 µH
+    inductor rated 2 A or more, 22 µF in and out, and 100 nF at each LED. No load switch: the
+    firmware sends a dark frame before it lets the line go, and dark LEDs draw about 1 mA each. Full
+    white is 60 mA per LED, 600 mA for ten; the firmware holds the LEDs to its budget (300 mA at
+    first, 500 mA at most), about 1 A from 3.3 V at 500 mA. Still to find out: how much the switch's
+    3.3 V rail can spare. On USB alone (AP2112K, 600 mA) the budget has to stay low.
+  - **Signal (decided).** One spare RP2350 pin through 330 Ω, driven by a PIO state machine, no level
+    shifter. The first LED gets its supply through a 1N4148W diode (about 4.0 V), so its input
+    threshold (0.7 VDD, about 2.8 V) is under the RP2350's 3.3 V. Its output, at its own supply,
+    drives the next LED, which is on the full 4.7 V.
   - **Connector.** The mod chip board has free GPIOs but no header for them yet: the next revision
     needs one for the data line, power and ground.
 

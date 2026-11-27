@@ -593,7 +593,7 @@ portled on|off
 portled pin <gpio>|none                  the WS2812B chain's data line
 portled mode vlan|speed                  each port in its VLAN's colour (its port VLAN ID), or its speed's
 portled brightness <1-100>               %, 30 at first
-portled budget <20-2000>                 mA the LEDs draw at most together, 300 at first
+portled budget <20-500>                 mA the LEDs draw at most together, 300 at first
 portled breathe on|off                   brightness rising and falling, every 3 s
 portled colour <vid> <rrggbb>|auto       a VLAN's own colour (16 at most); else one from its ID
 portled speed 10m|100m|1g|2g5|5g|10g <rrggbb>|auto
@@ -604,7 +604,8 @@ One WS2812B per front-panel port, chained in port order, on a GPIO the board lea
 refuses the ones it uses), driven by a PIO state machine. A port with no link is dark. Without its own
 colour, a VLAN gets one from its ID: VLAN 1 blue, and neighbouring IDs far apart. By speed: 10 and
 100M amber, 1G green, 2.5G teal, 5G cyan, 10G blue. The brightness is applied first, then the whole
-frame is scaled down to the current budget (20 mA per colour at full). UniFi's locate flashes all of
+frame is scaled down to the current budget (20 mA per colour at full; 500 mA at most, what the
+board's 3.3 to 5 V boost is sized for). UniFi's locate flashes all of
 them. The settings are kept in flash, written only when they change. Nothing is known yet about the
 board itself: see the roadmap in the top README.
 
