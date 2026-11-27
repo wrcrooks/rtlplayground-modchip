@@ -42,8 +42,11 @@ static char *text(const uint8_t *d, size_t n)
 static void open_packet(const uint8_t *d, size_t n)
 {
 	char *out = malloc(TEXT_MAX);
+	uint8_t *p = malloc(n ? n : 1);		/* opened in place */
 
-	unifi_open(d, n, KEY, out, TEXT_MAX);
+	memcpy(p, d, n);
+	unifi_open(p, n, KEY, out, TEXT_MAX);
+	free(p);
 	free(out);
 }
 
@@ -121,7 +124,7 @@ static void reply(const uint8_t *d, size_t n)
 
 	if (unifi_json_str(j, "_type", type, sizeof(type))) {
 		unifi_json_int(j, "interval", &v);
-		char *mgmt = malloc(1024), *sys = malloc(TEXT_MAX);
+		char *mgmt = malloc(1024), *sys;
 
 		if (unifi_json_str(j, "mgmt_cfg", mgmt, 1024)) {
 			if (unifi_kv(mgmt, "authkey", s, sizeof(s)))
@@ -131,18 +134,18 @@ static void reply(const uint8_t *d, size_t n)
 		}
 		if (unifi_json_str(j, "cfgversion", s, sizeof(s)) && strlen(s) < sizeof(version))
 			strcpy(version, s);
-		if (unifi_json_str(j, "system_cfg", sys, TEXT_MAX)) {
+		free(mgmt);
+		if (unifi_json_str(j, "cmd", type, sizeof(type)) && unifi_json_str(j, "key", s, sizeof(s)))
+			unifi_hex16(s, k);
+		unifi_json_str(j, "uri", s, sizeof(s));
+		/* last, as it's unescaped in place */
+		if ((sys = unifi_json_str_here(j, "system_cfg"))) {
 			struct unifi_sw *sw = malloc(sizeof(*sw));
 
 			if (unifi_parse(sys, sw))
 				commands(sw, NULL, 8, 2, CMDS_MAX);
 			free(sw);
 		}
-		free(mgmt);
-		free(sys);
-		if (unifi_json_str(j, "cmd", type, sizeof(type)) && unifi_json_str(j, "key", s, sizeof(s)))
-			unifi_hex16(s, k);
-		unifi_json_str(j, "uri", s, sizeof(s));
 	}
 	free(j);
 }

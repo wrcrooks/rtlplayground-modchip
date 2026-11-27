@@ -260,7 +260,7 @@ long zlib_store(const uint8_t *in, size_t len, uint8_t *out, size_t max)
 		out[n++] = k >> 8;
 		out[n++] = ~k;
 		out[n++] = ~k >> 8;
-		memcpy(out + n, in + b * 65535, k);
+		memmove(out + n, in + b * 65535, k);	/* in may be at out + 7 */
 		n += k;
 	}
 	out[n++] = a >> 24;

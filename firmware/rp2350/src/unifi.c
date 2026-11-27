@@ -25,6 +25,7 @@
 #define REPLY_MAX	12288		/* what the controller sends, compressed */
 #define TEXT_MAX	16384		/* and unpacked */
 #define CMDS_MAX	2048
+#define REQ_MAX		(200 + UNIFI_SEAL_AT + JSON_MAX + 4 + 16)	/* headers, packet header, zlib, JSON, Adler-32, padding */
 #define MACS_MAX	48		/* addresses reported */
 #define MACS_EVERY_S	60		/* the table read again, at most */
 #define L2_OUT		3072		/* "l2" output read */
@@ -369,7 +370,7 @@ static void apply(const char *system_cfg, const char *version)
 	event(EV_CONFIG, 0, 0, "UniFi: configuration %s applied%s", version, ok ? "" : " with errors");
 }
 
-static void handle(const char *j)
+static void handle(char *j)
 {
 	char type[24], s[96];
 	long v;
@@ -380,7 +381,7 @@ static void handle(const char *j)
 	if (unifi_json_int(j, "interval", &v) && v >= 2 && v <= 600)
 		interval = v;
 	if (!strcmp(type, "setparam")) {
-		char *mgmt = malloc(1024), *sys = malloc(TEXT_MAX);
+		char *mgmt = malloc(1024), *sys;
 		char version[24] = "";
 
 		if (mgmt && unifi_json_str(j, "mgmt_cfg", mgmt, 1024)) {
@@ -406,10 +407,10 @@ static void handle(const char *j)
 			s[0] = 0;
 		if (s[0])
 			strcpy(version, s);
-		if (sys && unifi_json_str(j, "system_cfg", sys, TEXT_MAX))
-			apply(sys, version);
 		free(mgmt);
-		free(sys);
+		/* last: unescaped where it is, with no copy, so j is no longer whole */
+		if ((sys = unifi_json_str_here(j, "system_cfg")))
+			apply(sys, version);
 		use_key();
 	} else if (!strcmp(type, "cmd")) {
 		char cmd[24];
@@ -640,14 +641,15 @@ static void start(void)
 		if (!macs_at)
 			macs_at = 1;
 	}
-	json = malloc(JSON_MAX);
-	x.req = malloc(JSON_MAX + 256);
+	/* the request: room for the request line and headers, then the packet, the JSON
+	   written where the packet has it, so that it is sealed in place */
+	x.req = malloc(REQ_MAX);
 	x.reply = malloc(REPLY_MAX);
-	if (!json || !x.req || !x.reply)
+	if (!x.req || !x.reply)
 		goto fail;
+	json = (char *)x.req + 200 + UNIFI_SEAL_AT;
 	size_t jl = inform_json(json, JSON_MAX);
 	if (jl >= JSON_MAX - 1) {
-		free(json);
 		free(x.req);
 		free(x.reply);
 		memset(&x, 0, sizeof(x));
@@ -655,8 +657,7 @@ static void start(void)
 		return;
 	}
 	rng_get(NULL, iv, sizeof(iv));
-	/* the packet after room for the request line and headers */
-	n = unifi_seal(x.req + 200, JSON_MAX + 56, rtl_mac(), key, store.unifi_gcm, iv, json, jl);
+	n = unifi_seal(x.req + 200, REQ_MAX - 200, rtl_mac(), key, store.unifi_gcm, iv, json, jl);
 	if (n < 0)
 		goto fail;
 	char head[200];
@@ -667,8 +668,6 @@ static void start(void)
 	memmove(x.req + hl, x.req + 200, n);
 	memcpy(x.req, head, hl);
 	x.req_len = hl + n;
-	free(json);
-	json = NULL;
 	x.pcb = tcp_new_ip_type(IPADDR_TYPE_V4);
 	if (!x.pcb)
 		goto fail;
@@ -686,7 +685,6 @@ static void start(void)
 	}
 	return;
 fail:
-	free(json);
 	free(x.req);
 	free(x.reply);
 	memset(&x, 0, sizeof(x));
@@ -697,7 +695,7 @@ fail:
 static void reply_done(void)
 {
 	int status = 0;
-	const uint8_t *body = NULL;
+	uint8_t *body = NULL;
 	size_t i, len = 0;
 
 	if (x.got > 12 && !memcmp(x.reply, "HTTP/1.", 7))
@@ -761,6 +759,8 @@ void unifi_second(void)
 			state = "controller not reachable";
 			resolved[0] = 0;
 		} else {
+			free(x.req);	/* sent: room for opening the reply */
+			x.req = NULL;
 			reply_done();
 		}
 		free(x.req);

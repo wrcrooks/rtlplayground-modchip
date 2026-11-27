@@ -79,7 +79,7 @@ long unifi_seal(uint8_t *out, size_t max, const uint8_t mac[6], const uint8_t ke
 	return r ? -1 : UNIFI_HDR + n;
 }
 
-long unifi_open(const uint8_t *pkt, size_t len, const uint8_t key[16], char *out, size_t max)
+long unifi_open(uint8_t *pkt, size_t len, const uint8_t key[16], char *out, size_t max)
 {
 	uint16_t flags;
 	uint32_t n;
@@ -92,10 +92,7 @@ long unifi_open(const uint8_t *pkt, size_t len, const uint8_t key[16], char *out
 	n = get32(pkt + 36);
 	if (n > len - UNIFI_HDR || (flags & F_SNAPPY) || !(flags & F_ENC))
 		return -1;
-	body = malloc(n ? n : 1);
-	if (!body)
-		return -1;
-	memcpy(body, pkt + UNIFI_HDR, n);
+	body = pkt + UNIFI_HDR;		/* decrypted in place */
 	if (flags & F_GCM) {
 		mbedtls_gcm_context c;
 
@@ -136,7 +133,6 @@ long unifi_open(const uint8_t *pkt, size_t len, const uint8_t key[16], char *out
 	if (r >= 0)
 		out[r] = 0;
 out:
-	free(body);
 	return r;
 }
 
@@ -276,6 +272,15 @@ bool unifi_json_str(const char *json, const char *name, char *out, size_t max)
 	bool fits;
 
 	return p && *p == '"' && string(p, out, max, &fits) && fits;
+}
+
+char *unifi_json_str_here(char *json, const char *name)
+{
+	char *p = (char *)member(json, name);
+	bool fits;
+
+	/* string() reads at least a character ahead of what it writes */
+	return p && *p == '"' && string(p, p, strlen(p) + 1, &fits) && fits ? p : NULL;
 }
 
 bool unifi_json_int(const char *json, const char *name, long *v)

@@ -212,6 +212,10 @@ def no_url(exe, cfg, store):
             os.path.exists(f) and os.unlink(f)
 
 
+# the reply (REPLY_MAX) and its text unpacked (TEXT_MAX) at once; was 46 KB before both were opened
+# in place and the request freed first
+HEAP_BUDGET = 32 * 1024
+
 def main():
     exe, cfgdir = sys.argv[1], sys.argv[2]
     cfg = {n: open(os.path.join(cfgdir, n + ".cfg")).read() for n in ("adopted", "ports")}
@@ -251,6 +255,12 @@ def main():
               and mt.get(4) == [(cm + ":00:04", 1, False)] and mt.get(10) == [(cm + ":00:06", 20, False)]
               and not mt.get(2) and not mt.get(9), "the MAC table by UniFi port (SFP+ front port 6 is 10): %s" % mt)
         check(not any(m in str(mt) for m in (mac, cm + ":00:05")), "not the switch's own, nor a LAG's")
+        # the most the C heap has had in use: adoption, a configuration, an inform with the tables
+        sw.send("heap")
+        got = sw.until(lambda l: l.startswith("HEAP "), 5)
+        peak = int(got[-1].split()[2]) if got else 0
+        print("      heap peak %d bytes (%s)" % (peak, got and got[-1]))
+        check(0 < peak <= HEAP_BUDGET, "the heap's peak is %d bytes, at most %d" % (peak, HEAP_BUDGET))
         sw.send("lldp 2 " + lldpdu(bytes.fromhex("0a0b0c0d0e0f"), b"ge-0/0/7", 120, b"core-sw", bytes([10, 0, 0, 2])))
         c.drain()
         j, k = c.inform(10)

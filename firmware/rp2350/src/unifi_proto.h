@@ -21,14 +21,19 @@
 #define UNIFI_PORTS		10	/* the most a model below has */
 #define UNIFI_VLANS		32
 
+/* Where json may already be in out, so that it is sealed with no copy (len < 65536) */
+#define UNIFI_SEAL_AT		(UNIFI_HDR + 7)
 /* The packet for json, in out; its length, or -1: out too small */
 long unifi_seal(uint8_t *out, size_t max, const uint8_t mac[6], const uint8_t key[16], bool gcm,
 		const uint8_t iv[16], const char *json, size_t len);
-/* The JSON in a packet, NUL-terminated in out; its length, or -1: not one, a wrong key, damaged, too long */
-long unifi_open(const uint8_t *pkt, size_t len, const uint8_t key[16], char *out, size_t max);
+/* The JSON in a packet, NUL-terminated in out; its length, or -1: not one, a wrong key, damaged, too long.
+ * The packet is decrypted in place. */
+long unifi_open(uint8_t *pkt, size_t len, const uint8_t key[16], char *out, size_t max);
 
 /* A top-level member of a JSON object: a string, unescaped, or an integer */
 bool unifi_json_str(const char *json, const char *name, char *out, size_t max);
+/* The same, unescaped in place in json, with no copy: json is no longer whole afterwards */
+char *unifi_json_str_here(char *json, const char *name);
 bool unifi_json_int(const char *json, const char *name, long *v);
 /* The value of a "key=value" line, as in mgmt_cfg */
 bool unifi_kv(const char *text, const char *key, char *out, size_t max);

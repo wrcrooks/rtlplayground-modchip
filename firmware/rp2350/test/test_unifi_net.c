@@ -11,8 +11,11 @@
  * few addresses ("L2 READ" for each).
  * Names: "unifi" is 127.0.0.1 after two tries ("RESOLVE unifi" for each), the rest
  * aren't found.
+ * "heap": "HEAP <live> <peak>", the C heap in use now and at most since the last
+ * "heap" (malloc is wrapped: unifi.c's buffers and mbed TLS's; lwIP has its own).
  */
 #include <fcntl.h>
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +31,26 @@
 #include "relay.h"
 
 char hostname[24] = "testswitch";
+
+/* -Wl,--wrap=malloc,... */
+static size_t heap_live, heap_peak;
+void *__real_malloc(size_t), *__real_calloc(size_t, size_t), *__real_realloc(void *, size_t);
+void __real_free(void *);
+static void *counted(void *p)
+{
+	if (p && (heap_live += malloc_usable_size(p)) > heap_peak)
+		heap_peak = heap_live;
+	return p;
+}
+void *__wrap_malloc(size_t n) { return counted(__real_malloc(n)); }
+void *__wrap_calloc(size_t a, size_t b) { return counted(__real_calloc(a, b)); }
+void __wrap_free(void *p) { if (p) heap_live -= malloc_usable_size(p); __real_free(p); }
+void *__wrap_realloc(void *p, size_t n)
+{
+	if (p)
+		heap_live -= malloc_usable_size(p);
+	return counted(__real_realloc(p, n));
+}
 static uint8_t mac[6];
 static const char *store_path;
 static uint8_t links[6] = { 3, 0, 0, 6, 0, 0 };		/* port 1 at 1G, port 4 at 2.5G */
@@ -178,6 +201,9 @@ int main(int argc, char **argv)
 				unifi_status(st, sizeof(st));
 				printf("STATUS %s", st);
 				printf("STATUS end\n");
+			} else if (!strcmp(line, "heap")) {
+				printf("HEAP %zu %zu\n", heap_live, heap_peak);
+				heap_peak = heap_live;
 			} else if (!strcmp(line, "on") || !strcmp(line, "off")) {
 				unifi_enable(line[1] == 'n');
 			} else if (!strcmp(line, "forget")) {

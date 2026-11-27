@@ -83,6 +83,13 @@ static void json_checks(void)
 	CHECK(!unifi_json_str("{\"a\":\"x", "a", s, sizeof(s)), "unterminated");
 	CHECK(!unifi_json_str("[1]", "a", s, sizeof(s)), "not an object");
 	CHECK(!unifi_json_str("{\"a\" 1}", "a", s, sizeof(s)), "no colon");
+	{
+		char h[] = "{\"x\":1,\"a\":\"one\\ntwo \\u0041\\\"\",\"b\":2}", plain[] = "{\"a\":\"abc\"}", *v;
+		CHECK((v = unifi_json_str_here(h, "a")) && !strcmp(v, "one\ntwo A\""), "in place: %s", v ? v : "-");
+		CHECK((v = unifi_json_str_here(plain, "a")) && !strcmp(v, "abc"), "in place, no escapes");
+		char bad[] = "{\"a\":\"x\\q\"}", open_[] = "{\"a\":\"x";
+		CHECK(!unifi_json_str_here(bad, "a") && !unifi_json_str_here(open_, "a"), "in place: bad ones refused");
+	}
 }
 
 static void model_checks(void)
@@ -193,6 +200,7 @@ int main(int argc, char **argv)
 			unifi_hex16(key, k);
 			n = unifi_open(a, pl, k, out, sizeof(out));
 			CHECK(n == (long)jl && !memcmp(out, b, jl), "open: %ld", n);
+			unhex(h1, a);	/* opened in place */
 			a[pl - 1] ^= 1;
 			CHECK(unifi_open(a, pl, k, out, sizeof(out)) < 0, "a changed packet is refused");
 		} else if (sscanf(line, "S %39s %d %149999s", key, &gcm, h2) == 3) {
@@ -207,6 +215,11 @@ int main(int argc, char **argv)
 			for (long i = 0; i < n; i++)
 				printf("%02x", a[i]);
 			printf("\n");
+			/* the JSON already where seal wants it: the same packet */
+			static uint8_t c[sizeof(a)];
+			memcpy(c + UNIFI_SEAL_AT, b, jl);
+			CHECK(unifi_seal(c, sizeof(c), (const uint8_t *)"\x02\x00\x5e\x10\x00\x01", k, gcm, iv,
+					 (char *)c + UNIFI_SEAL_AT, jl) == n && !memcmp(a, c, n), "sealed in place");
 			CHECK(unifi_open(a, n, k, out, sizeof(out)) == (long)jl, "own packet opens");
 		}
 	}

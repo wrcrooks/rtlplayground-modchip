@@ -801,7 +801,9 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
   controller, for what a real one rarely sends: the controller found by name or DHCP option 43 when
   no URL is set, and that URL kept on adoption; informs held back until the ports can be read, a new
   key once adopted, `set-adopt` naming the controller by a name, a configuration without a version,
-  a damaged saved configuration, and a forget while a change is still being checked.
+  a damaged saved configuration, and a forget while a change is still being checked. It also checks
+  the most heap an inform takes (the harness wraps `malloc`): 28.9 KB, the reply and its text
+  unpacked, since both are opened in place; it fails above 32 KB.
 - **`make -C test fuzz-unifi`** runs libFuzzer (clang, with ASan and UBSan) over what `unifi.c`
   reads from the network: packets, packet contents sealed with the default key (anyone who can
   answer an inform before adoption can send these), zlib streams, replies' JSON, and `system_cfg`
