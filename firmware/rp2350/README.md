@@ -579,6 +579,7 @@ has both as microcontroller-based switches. The Features page has the same: on o
   controller's scan, which then adopts it over SSH; one that informs is listed anyway.
 
 Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.
+`test/run_unifi_hw.py` is the same against a real switch (see Tests).
 
 ## SSH
 
@@ -797,6 +798,18 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
 - **`make -C test unifi-controller`** runs `unifi.c` on lwIP against UniFi Network 10.6.109 in Docker
   (`ghcr.io/jamesbraid/unifi-network:sim`): adoption, the ports as the controller sees them, VLAN and
   port changes, locate, a refused upgrade, a restart, and a change that cuts the switch off.
+- **`run_unifi_hw.py`** does those checks on a real switch:
+  `python3 test/run_unifi_hw.py <switch> --key <update.pem>`. It builds the firmware with that key,
+  signs it and sends it to the switch, waits for it and keeps it (`--no-flash` skips that). Then it
+  starts the controller (or uses `UNIFI_API`/`UNIFI_INFORM`), relays its inform port from this host's
+  address on the switch's network (`--relay-port`, 8088 at first), adopts the switch and changes its
+  settings. Each change must be taken with every command, and this host must still reach the switch.
+  It changes only ports with no link, never this host's. After it, the switch is forgotten, its UniFi
+  settings are put back, it is `reset` to its saved configuration, and the command log is cleared.
+  `--quick` leaves out the restart and the cut-off check (about 6 minutes). The password comes from
+  `MODCHIP_PASSWORD`, else it asks; with root it also sends an LLDP frame. It tests only a switch
+  whose mod chip says it is that board (`--board`, `beetle` at first), and never the addresses in
+  `MODCHIP_HW_REFUSE`. Dry-run against a fake switch in front of `test_unifi_net` only so far.
 - **`run_unifi_fake.py`** (`make -C test unifi-fake`, also in `all`) runs the same against a scripted
   controller, for what a real one rarely sends: the controller found by name or DHCP option 43 when
   no URL is set, and that URL kept on adoption; informs held back until the ports can be read, a new
