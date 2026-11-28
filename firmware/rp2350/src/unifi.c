@@ -203,7 +203,8 @@ static void forget(const char *why)
 
 /* ---- the inform ---- */
 
-/* The switch's MAC table, from the "l2" command: "aa:bb:cc:dd:ee:ff<TAB>vlan<TAB>learned|static<TAB>port" */
+/* The switch's MAC table, from the "l2" command: "aa:bb:cc:dd:ee:ff<TAB>0x0001<TAB>learned|static<TAB>port"
+   (print_short() writes the VLAN in hex) */
 static void read_macs(void)
 {
 	char *out = malloc(L2_OUT), line[8] = "l2";
@@ -217,13 +218,14 @@ static void read_macs(void)
 	nmacs = 0;
 	for (char *l = out, *e; l && *l && nmacs < MACS_MAX; l = e ? e + 1 : NULL) {
 		unsigned m[6], vlan;
-		char type[12], port[8];
+		char vid[12], type[12], port[8];
 
 		e = strchr(l, '\n');
 		if (e)
 			*e = 0;
-		if (sscanf(l, "%2x:%2x:%2x:%2x:%2x:%2x %u %11s %7s", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &vlan, type, port) != 9)
+		if (sscanf(l, "%2x:%2x:%2x:%2x:%2x:%2x %11s %11s %7s", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], vid, type, port) != 9)
 			continue;
+		vlan = strtoul(vid, NULL, 0);
 		/* print_phys_port() writes port 10 as ':' */
 		unsigned front = port[1] ? 0 : port[0] == ':' ? 10 : port[0] >= '1' && port[0] <= '9' ? port[0] - '0' : 0;
 		if (!front || vlan > 4094)

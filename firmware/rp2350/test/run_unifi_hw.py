@@ -23,7 +23,7 @@ addresses to refuse anyway. The password comes from
 MODCHIP_PASSWORD, else it is asked for. An LLDP frame is sent from this host only
 with CAP_NET_RAW (root); otherwise that check is skipped.
 """
-import argparse, getpass, http.client, json, os, random, socket, struct, subprocess, sys, threading, time
+import argparse, getpass, http.client, json, os, random, socket, struct, subprocess, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -84,8 +84,8 @@ class Switch:
             if not self.cookie:
                 self.login()
             st, loc, _, data = self._req(method, path, body, ctype, timeout)
-            if st == 302 and "login" in loc:
-                self.cookie = None	# a restart forgets sessions
+            if st == 401 or (st == 302 and "login" in loc):
+                self.cookie = None	# a restart forgets sessions: 401 for JSON and /cmd, else to the login page
                 continue
             return st, data
         raise RuntimeError("not logged in")
@@ -214,6 +214,14 @@ def build_and_sign(board, key, out_dir):
     return mcu, data[i:data.index(b"\0", i)].decode()
 
 
+def keep_backup(data):
+    """Only if putting it back failed: it holds the switch's passwords, so readable by this user alone"""
+    fd, path = tempfile.mkstemp(prefix="switch-backup-", suffix=".txt")
+    os.write(fd, data)
+    os.close(fd)
+    return path
+
+
 def flash(sw, mcu, version):
     print("      sending %s (%s)" % (os.path.basename(mcu), version), flush=True)
     st, body = sw.request("POST", "/update", open(mcu, "rb").read(), "application/octet-stream", timeout=200)
@@ -288,6 +296,7 @@ def main():
     ev.new()
     mac = dev_id = None
     made = []
+    saved = None	# the switch's saved configuration, while this test's is saved in its place
     try:
         sw.cmd("unifi forget")
         sw.cmd("unifi inform http://%s:%d/inform" % (host_ip, a.relay_port))
@@ -375,9 +384,16 @@ def main():
         if a.quick:
             skip("a restart and the cut-off guard (--quick)")
             raise Stop
-        # a restart of the mod chip: the configuration from flash, the same key
-        sw.cmd("reboot in 1")
-        got = ev.until(lambda t: "restored" in t, 150)
+        # a restart: the configuration from flash, the same key. "unifi on" is a line of the saved
+        # configuration, like "snmp on": saved with /restore, which restarts, and put back at the end
+        st, saved = sw.request("GET", "/backup")
+        if not check(st == 200 and saved, "the saved configuration backed up"):
+            saved = None
+            raise Stop
+        st, r = sw.request("POST", "/restore", saved.rstrip(b"\n") + b"\nunifi on\n", "text/plain", timeout=60)
+        if not check(st == 200 and r.startswith(b"OK"), "saved with unifi on, restarting: %s" % r.decode(errors="replace").strip()):
+            raise Stop
+        got = ev.until(lambda t: "UniFi: configuration" in t and "restored" in t, 150)
         check(got and "with errors" not in got[-1], "after a restart: the configuration from flash")
         d = rc.wait(lambda: (lambda d: d if d and d.get("state") == 1 and d.get("uptime", 999) < 120 else None)(c.dev(mac)), 90)
         later = ev.until(lambda t: False, 10) or []
@@ -410,11 +426,19 @@ def main():
             sw.cmd("unifi forget")
             sw.cmd("unifi inform " + (before.get("url") or "auto"))
             sw.cmd("unifi " + ("on" if before.get("on") else "off"))
+            if saved is not None:	# its own saved configuration again, which restarts it
+                try:
+                    st, r = sw.request("POST", "/restore", saved, "text/plain", timeout=60)
+                    if st != 200 or not r.startswith(b"OK"):
+                        print("      COULD NOT put the saved configuration back: %r; the backup is in %s" % (r, keep_backup(saved)))
+                except OSError:
+                    pass
+                time.sleep(15)
             try:
                 sw.cmd("reset")		# the switch's saved configuration again; it may not answer
-            except OSError:
+            except (OSError, RuntimeError):
                 pass
-            rc.wait(lambda: sw.up(), 60)
+            rc.wait(lambda: sw.up(), 90)
             time.sleep(5)
             sw.request("GET", "/cmd_log_clear")
         except (OSError, RuntimeError) as e:
