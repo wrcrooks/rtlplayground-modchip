@@ -90,6 +90,13 @@ class Switch:
             return st, data
         raise RuntimeError("not logged in")
 
+    def restore(self, text):
+        """POST /restore, as the Features page sends it: a multipart upload of the file. It restarts"""
+        b = "----modchip%08x" % random.getrandbits(32)
+        body = (("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"config.txt\"\r\n"
+                 "Content-Type: text/plain\r\n\r\n" % b).encode() + text + ("\r\n--%s--\r\n" % b).encode())
+        return self.request("POST", "/restore", body, "multipart/form-data; boundary=" + b, timeout=60)
+
     def cmd(self, line):
         st, data = self.request("POST", "/cmd", line)
         return data.decode(errors="replace")
@@ -113,6 +120,7 @@ class Events:
     """The switch's events, each seen once, across restarts of the mod chip"""
     def __init__(self, sw):
         self.sw, self.seen, self.uptime, self.restarts = sw, set(), 0, 0
+        self.all = []	# every event's text seen
 
     def new(self):
         try:
@@ -127,6 +135,7 @@ class Events:
             return []
         out = [e["text"] for e in ev if e["seq"] not in self.seen]
         self.seen.update(e["seq"] for e in ev)
+        self.all += out
         return out
 
     def until(self, pred, timeout):
@@ -378,8 +387,10 @@ def main():
             print(sw.cmd("unifi"))
         c.call("/api/s/default/cmd/devmgr", {"cmd": "unset-locate", "mac": mac})
         check(rc.wait(lambda: "locating" not in sw.cmd("unifi"), 40), "and stops")
+        # the controller may have sent one itself already, on adoption
         c.call("/api/s/default/cmd/devmgr", {"cmd": "upgrade", "mac": mac})
-        check(ev.until(lambda t: "upgrade refused" in t, 40) is not None, "a firmware upgrade is refused")
+        check(any("upgrade refused" in t for t in ev.all) or ev.until(lambda t: "upgrade refused" in t, 40) is not None,
+              "a firmware upgrade is refused")
 
         if a.quick:
             skip("a restart and the cut-off guard (--quick)")
@@ -390,7 +401,7 @@ def main():
         if not check(st == 200 and saved, "the saved configuration backed up"):
             saved = None
             raise Stop
-        st, r = sw.request("POST", "/restore", saved.rstrip(b"\n") + b"\nunifi on\n", "text/plain", timeout=60)
+        st, r = sw.restore(saved.rstrip(b"\n") + b"\nunifi on\n")
         if not check(st == 200 and r.startswith(b"OK"), "saved with unifi on, restarting: %s" % r.decode(errors="replace").strip()):
             raise Stop
         got = ev.until(lambda t: "UniFi: configuration" in t and "restored" in t, 150)
@@ -428,7 +439,7 @@ def main():
             sw.cmd("unifi " + ("on" if before.get("on") else "off"))
             if saved is not None:	# its own saved configuration again, which restarts it
                 try:
-                    st, r = sw.request("POST", "/restore", saved, "text/plain", timeout=60)
+                    st, r = sw.restore(saved)
                     if st != 200 or not r.startswith(b"OK"):
                         print("      COULD NOT put the saved configuration back: %r; the backup is in %s" % (r, keep_backup(saved)))
                 except OSError:

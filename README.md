@@ -45,7 +45,7 @@ firmware for that board is `-DMODCHIP_BOARD=poe`.
 - **UniFi.** The switch as a UniFi switch: adopted by a UniFi Network controller, which sets its
   VLANs, port VLAN IDs, names and speeds, STP, isolation, storm control, egress limits and
   Etherlighting, and sees its clients and LLDP neighbours. In the firmware, tested against a
-  controller in Docker but not on a switch yet (`test/run_unifi_hw.py` is ready for that). Next:
+  controller in Docker and on the Beetle rig (`test/run_unifi_hw.py`). Next:
   port security, LAG and mirroring, which the controller refuses for the models the switch claims.
   See [firmware/rp2350/README.md](firmware/rp2350/README.md#unifi).
 - **Port LED daughter board.** A small board on the mod chip with one WS2812B LED per port, chained,

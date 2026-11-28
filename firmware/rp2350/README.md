@@ -138,8 +138,8 @@ back to isolated if that rail drops, for example with the board on a bench probe
 
 - **SNMP writes.** The agent is read-only.
 - **The Features page in other languages.** It is in English only; RTLPlayground's own pages aren't.
-- **UniFi on a switch.** Only tested against a controller in Docker so far. Also: the settings it
-  doesn't take yet (see UniFi).
+- **UniFi on a switch.** Tested on the Beetle rig with one link: LLDP from a neighbour, and
+  Etherlighting on a real LED board, are not. Also: the settings it doesn't take yet (see UniFi).
 - **Hardware tests.** A whole EAP login (a server's first challenge arrived), the auth-fail VLAN, a
   multicast member on a second port, and SNMP, SSH and so on with the mod chip board itself.
 
@@ -582,8 +582,10 @@ has both as microcontroller-based switches. The Features page has the same: on o
   (`switch_caps`); for USW Flex 2.5G models it refuses mirroring and LAG anyway. No SSH for the controller, and no L2 discovery: that only lists a device in the
   controller's scan, which then adopts it over SSH; one that informs is listed anyway.
 
-Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), not on a switch yet.
-`test/run_unifi_hw.py` is the same against a real switch (see Tests).
+Tested against UniFi Network 10.6.109 in Docker (`make -C test unifi-controller`), and with
+`test/run_unifi_hw.py` on the Beetle rig (see Tests). `unifi on` is a line of the saved
+configuration, like `snmp on`: save it, or a restart turns UniFi off (adoption and the controller's
+configuration are kept either way).
 
 ## Port LED board
 
@@ -836,12 +838,16 @@ OpenSSH's client, `run_https.py` and `run_update.py` the openssl command, and th
   starts the controller (or uses `UNIFI_API`/`UNIFI_INFORM`), relays its inform port from this host's
   address on the switch's network (`--relay-port`, 8088 at first), adopts the switch and changes its
   settings. Each change must be taken with every command, and this host must still reach the switch.
-  It changes only ports with no link, never this host's. After it, the switch is forgotten, its UniFi
-  settings are put back, it is `reset` to its saved configuration, and the command log is cleared.
+  It changes only ports with no link, never this host's. For the restart it saves `unifi on` with the
+  rest of the saved configuration (`/restore`, which restarts). After it, the switch is forgotten,
+  its own saved configuration is restored, its UniFi settings are put back, and the command log is
+  cleared.
   `--quick` leaves out the restart and the cut-off check (about 6 minutes). The password comes from
   `MODCHIP_PASSWORD`, else it asks; with root it also sends an LLDP frame. It tests only a switch
   whose mod chip says it is that board (`--board`, `beetle` at first), and never the addresses in
-  `MODCHIP_HW_REFUSE`. Dry-run against a fake switch in front of `test_unifi_net` only so far.
+  `MODCHIP_HW_REFUSE`. Passes on the Beetle rig (about 15 minutes with the flash). After a run the
+  controller rejects the switch's first informs for a while ("tried to downgrade inform encryption
+  from AES-GCM to AES-CBC"), though the device is deleted: wait about 20 minutes between runs.
 - **`run_unifi_fake.py`** (`make -C test unifi-fake`, also in `all`) runs the same against a scripted
   controller, for what a real one rarely sends: the controller found by name or DHCP option 43 when
   no URL is set, and that URL kept on adoption; informs held back until the ports can be read, a new
